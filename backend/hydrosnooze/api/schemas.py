@@ -41,7 +41,11 @@ def schedule_json(schedule: Schedule) -> dict[str, Any]:
         "phase3_temp_c": schedule.phase3_temp_c,
         "mode": schedule.mode.value,
         "precool_enabled": schedule.precool_enabled,
+        "precondition": schedule.precondition.value,
         "precool_lead_minutes": schedule.precool_lead_minutes,
+        # Sent so the app can disable pre-heating with a reason rather than
+        # offering a setting that cannot work.
+        "preheat_is_possible": schedule.preheat_is_possible,
         "last_written_at": _iso(schedule.last_written_at),
         "updated_at": _iso(schedule.updated_at),
     }

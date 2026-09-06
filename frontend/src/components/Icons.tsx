@@ -65,6 +65,17 @@ export function Waves({ size = 15 }: IconProps) {
   )
 }
 
+export function Flame({ size = 15 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 2.5c3.5 3.5 5.5 6.2 5.5 9.4a5.5 5.5 0 01-11 0c0-1.6.6-3 1.8-4.4.3 1.4 1 2.2 2 2.4-.3-2.6.3-5 1.7-7.4z"
+        {...stroke}
+      />
+    </svg>
+  )
+}
+
 export function Bolt({ size = 15 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

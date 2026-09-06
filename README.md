@@ -16,9 +16,9 @@ scheduler, every command sequence, and the app driving all of it. What it is
 missing is a real HS1001 on the other end, and swapping to one is two lines in
 `.env`.
 
-`ROADMAP.md` has the whole route from here to a working unit, in order, including
-the parts only I can do. `SETUP.md` is the hardware half of that in detail, for
-when the parts arrive.
+**[CHECKLIST.md](CHECKLIST.md) is the thing to work down.** Everything left, in
+order, with boxes to tick. `ROADMAP.md` has the reasoning behind it and `SETUP.md`
+has the detail for each hardware step.
 
 ## Running it
 

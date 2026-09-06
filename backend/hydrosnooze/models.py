@@ -133,6 +133,42 @@ DEFAULT_LEAD_MINUTES: dict[Mode, int] = {
 PRECOOL_MODE = Mode.TURBO
 
 
+class Precondition(str, Enum):
+    """How to get the bed to the phase 1 temperature before the schedule arms.
+
+    A cooler cannot warm a bed. If phase 1 is above whatever the bed is resting
+    at, no amount of cooling reaches it, and the app would otherwise report a
+    pre-cool that achieved nothing.
+
+    This only affects the hour before arming. The overnight schedule itself never
+    needs it: once someone is in the bed, body heat pushes the pad well above any
+    sensible setpoint, so cooling to 24C works properly. Which is fortunate,
+    because the unit forbids switching between cooling and warming once a
+    schedule is running.
+    """
+
+    COOL = "cool"
+    WARM = "warm"
+
+    def mode_for(self, night_mode: Mode) -> Mode:
+        if self is Precondition.WARM:
+            return Mode.WARMING
+        # Turbo when the night is a cooling night, otherwise there is nothing to
+        # switch to and the night mode is already right.
+        return PRECOOL_MODE if night_mode.is_cooling else night_mode
+
+
+#: The lowest temperature warming mode can express. Below this the unit simply
+#: cannot heat the bed, whatever the app does, so pre-heating is refused rather
+#: than silently downgraded.
+WARMING_FLOOR_C = WARMING_RANGE[0]
+
+
+def can_preheat_to(target_c: int) -> bool:
+    low, high = WARMING_RANGE
+    return low <= target_c <= high
+
+
 @dataclass(frozen=True)
 class NightPlan:
     """The three moments of one night, derived from a wake time.
@@ -195,6 +231,11 @@ class Schedule:
     phase3_temp_c: int = 21
     mode: Mode = Mode.QUIET
     precool_enabled: bool = True
+    #: Named `precool_*` throughout because these were the database columns before
+    #: pre-heating existed, and renaming them would churn the schema, the API, the
+    #: frontend types and every test for a cosmetic gain. The user-facing text says
+    #: "pre-heat" or "pre-cool" to match what is actually happening.
+    precondition: Precondition = Precondition.COOL
     precool_lead_minutes: int = DEFAULT_LEAD_MINUTES[PRECOOL_MODE]
     #: When these temperatures were last actually pushed to the unit over infrared.
     #: The app cannot read the unit back, so this is the only handle it has on
@@ -206,6 +247,26 @@ class Schedule:
     @property
     def phase_temps(self) -> tuple[int, int, int]:
         return (self.phase1_temp_c, self.phase2_temp_c, self.phase3_temp_c)
+
+    @property
+    def precondition_mode(self) -> Mode:
+        """The mode the unit is put into before arming, not the night mode."""
+        return self.precondition.mode_for(self.mode)
+
+    @property
+    def preheat_is_possible(self) -> bool:
+        """Warming cannot express a target below 25C, so pre-heating below it
+        is not a setting the app can honour."""
+        return can_preheat_to(self.phase1_temp_c)
+
+    def precondition_problem(self) -> str | None:
+        """Why this pre-conditioning setting cannot work, or None if it can."""
+        if self.precondition is Precondition.WARM and not self.preheat_is_possible:
+            return (
+                f"Pre-heating cannot reach {self.phase1_temp_c}C. Warming mode only goes "
+                f"down to {WARMING_FLOOR_C}C, so the unit has no way to warm the bed to it."
+            )
+        return None
 
     @property
     def needs_write(self) -> bool:

@@ -21,7 +21,7 @@ import type {
   ServiceInfo,
   WriteProgress,
 } from '../types'
-import { MAX_TEMPERATURE_C, MODE_RANGE } from '../types'
+import { MAX_TEMPERATURE_C, MODE_RANGE, WARMING_FLOOR_C } from '../types'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -52,6 +52,8 @@ export class MockApiClient implements ApiClient {
     phase3_temp_c: 21,
     mode: 'quiet',
     precool_enabled: true,
+    precondition: 'cool',
+    preheat_is_possible: false,
     precool_lead_minutes: 30,
     last_written_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
     updated_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
@@ -92,7 +94,17 @@ export class MockApiClient implements ApiClient {
 
   async putSchedule(patch: Partial<Schedule>): Promise<Schedule> {
     await sleep(120)
-    this.schedule = { ...this.schedule, ...patch, updated_at: nowIso() }
+    const next = { ...this.schedule, ...patch, updated_at: nowIso() }
+    // Mirrors the service: warming cannot express a target below its floor, so
+    // the combination is refused rather than quietly downgraded.
+    next.preheat_is_possible = next.phase1_temp_c >= WARMING_FLOOR_C
+    if (next.precondition === 'warm' && !next.preheat_is_possible) {
+      throw new ApiError(
+        `Pre-heating cannot reach ${next.phase1_temp_c}C. Warming mode only goes down to ` +
+          `${WARMING_FLOOR_C}C, so the unit has no way to warm the bed to it.`,
+      )
+    }
+    this.schedule = next
     this.emit({ schedule: { ...this.schedule } })
     return { ...this.schedule }
   }

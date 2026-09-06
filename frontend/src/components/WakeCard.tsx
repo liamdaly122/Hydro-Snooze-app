@@ -1,8 +1,8 @@
 import { Card } from './Card'
 import { Toggle } from './Toggle'
-import { Clock, Snowflake, Waves } from './Icons'
+import { Clock, Flame, Snowflake, Waves } from './Icons'
 import { DAY_INITIALS, formatDays, formatDayTime, formatTime, nextPlan, tint } from '../domain'
-import { MODE_LABEL, type Schedule } from '../types'
+import { MODE_LABEL, WARMING_FLOOR_C, type Schedule } from '../types'
 
 interface Props {
   draft: Schedule
@@ -11,6 +11,9 @@ interface Props {
 
 export function WakeCard({ draft, onDraftChange }: Props) {
   const plan = nextPlan(draft)
+  const warming = draft.precool_enabled && draft.precondition === 'warm'
+  const canWarm = draft.phase1_temp_c >= WARMING_FLOOR_C
+  const preconditionKey = !draft.precool_enabled ? 'off' : draft.precondition
 
   function toggleDay(day: number) {
     const next = draft.days_of_week.includes(day)
@@ -47,8 +50,10 @@ export function WakeCard({ draft, onDraftChange }: Props) {
           {plan ? `Arms ${formatDayTime(plan.armAt)}` : 'Not scheduled'}
         </span>
         <span className="chip">
-          <Snowflake />
-          {plan?.precoolAt ? `Pre-cool ${formatTime(plan.precoolAt)}` : 'No pre-cool'}
+          {warming ? <Flame /> : <Snowflake />}
+          {plan?.precoolAt
+            ? `${warming ? 'Pre-heat' : 'Pre-cool'} ${formatTime(plan.precoolAt)}`
+            : 'No pre-conditioning'}
         </span>
         <span className="chip">
           <Waves />
@@ -57,6 +62,45 @@ export function WakeCard({ draft, onDraftChange }: Props) {
           </span>
         </span>
       </div>
+
+      {/*
+        A cooler cannot warm a bed. If phase 1 is above whatever the bed is
+        resting at, pre-cooling does nothing at all, and only warming gets there.
+        Warming cannot go below 25 degrees, so below that this is not offered.
+      */}
+      <p className="wake__sublabel">Get the bed ready by</p>
+      <div className="segmented" role="group" aria-label="Pre-conditioning">
+        {(
+          [
+            ['cool', 'Cooling', true],
+            ['warm', 'Warming', canWarm],
+            ['off', 'Nothing', true],
+          ] as const
+        ).map(([key, label, allowed]) => (
+          <button
+            key={key}
+            type="button"
+            className="segment"
+            aria-pressed={preconditionKey === key}
+            disabled={!allowed}
+            onClick={() =>
+              onDraftChange(
+                key === 'off'
+                  ? { precool_enabled: false }
+                  : { precool_enabled: true, precondition: key },
+              )
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {!canWarm && (
+        <p className="footnote" style={{ marginTop: 10 }}>
+          Warming only goes down to {WARMING_FLOOR_C}°C, so the unit cannot heat the bed to{' '}
+          {draft.phase1_temp_c}°C. Cooling below room temperature is the only option here.
+        </p>
+      )}
 
       <div className="days" role="group" aria-label="Days to wake">
         {DAY_INITIALS.map((initial, day) => (

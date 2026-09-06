@@ -5,7 +5,7 @@ import { ModeSelector } from '../components/ModeSelector'
 import { StatusStrip } from '../components/StatusStrip'
 import { SaveSheet, type SaveStage } from '../components/SaveSheet'
 import type { ApiClient } from '../api/client'
-import type { DeviceState, Mode, Schedule, WriteProgress } from '../types'
+import { WARMING_FLOOR_C, type DeviceState, type Mode, type Schedule, type WriteProgress } from '../types'
 
 /**
  * Fields the unit itself has to be told about. Everything else, wake time and days
@@ -30,6 +30,7 @@ export function Home({ client, state, schedule, maxC }: Props) {
   const [stage, setStage] = useState<SaveStage | null>(null)
   const [progress, setProgress] = useState<WriteProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   // Adopt anything the service pushes, unless it would stamp on an edit in flight.
   useEffect(() => {
@@ -38,7 +39,24 @@ export function Home({ client, state, schedule, maxC }: Props) {
 
   /** Phase temperatures and mode: held locally until written to the unit. */
   function editDraft(patch: Partial<Schedule>) {
-    setDraft((prev) => ({ ...prev, ...patch }))
+    setDraft((prev) => {
+      const next = { ...prev, ...patch }
+      // Dragging phase 1 below warming's floor makes pre-heating impossible, so
+      // the setting follows rather than leaving a combination that cannot save.
+      if (next.precondition === 'warm' && next.phase1_temp_c < WARMING_FLOOR_C) {
+        next.precondition = 'cool'
+        // Persisted straight away, not just locally. Otherwise the service would
+        // still hold "warm" and would refuse the phase temperatures on Save,
+        // which is the combination the whole guard exists to prevent.
+        void client.putSchedule({ precondition: 'cool' }).catch(() => undefined)
+        setNotice(
+          `Pre-heating switched off: warming cannot reach ${next.phase1_temp_c}°C, ` +
+            `its lowest setting is ${WARMING_FLOOR_C}°C.`,
+        )
+      }
+      next.preheat_is_possible = next.phase1_temp_c >= WARMING_FLOOR_C
+      return next
+    })
   }
 
   /** Timing settings: saved straight away, since nothing needs sending anywhere. */
@@ -96,6 +114,12 @@ export function Home({ client, state, schedule, maxC }: Props) {
       />
 
       <StatusStrip state={state} />
+
+      {notice && (
+        <p className="footnote" onClick={() => setNotice(null)}>
+          {notice}
+        </p>
+      )}
 
       <p className="footnote">
         The wake time sets the unit's temperature schedule, working backwards 8 hours 30 minutes to

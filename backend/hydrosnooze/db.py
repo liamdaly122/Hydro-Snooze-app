@@ -13,7 +13,7 @@ from datetime import datetime, time
 from pathlib import Path
 
 from .events import Event, Level
-from .models import Mode, Schedule
+from .models import Mode, Precondition, Schedule
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule (
@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS schedule (
     phase3_temp_c        INTEGER NOT NULL,
     mode                 TEXT    NOT NULL,
     precool_enabled      INTEGER NOT NULL,
+    precondition         TEXT    NOT NULL DEFAULT 'cool',
     precool_lead_minutes INTEGER NOT NULL,
     last_written_at      TEXT,
     updated_at           TEXT
@@ -55,7 +56,24 @@ class Database:
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        self._migrate()
         self._db.commit()
+
+    def _migrate(self) -> None:
+        """Bring an older database up to the current schema.
+
+        CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so
+        a database written before a column was added keeps the old shape. There is
+        exactly one row and one deployment, so adding columns in place is enough:
+        no version table, no migration framework.
+        """
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
+        added = [
+            ("precondition", "TEXT NOT NULL DEFAULT 'cool'"),
+        ]
+        for name, definition in added:
+            if name not in columns:
+                self._db.execute(f"ALTER TABLE schedule ADD COLUMN {name} {definition}")
 
     def close(self) -> None:
         self._db.close()
@@ -79,6 +97,7 @@ class Database:
             phase3_temp_c=row["phase3_temp_c"],
             mode=Mode(row["mode"]),
             precool_enabled=bool(row["precool_enabled"]),
+            precondition=Precondition(row["precondition"]),
             precool_lead_minutes=row["precool_lead_minutes"],
             last_written_at=_parse(row["last_written_at"]),
             updated_at=_parse(row["updated_at"]),
@@ -89,15 +108,16 @@ class Database:
             """
             INSERT INTO schedule (id, name, enabled, days_of_week, wake_time,
                                   phase1_temp_c, phase2_temp_c, phase3_temp_c, mode,
-                                  precool_enabled, precool_lead_minutes,
+                                  precool_enabled, precondition, precool_lead_minutes,
                                   last_written_at, updated_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, enabled=excluded.enabled,
                 days_of_week=excluded.days_of_week, wake_time=excluded.wake_time,
                 phase1_temp_c=excluded.phase1_temp_c, phase2_temp_c=excluded.phase2_temp_c,
                 phase3_temp_c=excluded.phase3_temp_c, mode=excluded.mode,
                 precool_enabled=excluded.precool_enabled,
+                precondition=excluded.precondition,
                 precool_lead_minutes=excluded.precool_lead_minutes,
                 last_written_at=excluded.last_written_at, updated_at=excluded.updated_at
             """,
@@ -111,6 +131,7 @@ class Database:
                 schedule.phase3_temp_c,
                 schedule.mode.value,
                 int(schedule.precool_enabled),
+                schedule.precondition.value,
                 schedule.precool_lead_minutes,
                 _iso(schedule.last_written_at),
                 _iso(schedule.updated_at),

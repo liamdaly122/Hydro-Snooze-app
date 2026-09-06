@@ -28,6 +28,7 @@ from .models import (
     Mode,
     NightPlan,
     Power,
+    Precondition,
     Schedule,
     Tristate,
     range_for,
@@ -191,11 +192,22 @@ class Service:
     # --- Nightly jobs ---------------------------------------------------------
 
     async def _run_precool(self, plan: NightPlan) -> None:
-        mode = PRECOOL_MODE if self.schedule.mode.is_cooling else self.schedule.mode
+        # A cooler cannot warm a bed. When phase 1 is above whatever the bed is
+        # resting at, only warming mode can get there, and only down to 25C.
+        problem = self.schedule.precondition_problem()
+        if problem is not None:
+            self.events.warning("precool", f"{problem} Pre-cooling instead.")
+
+        mode = (
+            self.schedule.precondition_mode
+            if problem is None
+            else Precondition.COOL.mode_for(self.schedule.mode)
+        )
+        verb = "Pre-heating" if mode is Mode.WARMING else "Pre-cooling"
         self.events.info(
             "precool",
-            f"Pre-cooling in {mode.value} for a {plan.arm_at:%H:%M} arm "
-            f"and a {plan.wake_at:%a %H:%M} wake",
+            f"{verb} in {mode.value} to {self.schedule.phase1_temp_c}C for a "
+            f"{plan.arm_at:%H:%M} arm and a {plan.wake_at:%a %H:%M} wake",
         )
         async with self._lock:
             try:
@@ -210,17 +222,59 @@ class Service:
             except CommandFailed as exc:
                 self._fail("precool", exc)
 
+    def _report_idle_preconditioning(self, plan: NightPlan) -> None:
+        """Say so when the pre-conditioning run never actually did anything.
+
+        The plug is the only real sensor in this project, and it can answer this.
+        If the draw never rose above idle between the pre-cool starting and the
+        schedule arming, the unit was never working, which means the bed was
+        already at or past the target. Cooling cannot go the other way.
+        """
+        if plan.precool_at is None:
+            return
+        samples = self.db.power_history(plan.precool_at)
+        if not samples:
+            return
+        peak = max(watts for _, watts in samples)
+        if peak >= self.settings.idle_max_w:
+            return
+
+        was_heating = self.schedule.precondition_mode is Mode.WARMING
+        wanted = "warm" if was_heating else "cool"
+        self.events.warning(
+            "precool",
+            f"The unit never drew more than {peak:.0f} W while pre-conditioning, so it was "
+            f"not working. The bed was most likely already past {self.schedule.phase1_temp_c}C, "
+            f"and it cannot {wanted} in the other direction.",
+        )
+
     async def _run_arm(self, plan: NightPlan) -> None:
         self.events.info("schedule_arm", f"Arming for a {plan.wake_at:%a %H:%M} wake")
+        self._report_idle_preconditioning(plan)
+
         async with self._lock:
             try:
+                current = self.state.assumed_mode or PRECOOL_MODE
+
+                # Cooling and warming cannot be switched once a schedule is
+                # running. So if the bed was pre-heated, the night mode has to be
+                # set BEFORE arming. Getting this the wrong way round would arm
+                # the unit into a night of warming, which is the worst outcome
+                # this project can produce.
+                preheated = current is Mode.WARMING and self.schedule.mode.is_cooling
+                if preheated:
+                    await self.commands.set_mode(self.schedule.mode)
+                    current = self.schedule.mode
+                    self._set_state(assumed_mode=current)
+
                 await self.commands.arm_schedule()
                 self._set_state(in_schedule=Tristate.TRUE, last_command_at=self.clock.now())
 
-                # Immediately, while the display is still awake from arming. Never
-                # as a separate job: the preamble cannot be used during a schedule.
-                current = self.state.assumed_mode or PRECOOL_MODE
-                if self.schedule.mode.is_cooling and current is not self.schedule.mode:
+                # After pre-cooling the unit is in Turbo, and dropping to the
+                # quieter night speed is the one mode change allowed mid-schedule.
+                # It goes immediately, while the display is still awake from
+                # arming, because the preamble cannot be used during a schedule.
+                if not preheated and self.schedule.mode.is_cooling and current is not self.schedule.mode:
                     try:
                         await self.commands.set_cooling_speed(self.schedule.mode, current)
                         self._set_state(assumed_mode=self.schedule.mode)

@@ -266,6 +266,15 @@ button:disabled {
   color: var(--text-dim);
 }
 
+.wake__sublabel {
+  margin: 20px 0 0;
+  font-size: var(--label-size);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .wake__row {
   display: flex;
   align-items: center;
