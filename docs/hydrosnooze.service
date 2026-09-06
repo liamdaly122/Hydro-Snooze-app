@@ -1,0 +1,42 @@
+# The systemd unit, as scripts/install.sh writes it.
+#
+# Kept here as a readable file so it can be looked at and understood rather than
+# only appearing on the Pi. __PREFIX__ and __USER__ are filled in by install.sh;
+# the installed copy on the Pi has real values.
+
+[Unit]
+Description=HydroSnooze
+Documentation=https://github.com/liamdaly122/Hydro-Snooze-app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=__USER__
+WorkingDirectory=__PREFIX__
+
+# The frontend is built on the Mac and copied to __PREFIX__/static by
+# scripts/deploy.sh. Saying so explicitly rather than relying on the service
+# guessing: the guess resolves to a different folder on the Pi, and the symptom
+# is an API that works perfectly serving a blank page.
+Environment=HS_STATIC_DIR=__PREFIX__/static
+EnvironmentFile=__PREFIX__/.env
+
+ExecStart=__PREFIX__/venv/bin/python -m uvicorn hydrosnooze.main:app --host 0.0.0.0 --port 8000
+
+# It runs unattended overnight and its whole job is to be there at 22:00.
+Restart=always
+RestartSec=5
+
+# It only needs its own directory and the local network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=__PREFIX__
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

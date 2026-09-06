@@ -118,7 +118,7 @@ failing is the single most likely way the whole project stops working.
 
 ## Step 5. Set up the Pi
 
-One evening, and easier than it sounds.
+One evening, and easier than it sounds. **`SETUP.md` has all of steps 5 to 10 in full detail.**
 
 Download Raspberry Pi Imager onto the Mac and choose Raspberry Pi OS Lite (64-bit). **Before
 writing, click the settings gear.** Set the hostname to `hydrosnooze`, turn on SSH, set a username
@@ -183,7 +183,7 @@ Nothing else moves. That is the entire point of having built it this way.
 
 ## Step 10. Install it on the Pi
 
-One script that installs Python, sets up the service, and registers it to start on boot. Then open
+`./scripts/install.sh` on the Pi, then `./scripts/deploy.sh` from the Mac. Then open
 `http://hydrosnooze.local:8000` in Safari on the phone and add it to the Home Screen.
 
 The app is still built on the Mac and copied across. The Pi never builds it.

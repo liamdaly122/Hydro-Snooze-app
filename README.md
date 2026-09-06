@@ -17,7 +17,8 @@ missing is a real HS1001 on the other end, and swapping to one is two lines in
 `.env`.
 
 `ROADMAP.md` has the whole route from here to a working unit, in order, including
-the parts only I can do.
+the parts only I can do. `SETUP.md` is the hardware half of that in detail, for
+when the parts arrive.
 
 ## Running it
 
