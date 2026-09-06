@@ -51,18 +51,19 @@ export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }:
   const selected = valueFor(tab)
   const fallback = draft.stages[0]?.temp_c ?? 20
 
-  // Each stage works out for itself whether it cools or warms, so the range it
-  // can be set to follows from the temperature rather than from a mode setting.
-  const rangeFor = (value: number) =>
-    MODE_RANGE[value >= WARMING_FLOOR_C ? 'warming' : draft.cooling_speed]
+  // The full span a temperature can occupy, not the current mode's range.
+  //
+  // Cooling covers 15 to 35 and warming covers 25 to 55, so the union runs 15 to
+  // 55 with no gap: below 25 it cools, at 25 and above it warms. Bounding the
+  // buttons by whichever mode the current value happens to fall in trapped it at
+  // exactly 25, because warming's floor IS 25, so the minus button disabled
+  // itself and there was no way back down.
+  const floor = MODE_RANGE.quiet[0]
+  const ceiling = Math.min(MODE_RANGE.warming[1], maxC)
 
   function step(delta: number) {
     const current = selected ?? fallback
-    const next = current + delta
-    // 24 to 25 crosses from cooling into warming, and both can express those, so
-    // stepping across the boundary needs no special handling beyond the ranges.
-    const [low, high] = rangeFor(next)
-    const clamped = Math.max(low, Math.min(Math.min(high, maxC), next))
+    const clamped = Math.max(floor, Math.min(ceiling, current + delta))
 
     if (tab === 'now') {
       if (!editable) return
@@ -75,10 +76,8 @@ export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }:
   }
 
   const glowTemp = selected ?? fallback
-  const [low, high] = rangeFor(selected ?? fallback)
-  const ceiling = Math.min(high, maxC)
   const canEdit = tab !== 'now' || editable
-  const atFloor = selected !== null && selected <= low
+  const atFloor = selected !== null && selected <= floor
   const atCeiling = selected !== null && selected >= ceiling
 
   return (
