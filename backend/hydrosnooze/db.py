@@ -13,7 +13,15 @@ from datetime import datetime, time
 from pathlib import Path
 
 from .events import Event, Level
-from .models import Mode, Precondition, Schedule, SleepStage, Stage, default_stages
+from .models import (
+    STAGE_ORDER,
+    Mode,
+    Precondition,
+    Schedule,
+    SleepStage,
+    Stage,
+    default_stages,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule (
@@ -45,6 +53,28 @@ CREATE TABLE IF NOT EXISTS power_samples (
 );
 """
 
+#: Every column the schedule table has now, in the order SCHEMA declares them.
+#: Anything in the table and not in here belongs to an older shape of the app and
+#: is dropped by the migration below.
+SCHEDULE_COLUMNS = (
+    "id",
+    "name",
+    "enabled",
+    "days_of_week",
+    "wake_time",
+    "stages",
+    "cooling_speed",
+    "precool_enabled",
+    "precondition",
+    "precool_lead_minutes",
+    "updated_at",
+)
+
+#: How long the unit's own three phases lasted, in minutes. Fixed in the hardware,
+#: and the only durations a database written before the app drove the night can
+#: have meant.
+LEGACY_PHASE_MINUTES = (240, 240, 30)
+
 
 class Database:
     def __init__(self, path: str | Path) -> None:
@@ -60,9 +90,15 @@ class Database:
         """Bring an older database up to the current schema.
 
         CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so
-        a database written before a column was added keeps the old shape. There is
-        exactly one row and one deployment, so adding columns in place is enough:
-        no version table, no migration framework.
+        a database written before the schema changed keeps the old shape. There is
+        exactly one row and one deployment, so this stays small: add the columns
+        that are new, then rebuild the table if it still carries columns that are
+        gone.
+
+        The second half is not tidying. The schema before the app drove the night
+        had phase1_temp_c NOT NULL with no default, and nothing writes that column
+        any more, so on an upgraded database every single save failed with a
+        constraint error while every read carried on working.
         """
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
@@ -73,6 +109,33 @@ class Database:
         for name, definition in added:
             if name not in columns:
                 self._db.execute(f"ALTER TABLE schedule ADD COLUMN {name} {definition}")
+                columns.add(name)
+
+        if columns - set(SCHEDULE_COLUMNS):
+            self._rebuild_schedule()
+
+    def _rebuild_schedule(self) -> None:
+        """Rebuild the schedule table around the columns the app still has.
+
+        SQLite only learned DROP COLUMN in 3.35 and the version on a Pi is not
+        ours to choose, so the old table is renamed out of the way, the current
+        one created from SCHEMA, and the row written back through the normal save
+        path. One row, so there is nothing to page through.
+
+        What the row means is preserved, not just its new-shaped columns: the
+        three old fixed phases become Deep, REM and Wake, and the old single
+        night mode becomes the cooling speed. See `_schedule_from`.
+        """
+        row = self._db.execute("SELECT * FROM schedule WHERE id = 1").fetchone()
+        carried = _schedule_from(row) if row is not None else None
+
+        self._db.execute("DROP TABLE IF EXISTS schedule_old")
+        self._db.execute("ALTER TABLE schedule RENAME TO schedule_old")
+        self._db.executescript(SCHEMA)
+        if carried is not None:
+            self.save_schedule(carried)
+        self._db.execute("DROP TABLE schedule_old")
+        self._db.commit()
 
     def close(self) -> None:
         self._db.close()
@@ -85,19 +148,7 @@ class Database:
             schedule = Schedule()
             self.save_schedule(schedule)
             return schedule
-        hour, minute = (int(p) for p in row["wake_time"].split(":"))
-        return Schedule(
-            name=row["name"],
-            enabled=bool(row["enabled"]),
-            days_of_week=json.loads(row["days_of_week"]),
-            wake_time=time(hour, minute),
-            stages=_stages_from(row["stages"]),
-            cooling_speed=Mode(row["cooling_speed"]),
-            precool_enabled=bool(row["precool_enabled"]),
-            precondition=Precondition(row["precondition"]),
-            precool_lead_minutes=row["precool_lead_minutes"],
-            updated_at=_parse(row["updated_at"]),
-        )
+        return _schedule_from(row)
 
     def save_schedule(self, schedule: Schedule) -> None:
         self._db.execute(
@@ -189,14 +240,65 @@ class Database:
         self._db.commit()
 
 
-def _stages_from(raw: str) -> list[SleepStage]:
-    """Stages come back from a JSON column. An empty list means a database written
-    before stages existed, so fall back to the defaults rather than a silent night
-    with nothing in it."""
-    parsed = json.loads(raw) if raw else []
-    if not parsed:
-        return default_stages()
-    return [SleepStage(Stage(s["stage"]), s["duration_minutes"], s["temp_c"]) for s in parsed]
+def _schedule_from(row: sqlite3.Row) -> Schedule:
+    """One row, whatever shape of the app wrote it.
+
+    Run after `_migrate`, so every current column is there. Older columns may be
+    there too, and where they hold something the current ones cannot, they win:
+    a row that still has them has never been written by this version of the app,
+    because writing it is exactly what was failing.
+    """
+    hour, minute = (int(p) for p in row["wake_time"].split(":"))
+    return Schedule(
+        name=row["name"],
+        enabled=bool(row["enabled"]),
+        days_of_week=json.loads(row["days_of_week"]),
+        wake_time=time(hour, minute),
+        stages=_stages_from(row),
+        cooling_speed=_cooling_speed_from(row),
+        precool_enabled=bool(row["precool_enabled"]),
+        precondition=Precondition(row["precondition"]),
+        precool_lead_minutes=row["precool_lead_minutes"],
+        updated_at=_parse(row["updated_at"]),
+    )
+
+
+def _stages_from(row: sqlite3.Row) -> list[SleepStage]:
+    """The night, in order.
+
+    Before the app drove the night itself the schedule was the unit's own three
+    phases: 4h, 4h and 30m, fixed, one temperature each. Those are Deep, REM and
+    Wake with the durations spelled out, so an upgraded database keeps the three
+    temperatures rather than quietly resetting to the defaults.
+    """
+    parsed = json.loads(row["stages"]) if row["stages"] else []
+    if parsed:
+        return [
+            SleepStage(Stage(s["stage"]), s["duration_minutes"], s["temp_c"]) for s in parsed
+        ]
+    # sqlite3.Row iterates its values, not its names, so membership goes via keys().
+    if "phase1_temp_c" in set(row.keys()):
+        temps = (row["phase1_temp_c"], row["phase2_temp_c"], row["phase3_temp_c"])
+        return [
+            SleepStage(stage, minutes, temp)
+            for stage, minutes, temp in zip(STAGE_ORDER, LEGACY_PHASE_MINUTES, temps)
+        ]
+    return default_stages()
+
+
+def _cooling_speed_from(row: sqlite3.Row) -> Mode:
+    """Which speed a cooling stage runs at.
+
+    The old schema had one `mode` for the whole night, and warming was a valid
+    choice there. It is not one here: a stage's mode follows its temperature now,
+    and this only picks how hard the unit works when a stage is cooling. So a
+    legacy warming night has nothing to carry over and takes the saved speed.
+    """
+    if "mode" in set(row.keys()):
+        legacy = Mode(row["mode"])
+        if legacy.is_cooling:
+            return legacy
+    return Mode(row["cooling_speed"])
 
 
 def _iso(value: datetime | None) -> str | None:
