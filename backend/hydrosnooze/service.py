@@ -350,7 +350,14 @@ class Service:
         async with self._lock:
             try:
                 await self.commands.mute()
-                self._set_state(last_command_at=self.clock.now())
+                # The wake preamble is two temp_down presses, and whichever of
+                # them are not swallowed really do lower the target: the press log
+                # shows 17C going to 15C. Every other command rails and counts
+                # afterwards, which absorbs that; this one has nothing to count
+                # to. So the target stops being something we know, and the app
+                # says so rather than carrying on showing a number the unit no
+                # longer holds. The next stage boundary sets it properly.
+                self._set_state(assumed_target_c=None, last_command_at=self.clock.now())
             except CommandFailed as exc:
                 self._fail("mute", exc)
 

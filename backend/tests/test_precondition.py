@@ -211,3 +211,25 @@ async def test_a_working_pre_conditioning_run_is_not_reported(service):
     service._report_idle_preconditioning(plan)
     messages = [e.message for e in service.events.recent(50) if e.level == "warning"]
     assert not any("never drew more than" in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_muting_gives_up_the_target_rather_than_lying_about_it(service):
+    """Mute is the one command that cannot put the temperature back.
+
+    Its wake preamble is two temp_down presses, and whichever of them are not
+    swallowed really do lower the target. Every other command rails to a mode's
+    floor and counts up afterwards, which absorbs them. This one has nothing to
+    count to, so the unit ends up a degree or two below what the app last set,
+    and the app has to say it no longer knows rather than keep showing the number.
+    """
+    service.unit.powered = True
+    service.unit.powered_at = service.clock.now()
+    await service.set_temperature(20)
+    assert service.state.assumed_target_c == 20
+
+    await service.mute()
+
+    assert service.unit.muted
+    assert service.unit.target < 20, "the wake presses land on a woken display"
+    assert service.state.assumed_target_c is None
