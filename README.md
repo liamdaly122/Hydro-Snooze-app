@@ -69,6 +69,11 @@ Right now there is no service, only seed data, so the app is a plain static site
 anywhere. There is a `vercel.json` at the root for exactly this: point Vercel at this repository and
 it builds `frontend/` and gives me a URL I can open on the phone without my Mac being switched on.
 
+`.vercelignore` keeps `backend/` out of the upload. Without it Vercel sees `backend/pyproject.toml`,
+decides this is a two-part app with a website and an API, and asks for a multi-service `vercel.json`
+routing `/api` to a Python service. That is the wrong shape for this project: there is no service in
+`backend/` yet, and when there is one it will not live on Vercel.
+
 **This is for the design phase only.** The finished thing cannot live on Vercel, and neither can any
 other hosting company. See below.
 

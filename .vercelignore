@@ -1,0 +1,12 @@
+# Vercel hosts the design phase only: the static frontend, nothing else.
+#
+# Without this, Vercel spots backend/pyproject.toml, decides this is a two-part
+# app with a website and an API, and offers to deploy both with /api routed to
+# the backend. That guess is wrong twice over. There is no service in backend/
+# yet, only the domain model and its tests, so there would be nothing to run. And
+# when the service does exist it cannot live here at all: it has to reach an
+# infrared blaster on the home network, stay awake at 21:30 with nobody watching,
+# and remember things between commands. It runs on the Pi.
+backend/
+scripts/
+docs/
