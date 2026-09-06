@@ -1,0 +1,687 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  /* A bedroom app should not rubber-band or let a stray double tap zoom it. */
+  overscroll-behavior-y: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* --- App frame ------------------------------------------------------------- */
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--safe-top);
+}
+
+.app__scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px var(--gutter) calc(var(--nav-height) + var(--safe-bottom) + 24px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px var(--gutter) 10px;
+}
+
+.app__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-mid);
+}
+
+/* --- Card ------------------------------------------------------------------ */
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  padding: var(--pad-card);
+  overflow: hidden;
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.card__label {
+  margin: 0;
+  font-size: var(--label-size);
+  font-weight: 600;
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+
+.card__chevron {
+  color: var(--text-faint);
+  flex: none;
+}
+
+/* --- Temperature card ------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+}
+
+.tab {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+.tab__value {
+  display: block;
+  padding: 16px 2px 12px;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  /* Each tab is tinted by its own temperature. The continuous hairline runs
+     across every tab and the active one overdraws it in white. */
+  border-bottom: 1.5px solid var(--divider);
+  transition: border-color 180ms var(--ease);
+}
+
+.tab[aria-selected='true'] .tab__value {
+  border-bottom-color: var(--text);
+}
+
+.tab__value--unknown {
+  color: var(--text-faint);
+}
+
+.tab__label {
+  padding-top: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 180ms var(--ease);
+}
+
+.tab[aria-selected='true'] .tab__label {
+  color: var(--text);
+}
+
+/*
+ * The stage bleeds to the card's edges, because in the reference the glow reaches
+ * the left, right and bottom of the card exactly rather than sitting in a padded
+ * box. The gradient is anchored low, near the bottom edge, not behind the numeral.
+ */
+.stage {
+  position: relative;
+  margin: 0 calc(var(--pad-card) * -1) calc(var(--pad-card) * -1);
+  padding: 42px 34px 56px;
+  min-height: 172px;
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  isolation: isolate;
+}
+
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse 70% 42% at 50% 97%, var(--glow-core) 0%, transparent 82%),
+    radial-gradient(
+      ellipse 108% 128% at 50% 106%,
+      var(--glow-strong) 0%,
+      var(--glow-soft) 56%,
+      transparent 100%
+    );
+  transition: background 320ms var(--ease);
+  z-index: -1;
+}
+
+.stage__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: clamp(52px, 17.5vw, 72px);
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stage__value--unknown {
+  color: var(--text-faint);
+  font-size: clamp(22px, 7.5vw, 30px);
+  letter-spacing: 0;
+}
+
+.stage__unit {
+  font-size: 0.46em;
+  font-weight: 400;
+  vertical-align: baseline;
+  letter-spacing: 0;
+}
+
+.step {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--control);
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  transition: background 140ms var(--ease), transform 140ms var(--ease);
+}
+
+.step:active:not(:disabled) {
+  background: var(--control-active);
+  transform: scale(0.94);
+}
+
+.step:disabled {
+  color: var(--text-faint);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.stage__note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
+  padding: 0 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-mid);
+}
+
+/* --- Wake card ------------------------------------------------------------- */
+
+.wake__days {
+  margin: 16px 0 2px;
+  font-size: var(--label-size);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.wake__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wake__time {
+  font-size: 40px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.wake__time--off {
+  color: var(--text-faint);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Let the row bleed past the card padding so a cut-off chip reads as scrollable,
+     the way it does in the reference. */
+  margin-inline: calc(var(--pad-card) * -1);
+  padding-inline: var(--pad-card);
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+
+.chip__accent {
+  color: var(--accent, var(--text));
+  font-variant-numeric: tabular-nums;
+}
+
+.chip svg {
+  flex: none;
+  color: var(--text-dim);
+}
+
+/* --- Day picker ------------------------------------------------------------ */
+
+.days {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.day {
+  flex: 1 1 0;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  transition: background 140ms var(--ease), color 140ms var(--ease),
+    border-color 140ms var(--ease);
+}
+
+.day[aria-pressed='true'] {
+  background: rgb(255 255 255 / 0.16);
+  border-color: transparent;
+  color: var(--text);
+}
+
+/* --- Toggle ---------------------------------------------------------------- */
+
+.toggle {
+  flex: none;
+  width: 55px;
+  height: 32px;
+  border-radius: 999px;
+  background: #39393d;
+  padding: 2px;
+  display: flex;
+  transition: background 200ms var(--ease);
+}
+
+.toggle[aria-pressed='true'] {
+  background: var(--blue);
+}
+
+.toggle__knob {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+  transition: transform 200ms var(--ease);
+}
+
+.toggle[aria-pressed='true'] .toggle__knob {
+  transform: translateX(23px);
+}
+
+/* --- Segmented mode selector ----------------------------------------------- */
+
+.segmented {
+  display: flex;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.segment {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 42px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.05);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-mid);
+  transition: background 160ms var(--ease), color 160ms var(--ease);
+}
+
+.segment[aria-pressed='true'] {
+  background: rgb(255 255 255 / 0.16);
+  color: var(--text);
+}
+
+.segment:disabled {
+  color: var(--text-faint);
+}
+
+/* --- Status strip ---------------------------------------------------------- */
+
+.status {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.status__cell {
+  min-width: 0;
+}
+
+.status__key {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.status__val {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status__val--unknown {
+  color: var(--text-faint);
+}
+
+.status__sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status__error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(255 107 107 / 0.12);
+  color: var(--red);
+  font-size: 13px;
+}
+
+/* --- Save banner ----------------------------------------------------------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 14px;
+  background: rgb(10 132 255 / 0.12);
+}
+
+.banner__text {
+  font-size: 13px;
+  color: var(--text-mid);
+  min-width: 0;
+}
+
+.banner__action {
+  flex: none;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* --- Bottom nav ------------------------------------------------------------ */
+
+.nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: calc(var(--nav-height) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  background: var(--bg);
+}
+
+.nav__item {
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  transition: color 140ms var(--ease);
+}
+
+.nav__item[aria-current='page'] {
+  color: var(--text);
+}
+
+/* --- Modal ----------------------------------------------------------------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.65);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: var(--gutter);
+  padding-bottom: calc(var(--gutter) + var(--safe-bottom));
+  z-index: 20;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 460px;
+  background: #1c1c1e;
+  border-radius: 24px;
+  padding: 24px 20px 20px;
+}
+
+.sheet__title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sheet__body {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-mid);
+}
+
+.sheet__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.sheet__btn {
+  flex: 1 1 0;
+  height: 50px;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--text);
+}
+
+.sheet__btn--primary {
+  background: var(--blue);
+  color: #fff;
+}
+
+.progress {
+  margin-top: 20px;
+}
+
+.progress__track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--blue);
+  transition: width 120ms linear;
+}
+
+.progress__caption {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-mid);
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- History --------------------------------------------------------------- */
+
+.chart {
+  margin-top: 16px;
+}
+
+.chart__svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+  overflow: visible;
+}
+
+.chart__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.log {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.log__row {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: 14px;
+}
+
+.log__row:last-child {
+  border-bottom: 0;
+}
+
+.log__time {
+  color: var(--text-faint);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.log__msg {
+  color: var(--text-mid);
+  min-width: 0;
+}
+
+.log__msg--warning {
+  color: var(--amber);
+}
+
+.log__msg--error {
+  color: var(--red);
+}
+
+.empty {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+/* --- Footnote -------------------------------------------------------------- */
+
+.footnote {
+  margin: 4px 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

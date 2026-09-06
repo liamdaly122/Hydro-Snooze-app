@@ -1,0 +1,52 @@
+/*
+ * Design tokens, measured off the reference screenshot.
+ *
+ * The screenshot is a 390pt iPhone screen captured at 640px wide, so image
+ * measurements are divided by 1.641 to get CSS pixels. Where the brief and the
+ * screenshot disagree, the screenshot wins: it is the thing Liam actually wants
+ * this to look like.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces. Pure black ground, near-black cards. */
+  --bg: #000000;
+  --card: #18181a;
+  --divider: #2a2a2c;
+  --hairline: #38383a;
+
+  /* Type. Section labels are bright, sub-labels are dim: that contrast is a lot
+     of what makes the reference read as calm rather than murky. */
+  --text: #ffffff;
+  --text-label: #e9e9ed;
+  --text-mid: #aeaeb2;
+  --text-dim: #8e8e93;
+  --text-faint: #636366;
+
+  --blue: #0a84ff;
+  --amber: #ffb340;
+  --red: #ff6b6b;
+
+  /* Controls: translucent white rather than a flat grey, so they sit on the glow
+     without punching a hole in it. */
+  --control: rgb(255 255 255 / 0.07);
+  --control-active: rgb(255 255 255 / 0.15);
+
+  --radius-card: 20px;
+  --pad-card: 18px;
+  --gutter: 16px;
+  --stack: 16px;
+
+  --label-size: 12px;
+  --label-track: 0.12em;
+
+  --nav-height: 56px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui,
+    'Segoe UI', Roboto, sans-serif;
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
