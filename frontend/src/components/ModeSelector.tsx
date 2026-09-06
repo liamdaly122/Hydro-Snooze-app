@@ -1,9 +1,9 @@
 import { Card } from './Card'
-import { ALL_MODES, MODE_LABEL, type Mode } from '../types'
+import { COOLING_MODES, MODE_LABEL, type Mode } from '../types'
 
 /**
- * Warming is offered but sits apart in meaning: it cannot be switched into once a
- * schedule is running, so getting it right before arming is the whole point.
+ * Cooling speeds only. Whether a stage cools or warms is worked out from its
+ * temperature, so warming is not a thing to pick here.
  */
 export function ModeSelector({
   mode,
@@ -17,9 +17,9 @@ export function ModeSelector({
   note?: string | null
 }) {
   return (
-    <Card label="Mode" chevron={false}>
+    <Card label="Cooling speed" chevron={false}>
       <div className="segmented" role="group" aria-label="Cooling mode">
-        {ALL_MODES.map((m) => (
+        {COOLING_MODES.map((m) => (
           <button
             key={m}
             type="button"

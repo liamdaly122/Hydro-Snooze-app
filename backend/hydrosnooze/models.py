@@ -106,21 +106,36 @@ def is_valid_for_mode(target_c: int, mode: Mode) -> bool:
     return low <= target_c <= high
 
 
-# --- The Smart Sleep Schedule -------------------------------------------------
+# --- The night ----------------------------------------------------------------
 #
-# Three phases, 4h then 4h then 30m. Fixed, cannot be changed. So the schedule
-# always runs 8h30m from the moment it is armed and then the unit switches off,
-# which is the whole trick: "wake me at 06:30" is "arm at 22:00", and the unit
-# never needs a clock of its own.
+# The unit has its own Smart Sleep Schedule: three phases of 4h, 4h and 30m,
+# fixed, armed with two button presses and then left to run itself. This project
+# used to drive it, and it was elegant, but it is a straitjacket. While it runs,
+# the unit refuses to change temperature, refuses the timer, and above all refuses
+# to switch between cooling and warming. Since a cooler cannot warm a bed, that
+# capped the whole thing at "some temperature at or below the bedroom".
+#
+# So the app drives the night itself instead. It powers the unit on, sets a
+# temperature, and comes back at each stage boundary to set another. Outside the
+# unit's own schedule everything is unlocked, which means any number of stages,
+# any durations, and any mix of heating and cooling in one night.
+#
+# What that costs is spelled out where it matters: the unit will no longer switch
+# itself off, so the app must, and the Shelly's own auto-off timer stops being a
+# nicety and becomes the last line of defence.
 
-PHASE_DURATIONS = (timedelta(hours=4), timedelta(hours=4), timedelta(minutes=30))
-SCHEDULE_DURATION = sum(PHASE_DURATIONS, timedelta())  # 8h30m
+#: The unit's own Smart Sleep Schedule still exists in the hardware, and the
+#: physical remote can still arm it. The app never does, but the simulated unit
+#: models it so that using the remote by hand behaves the way the real one would.
+UNIT_SCHEDULE_DURATION = timedelta(hours=8, minutes=30)
+
+#: The unit switches itself off after twelve hours with no button press, and this
+#: cannot be disabled. Every stage transition resets it, so across a normal night
+#: it never fires. It is a backstop of last resort, not something to rely on.
+INACTIVITY_CUTOFF = timedelta(hours=12)
 
 #: Rough time each cooling speed takes to pull the bed down to its lowest setting.
 #: ASSUMPTION: Part 2 lists these as untested. They are defaults, not facts.
-#: Pre-cooling always runs Turbo because it is fastest, so 30 is the default that
-#: actually gets used; the rest are here for when you want to pre-cool in the
-#: night mode instead.
 DEFAULT_LEAD_MINUTES: dict[Mode, int] = {
     Mode.QUIET: 60,
     Mode.STANDARD: 45,
@@ -128,39 +143,12 @@ DEFAULT_LEAD_MINUTES: dict[Mode, int] = {
     Mode.WARMING: 30,
 }
 
-#: Pre-cooling is always done in Turbo. Part 3: "always turbo for pre-cooling, it
-#: is fastest". The night mode is applied afterwards, once the schedule is armed.
+#: Pre-conditioning runs Turbo when it is cooling, because it is the fastest way
+#: to pull the bed down before bedtime.
 PRECOOL_MODE = Mode.TURBO
 
-
-class Precondition(str, Enum):
-    """How to get the bed to the phase 1 temperature before the schedule arms.
-
-    A cooler cannot warm a bed. If phase 1 is above whatever the bed is resting
-    at, no amount of cooling reaches it, and the app would otherwise report a
-    pre-cool that achieved nothing.
-
-    This only affects the hour before arming. The overnight schedule itself never
-    needs it: once someone is in the bed, body heat pushes the pad well above any
-    sensible setpoint, so cooling to 24C works properly. Which is fortunate,
-    because the unit forbids switching between cooling and warming once a
-    schedule is running.
-    """
-
-    COOL = "cool"
-    WARM = "warm"
-
-    def mode_for(self, night_mode: Mode) -> Mode:
-        if self is Precondition.WARM:
-            return Mode.WARMING
-        # Turbo when the night is a cooling night, otherwise there is nothing to
-        # switch to and the night mode is already right.
-        return PRECOOL_MODE if night_mode.is_cooling else night_mode
-
-
-#: The lowest temperature warming mode can express. Below this the unit simply
-#: cannot heat the bed, whatever the app does, so pre-heating is refused rather
-#: than silently downgraded.
+#: The lowest temperature warming mode can express. Below this the unit cannot
+#: heat at all, which is what decides whether a stage cools or warms.
 WARMING_FLOOR_C = WARMING_RANGE[0]
 
 
@@ -169,42 +157,169 @@ def can_preheat_to(target_c: int) -> bool:
     return low <= target_c <= high
 
 
+def mode_for_target(target_c: int, cooling_speed: Mode) -> Mode:
+    """Whether a stage cools or warms, worked out from its temperature.
+
+    Below 25C it has to be cooling, because warming mode cannot express a number
+    that low. At 25C and above it warms, on the reasoning that nobody asks for a
+    bed at 27C unless they want it actively warmed to 27C; leaving it in cooling
+    would mean the unit sits idle whenever the bed is already cooler than that.
+    """
+    if target_c >= WARMING_FLOOR_C:
+        return Mode.WARMING
+    return cooling_speed if cooling_speed.is_cooling else Mode.QUIET
+
+
+class Stage(str, Enum):
+    """The parts of a night, named for what the body is doing.
+
+    Deep sleep is concentrated in the first third of a night and REM lengthens
+    through the second half, so the order here is chronological. During REM the
+    body regulates its own temperature poorly, which is the usual argument for
+    letting the bed run warmer later on.
+    """
+
+    DEEP = "deep"
+    REM = "rem"
+    WAKE = "wake"
+
+
+STAGE_ORDER: tuple[Stage, ...] = (Stage.DEEP, Stage.REM, Stage.WAKE)
+
+STAGE_LABEL: dict[Stage, str] = {
+    Stage.DEEP: "Deep",
+    Stage.REM: "REM",
+    Stage.WAKE: "Wake",
+}
+
+
+@dataclass
+class SleepStage:
+    """One part of the night: how long it lasts and how cold or warm it is."""
+
+    stage: Stage
+    duration_minutes: int
+    temp_c: int
+
+    def mode(self, cooling_speed: Mode) -> Mode:
+        return mode_for_target(self.temp_c, cooling_speed)
+
+    def is_warming(self) -> bool:
+        return self.temp_c >= WARMING_FLOOR_C
+
+
+def default_stages() -> list[SleepStage]:
+    """A sensible starting night: cold for deep sleep, easing up through REM.
+
+    Four hours deep at 17C, three and a half through REM at 20C, then half an
+    hour at 26C to surface on. The last one warms, which is exactly what the
+    unit's own scheduler made impossible.
+    """
+    return [
+        SleepStage(Stage.DEEP, 240, 17),
+        SleepStage(Stage.REM, 210, 20),
+        SleepStage(Stage.WAKE, 30, 26),
+    ]
+
+
+class Precondition(str, Enum):
+    """How to get the bed ready before the first stage starts.
+
+    A cooler cannot warm a bed. If the first stage is above whatever the bed is
+    resting at, no amount of cooling reaches it, and the app would otherwise
+    report a pre-cool that achieved nothing.
+    """
+
+    COOL = "cool"
+    WARM = "warm"
+
+    def mode_for(self, cooling_speed: Mode) -> Mode:
+        if self is Precondition.WARM:
+            return Mode.WARMING
+        return PRECOOL_MODE if cooling_speed.is_cooling else cooling_speed
+
+
+@dataclass(frozen=True)
+class StageStep:
+    """One stage, with the real moment it starts and the mode it needs."""
+
+    stage: Stage
+    starts_at: datetime
+    ends_at: datetime
+    temp_c: int
+    mode: Mode
+
+    @property
+    def label(self) -> str:
+        return STAGE_LABEL[self.stage]
+
+
 @dataclass(frozen=True)
 class NightPlan:
-    """The three moments of one night, derived from a wake time.
+    """One night, as real timestamps.
 
-    Every one of these is a real timestamp on a real date, because the arm and
-    pre-cool steps almost always fall on the evening *before* the wake morning and
-    that is exactly the sort of off-by-one-day that ruins a night's sleep.
+    Every moment here is a full timestamp on a real date, because bedtime almost
+    always falls on the evening *before* the wake morning, and that off-by-one-day
+    is exactly the sort of thing that ruins a night.
     """
 
     precool_at: datetime | None
-    arm_at: datetime
+    bedtime_at: datetime
     wake_at: datetime
+    steps: tuple[StageStep, ...]
 
     @property
     def starts_at(self) -> datetime:
-        return self.precool_at or self.arm_at
+        return self.precool_at or self.bedtime_at
+
+    @property
+    def first_temp_c(self) -> int:
+        return self.steps[0].temp_c if self.steps else 20
 
 
 def plan_for_wake(
     wake_on: date,
     wake_time: time,
+    stages: list[SleepStage],
+    cooling_speed: Mode = Mode.QUIET,
     *,
     precool_enabled: bool = True,
     precool_lead_minutes: int = DEFAULT_LEAD_MINUTES[PRECOOL_MODE],
 ) -> NightPlan:
     """Work backwards from the morning you want to wake up.
 
-        arm_at     = wake_at - 8h30m
-        precool_at = arm_at  - lead
-
-    Wake 06:30 gives arm 22:00 the previous evening, gives pre-cool 21:30.
+    The stages run in order and finish at the wake time, so bedtime falls out of
+    how long they add up to. Wake at 06:30 after 4h deep, 3h30 REM and 30m wake
+    means lights out at 22:30, and pre-conditioning starts before that.
     """
     wake_at = datetime.combine(wake_on, wake_time)
-    arm_at = wake_at - SCHEDULE_DURATION
-    precool_at = arm_at - timedelta(minutes=precool_lead_minutes) if precool_enabled else None
-    return NightPlan(precool_at=precool_at, arm_at=arm_at, wake_at=wake_at)
+    total = timedelta(minutes=sum(s.duration_minutes for s in stages))
+    bedtime_at = wake_at - total
+
+    steps: list[StageStep] = []
+    cursor = bedtime_at
+    for stage in stages:
+        ends = cursor + timedelta(minutes=stage.duration_minutes)
+        steps.append(
+            StageStep(
+                stage=stage.stage,
+                starts_at=cursor,
+                ends_at=ends,
+                temp_c=stage.temp_c,
+                mode=stage.mode(cooling_speed),
+            )
+        )
+        cursor = ends
+
+    precool_at = (
+        bedtime_at - timedelta(minutes=precool_lead_minutes) if precool_enabled else None
+    )
+    return NightPlan(
+        precool_at=precool_at,
+        bedtime_at=bedtime_at,
+        wake_at=wake_at,
+        steps=tuple(steps),
+    )
 
 
 # --- Schedule -----------------------------------------------------------------
@@ -226,66 +341,58 @@ class Schedule:
     enabled: bool = True
     days_of_week: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
     wake_time: time = time(6, 30)
-    phase1_temp_c: int = 19
-    phase2_temp_c: int = 17
-    phase3_temp_c: int = 21
-    mode: Mode = Mode.QUIET
+    #: The night, in order. Deep first, because that is when deep sleep happens.
+    stages: list[SleepStage] = field(default_factory=default_stages)
+    #: Which cooling speed a cooling stage uses. Quiet by default: it is next to
+    #: a bed. Warming stages ignore this, the unit has only one warming speed.
+    cooling_speed: Mode = Mode.QUIET
     precool_enabled: bool = True
-    #: Named `precool_*` throughout because these were the database columns before
-    #: pre-heating existed, and renaming them would churn the schema, the API, the
-    #: frontend types and every test for a cosmetic gain. The user-facing text says
-    #: "pre-heat" or "pre-cool" to match what is actually happening.
+    #: Named `precool_*` because these were the database columns before pre-heating
+    #: existed. The user-facing text says "pre-heat" or "pre-cool" to match what is
+    #: actually happening.
     precondition: Precondition = Precondition.COOL
     precool_lead_minutes: int = DEFAULT_LEAD_MINUTES[PRECOOL_MODE]
-    #: When these temperatures were last actually pushed to the unit over infrared.
-    #: The app cannot read the unit back, so this is the only handle it has on
-    #: whether what is saved here matches what the unit is holding.
-    last_written_at: datetime | None = None
     updated_at: datetime | None = None
     id: int = 1
 
     @property
-    def phase_temps(self) -> tuple[int, int, int]:
-        return (self.phase1_temp_c, self.phase2_temp_c, self.phase3_temp_c)
+    def first_temp_c(self) -> int:
+        """The temperature the bed is brought to before the night starts."""
+        return self.stages[0].temp_c if self.stages else 20
+
+    @property
+    def total_minutes(self) -> int:
+        return sum(s.duration_minutes for s in self.stages)
+
+    def stage(self, stage: Stage) -> SleepStage | None:
+        return next((s for s in self.stages if s.stage is stage), None)
 
     @property
     def precondition_mode(self) -> Mode:
-        """The mode the unit is put into before arming, not the night mode."""
-        return self.precondition.mode_for(self.mode)
+        """The mode the unit is put into before the first stage, not during it."""
+        return self.precondition.mode_for(self.cooling_speed)
 
     @property
     def preheat_is_possible(self) -> bool:
         """Warming cannot express a target below 25C, so pre-heating below it
         is not a setting the app can honour."""
-        return can_preheat_to(self.phase1_temp_c)
+        return can_preheat_to(self.first_temp_c)
 
     def precondition_problem(self) -> str | None:
         """Why this pre-conditioning setting cannot work, or None if it can."""
         if self.precondition is Precondition.WARM and not self.preheat_is_possible:
             return (
-                f"Pre-heating cannot reach {self.phase1_temp_c}C. Warming mode only goes "
+                f"Pre-heating cannot reach {self.first_temp_c}C. Warming mode only goes "
                 f"down to {WARMING_FLOOR_C}C, so the unit has no way to warm the bed to it."
             )
         return None
-
-    @property
-    def needs_write(self) -> bool:
-        """True when the saved temperatures have not been pushed to the unit yet.
-
-        This is what raises the Save button in the app. It is deliberately derived
-        from timestamps rather than tracked as a flag in the UI, so a reload or a
-        second phone cannot lose track of it.
-        """
-        if self.last_written_at is None:
-            return True
-        if self.updated_at is None:
-            return False
-        return self.updated_at > self.last_written_at
 
     def plan_for(self, wake_on: date) -> NightPlan:
         return plan_for_wake(
             wake_on,
             self.wake_time,
+            self.stages,
+            self.cooling_speed,
             precool_enabled=self.precool_enabled,
             precool_lead_minutes=self.precool_lead_minutes,
         )
@@ -326,7 +433,9 @@ class DeviceState:
     """
 
     power: Power = Power.UNKNOWN
-    in_schedule: Tristate = Tristate.UNKNOWN
+    #: Which part of the night is running, if any. The app drives the stages
+    #: itself, so unlike everything else prefixed `assumed_` this one is known.
+    current_stage: Stage | None = None
     assumed_mode: Mode | None = None
     #: The target we last commanded. Not in the brief's data model, but the Home
     #: screen's "Now" tab has to show and edit something, and this is the only
@@ -339,11 +448,13 @@ class DeviceState:
 
     @property
     def can_set_temperature(self) -> bool:
-        """Temperature adjustment is dead while the sleep schedule is running.
+        """Only dead when the unit is off, where the power button is the only
+        one that responds.
 
-        Also dead when the unit is off, where only the power button responds.
+        It used to also be dead during the unit's own sleep schedule. The app no
+        longer arms that, so a temperature can be set at any point in the night.
         """
-        return self.power is Power.ON and self.in_schedule is Tristate.FALSE
+        return self.power is Power.ON
 
 
 # --- Power thresholds ---------------------------------------------------------

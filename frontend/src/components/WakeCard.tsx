@@ -1,18 +1,30 @@
 import { Card } from './Card'
 import { Toggle } from './Toggle'
 import { Clock, Flame, Snowflake, Waves } from './Icons'
-import { DAY_INITIALS, formatDays, formatDayTime, formatTime, nextPlan, tint } from '../domain'
-import { MODE_LABEL, WARMING_FLOOR_C, type Schedule } from '../types'
+import {
+  DAY_INITIALS,
+  formatDayTime,
+  formatDays,
+  formatDuration,
+  formatTime,
+  nextPlan,
+  tint,
+} from '../domain'
+import { STAGE_LABEL, WARMING_FLOOR_C, type Schedule, type Stage } from '../types'
 
 interface Props {
   draft: Schedule
   onDraftChange: (patch: Partial<Schedule>) => void
+  onStageDuration: (stage: Stage, minutes: number) => void
 }
 
-export function WakeCard({ draft, onDraftChange }: Props) {
+const DURATION_STEP = 15
+
+export function WakeCard({ draft, onDraftChange, onStageDuration }: Props) {
   const plan = nextPlan(draft)
+  const firstTemp = draft.stages[0]?.temp_c ?? 20
   const warming = draft.precool_enabled && draft.precondition === 'warm'
-  const canWarm = draft.phase1_temp_c >= WARMING_FLOOR_C
+  const canWarm = firstTemp >= WARMING_FLOOR_C
   const preconditionKey = !draft.precool_enabled ? 'off' : draft.precondition
 
   function toggleDay(day: number) {
@@ -25,7 +37,9 @@ export function WakeCard({ draft, onDraftChange }: Props) {
   return (
     <Card label="Wake">
       <p className="wake__days">
-        {draft.days_of_week.length === 0 ? 'No days selected' : `Every ${formatDays(draft.days_of_week)}`}
+        {draft.days_of_week.length === 0
+          ? 'No days selected'
+          : `Every ${formatDays(draft.days_of_week)}`}
       </p>
 
       <div className="wake__row">
@@ -40,14 +54,14 @@ export function WakeCard({ draft, onDraftChange }: Props) {
       </div>
 
       {/*
-        Never a bare time. Waking at 06:30 on Tuesday means arming at 22:00 on
+        Never a bare time. Waking at 06:30 on Tuesday means going to bed on
         Monday, and that off-by-one-day is exactly the sort of thing that ruins a
         night, so the day is always spelled out.
       */}
       <div className="chips">
         <span className="chip">
           <Clock />
-          {plan ? `Arms ${formatDayTime(plan.armAt)}` : 'Not scheduled'}
+          {plan ? `Bed ${formatDayTime(plan.bedtimeAt)}` : 'Not scheduled'}
         </span>
         <span className="chip">
           {warming ? <Flame /> : <Snowflake />}
@@ -57,15 +71,54 @@ export function WakeCard({ draft, onDraftChange }: Props) {
         </span>
         <span className="chip">
           <Waves />
-          <span className="chip__accent" style={{ color: tint(draft.phase1_temp_c) }}>
-            {MODE_LABEL[draft.mode]}
+          <span className="chip__accent" style={{ color: tint(firstTemp) }}>
+            {formatDuration(draft.stages.reduce((n, s) => n + s.duration_minutes, 0))}
           </span>
         </span>
       </div>
 
       {/*
-        A cooler cannot warm a bed. If phase 1 is above whatever the bed is
-        resting at, pre-cooling does nothing at all, and only warming gets there.
+        Bedtime is not set directly. The stages run in order and finish at the
+        wake time, so how long they add up to is what decides it.
+      */}
+      <p className="wake__sublabel">How long each part lasts</p>
+      <div className="stages">
+        {draft.stages.map((stage) => {
+          const step = plan?.steps.find((s) => s.stage === stage.stage)
+          return (
+            <div className="stagerow" key={stage.stage}>
+              <div className="stagerow__name">
+                {STAGE_LABEL[stage.stage]}
+                <span className="stagerow__at">{step ? formatTime(step.startsAt) : ''}</span>
+              </div>
+              <div className="stagerow__controls">
+                <button
+                  type="button"
+                  className="stagerow__btn"
+                  aria-label={`${STAGE_LABEL[stage.stage]} shorter`}
+                  disabled={stage.duration_minutes <= DURATION_STEP}
+                  onClick={() => onStageDuration(stage.stage, stage.duration_minutes - DURATION_STEP)}
+                >
+                  −
+                </button>
+                <span className="stagerow__value">{formatDuration(stage.duration_minutes)}</span>
+                <button
+                  type="button"
+                  className="stagerow__btn"
+                  aria-label={`${STAGE_LABEL[stage.stage]} longer`}
+                  onClick={() => onStageDuration(stage.stage, stage.duration_minutes + DURATION_STEP)}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/*
+        A cooler cannot warm a bed. If the first stage is above whatever the bed
+        is resting at, pre-cooling does nothing, and only warming gets there.
         Warming cannot go below 25 degrees, so below that this is not offered.
       */}
       <p className="wake__sublabel">Get the bed ready by</p>
@@ -98,7 +151,7 @@ export function WakeCard({ draft, onDraftChange }: Props) {
       {!canWarm && (
         <p className="footnote" style={{ marginTop: 10 }}>
           Warming only goes down to {WARMING_FLOOR_C}°C, so the unit cannot heat the bed to{' '}
-          {draft.phase1_temp_c}°C. Cooling below room temperature is the only option here.
+          {firstTemp}°C. Cooling below room temperature is the only option here.
         </p>
       )}
 

@@ -12,42 +12,71 @@ import pytest
 
 from hydrosnooze.models import (
     Activity,
+    DeviceState,
     Mode,
     Power,
     PowerThresholds,
     Schedule,
-    Tristate,
-    DeviceState,
-    SCHEDULE_DURATION,
+    SleepStage,
+    Stage,
+    default_stages,
+    mode_for_target,
     plan_for_wake,
     rail_count,
     range_for,
 )
 
 
-def test_schedule_runs_eight_and_a_half_hours():
-    assert SCHEDULE_DURATION == timedelta(hours=8, minutes=30)
-
-
-def test_wake_time_works_backwards_to_the_evening_before():
-    # The headline example from the brief: wake 06:30 means arm at 22:00 the
-    # night before, and pre-cool 30 minutes before that.
-    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), precool_lead_minutes=30)
+def test_the_night_is_as_long_as_its_stages():
+    # No fixed 8h30m any more. The night is however long you make it, which is
+    # the whole reason for dropping the unit's own scheduler.
+    stages = [SleepStage(Stage.DEEP, 120, 17), SleepStage(Stage.WAKE, 60, 26)]
+    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), stages, precool_lead_minutes=30)
     assert plan.wake_at == datetime(2026, 9, 8, 6, 30)
-    assert plan.arm_at == datetime(2026, 9, 7, 22, 0)
-    assert plan.precool_at == datetime(2026, 9, 7, 21, 30)
+    assert plan.bedtime_at == datetime(2026, 9, 8, 3, 30)
+    assert plan.precool_at == datetime(2026, 9, 8, 3, 0)
 
 
-def test_pre_cool_can_be_turned_off():
-    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), precool_enabled=False)
+def test_stages_run_in_order_and_finish_at_the_wake_time():
+    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), default_stages())
+    assert [s.stage for s in plan.steps] == [Stage.DEEP, Stage.REM, Stage.WAKE]
+    assert plan.steps[0].starts_at == plan.bedtime_at
+    assert plan.steps[-1].ends_at == plan.wake_at
+    # Each one picks up where the last left off, with no gaps.
+    for earlier, later in zip(plan.steps, plan.steps[1:]):
+        assert earlier.ends_at == later.starts_at
+
+
+def test_a_night_can_cool_then_heat():
+    # The thing the unit's own scheduler made impossible: it refuses to switch
+    # between cooling and warming once armed.
+    plan = plan_for_wake(
+        date(2026, 9, 8),
+        time(6, 30),
+        [SleepStage(Stage.DEEP, 240, 17), SleepStage(Stage.WAKE, 60, 28)],
+    )
+    assert plan.steps[0].mode is Mode.QUIET
+    assert plan.steps[1].mode is Mode.WARMING
+
+
+def test_pre_conditioning_can_be_turned_off():
+    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), default_stages(), precool_enabled=False)
     assert plan.precool_at is None
-    assert plan.starts_at == plan.arm_at
+    assert plan.starts_at == plan.bedtime_at
 
 
-def test_a_late_wake_time_keeps_arming_on_the_same_day():
-    # Wake at 11:00 arms at 02:30 the same morning, not the evening before.
-    plan = plan_for_wake(date(2026, 9, 8), time(11, 0), precool_enabled=False)
-    assert plan.arm_at == datetime(2026, 9, 8, 2, 30)
+@pytest.mark.parametrize(
+    ("temp", "expected"),
+    [(15, Mode.QUIET), (24, Mode.QUIET), (25, Mode.WARMING), (30, Mode.WARMING)],
+)
+def test_a_stage_works_out_for_itself_whether_to_cool_or_heat(temp, expected):
+    # Below 25 it has to cool, because warming cannot express a number that low.
+    assert mode_for_target(temp, Mode.QUIET) is expected
+
+
+def test_the_cooling_speed_carries_through_to_cooling_stages_only():
+    assert mode_for_target(18, Mode.TURBO) is Mode.TURBO
+    assert mode_for_target(27, Mode.TURBO) is Mode.WARMING
 
 
 @pytest.mark.parametrize(
@@ -68,49 +97,20 @@ def test_ranges_and_rail_counts_match_the_manual(mode, expected_range, expected_
 
 
 def test_days_of_week_are_keyed_to_the_wake_morning():
-    # Monday to Friday means five wake mornings, so the first arming of the week
-    # happens on Sunday evening.
+    # Monday to Friday means five wake mornings, so the first night of the week
+    # starts on Sunday evening.
     schedule = Schedule(wake_time=time(6, 30), days_of_week=[0, 1, 2, 3, 4])
-    plan = schedule.next_plan(datetime(2026, 9, 6, 12, 0))  # a Sunday lunchtime
-    assert plan is not None
-    assert plan.wake_at == datetime(2026, 9, 7, 6, 30)  # Monday morning
-    assert plan.arm_at == datetime(2026, 9, 6, 22, 0)  # Sunday evening
+    plan = schedule.plan_for(date(2026, 9, 7))  # Monday morning
+    assert plan.wake_at == datetime(2026, 9, 7, 6, 30)
+    assert plan.bedtime_at.date() == date(2026, 9, 6)  # Sunday evening
 
 
-def test_next_plan_skips_a_night_already_under_way():
-    schedule = Schedule(wake_time=time(6, 30), days_of_week=[0, 1, 2, 3, 4])
-    # Sunday 23:00: Monday's arming at 22:00 has been and gone.
-    plan = schedule.next_plan(datetime(2026, 9, 6, 23, 0))
-    assert plan is not None
-    assert plan.wake_at == datetime(2026, 9, 8, 6, 30)  # Tuesday
-
-
-def test_a_disabled_schedule_has_no_next_plan():
-    assert Schedule(enabled=False).next_plan(datetime(2026, 9, 6, 12, 0)) is None
-    assert Schedule(days_of_week=[]).next_plan(datetime(2026, 9, 6, 12, 0)) is None
-
-
-def test_needs_write_is_true_until_it_has_been_sent_to_the_unit():
-    fresh = Schedule()
-    assert fresh.needs_write  # never written
-
-    written = Schedule(
-        last_written_at=datetime(2026, 9, 6, 20, 0),
-        updated_at=datetime(2026, 9, 6, 19, 0),
-    )
-    assert not written.needs_write
-
-    edited = written.with_updates(datetime(2026, 9, 6, 21, 0), phase1_temp_c=18)
-    assert edited.needs_write
-
-
-def test_temperature_is_only_adjustable_when_on_and_out_of_a_schedule():
-    # Both of the unit's real constraints: when it is off only power responds, and
-    # while a schedule runs the temperature buttons do nothing at all.
-    assert DeviceState(power=Power.ON, in_schedule=Tristate.FALSE).can_set_temperature
-    assert not DeviceState(power=Power.OFF, in_schedule=Tristate.FALSE).can_set_temperature
-    assert not DeviceState(power=Power.ON, in_schedule=Tristate.TRUE).can_set_temperature
-    assert not DeviceState(power=Power.ON, in_schedule=Tristate.UNKNOWN).can_set_temperature
+def test_temperature_is_adjustable_whenever_the_unit_is_on():
+    # It used to also be dead during the unit's own sleep schedule. The app never
+    # arms that now, so the only constraint left is that the unit is on.
+    assert DeviceState(power=Power.ON).can_set_temperature
+    assert not DeviceState(power=Power.OFF).can_set_temperature
+    assert not DeviceState(power=Power.UNKNOWN).can_set_temperature
 
 
 @pytest.mark.parametrize(

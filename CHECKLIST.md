@@ -12,9 +12,10 @@ you can do these whenever suits.
 - [x] The app, designed and running on the phone
 - [x] The service: scheduler, database, live updates
 - [x] A simulated HS1001 with every documented quirk
-- [x] Every button sequence, with 113 tests behind them
+- [x] Every button sequence, with 117 tests behind them
 - [x] Verified on your Mac, press log and all
-- [x] Pre-heating, for when the start temperature is above room temperature
+- [x] The app drives the night itself: Deep, REM and Wake, any durations, cooling and heating in
+      the same night
 
 ---
 
@@ -74,18 +75,6 @@ Write down all eight:
 
 ---
 
-## Ten minutes: the one open question
-
-Detail in [SETUP.md](SETUP.md#step-4-answer-the-one-remaining-question).
-
-- [ ] Enter the schedule setup, press the schedule button once more to reach phase 2, wait twenty
-      seconds without touching anything
-- [ ] Did it arm itself? If **no**, set `HS_SIM_AUTO_APPLY_FROM_ANY_PHASE=false` in `.env`
-
-Blocks nothing. It only changes how much the app should trust a single arming attempt.
-
----
-
 ## Half an hour: the Shelly
 
 Detail in [SETUP.md](SETUP.md#step-5-the-shelly).
@@ -99,8 +88,9 @@ Measure and write down the watts in four states:
 - [ ] On, sitting at temperature (expect 5 to 60 W)
 - [ ] Actively cooling (expect around 170 W)
 - [ ] Actively heating (expect around 300 W)
-- [ ] Set the Shelly's own auto-off timer to about ten hours, as a backstop that works even if the Pi
-      is dead
+- [ ] Set the Shelly's own auto-off timer to about ten hours. **Not optional.** The unit no longer
+      switches itself off, so if the Pi dies mid-night this is the only thing that stops the bed
+      running all day
 
 ---
 
@@ -134,18 +124,18 @@ Watch the unit each time, and watch `journalctl -u hydrosnooze -f` in a Terminal
 
 If the presses land, the codes are good and the hard part is behind you.
 
-### Then write the schedule, standing in front of it
+### Then watch a stage change
 
-- [ ] Press Save in the app and watch the unit step through three phases
+- [ ] Watch one stage boundary land, and check the unit takes the new temperature
 
-About ninety presses in a row. Nothing in software can check what actually got written, which is why
-you have to be in the room.
+About thirty presses over ten seconds. There is no schedule to write any more, so nothing has to be
+walked through the unit's setup wizard and nothing is unverifiable.
 
 ### Then one night, with your normal alarm still set
 
 - [ ] Let it run a full night
-- [ ] In the morning, check History: did it power on at pre-cool time, arm at the arm time, and
-      switch itself off at wake time?
+- [ ] In the morning, check History: did it power on before bedtime, change at each stage boundary,
+      and get switched off at the wake time?
 
 ### Then trust it
 

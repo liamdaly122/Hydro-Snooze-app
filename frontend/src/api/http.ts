@@ -16,7 +16,6 @@ import type {
   PowerSample,
   Schedule,
   ServiceInfo,
-  WriteProgress,
 } from '../types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -54,10 +53,6 @@ export class HttpApiClient implements ApiClient {
   putSchedule = (patch: Partial<Schedule>) =>
     request<Schedule>('/api/schedule', { method: 'PUT', body: JSON.stringify(patch) })
 
-  armSchedule = async () => {
-    await request<DeviceState>('/api/schedule/arm', { method: 'POST' })
-  }
-
   powerOn = async () => {
     await request<DeviceState>('/api/power/on', { method: 'POST' })
   }
@@ -75,37 +70,6 @@ export class HttpApiClient implements ApiClient {
 
   setMode = async (mode: Mode) => {
     await request<DeviceState>('/api/mode', { method: 'POST', body: JSON.stringify({ mode }) })
-  }
-
-  /**
-   * Around ninety presses over about forty five seconds, streamed back one JSON
-   * object per line so the progress bar reflects presses actually sent rather
-   * than a guess at how long it should take.
-   */
-  writeSchedule = async (onProgress: (p: WriteProgress) => void): Promise<void> => {
-    const response = await fetch('/api/schedule/write', { method: 'POST' })
-    if (!response.ok || !response.body) {
-      throw new ApiError(`Could not start the write: ${response.status}`)
-    }
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let failure: string | null = null
-
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.trim()) continue
-        const frame = JSON.parse(line) as WriteProgress
-        if (frame.phase === 'failed') failure = frame.message
-        onProgress(frame)
-      }
-    }
-    if (failure) throw new ApiError(failure)
   }
 
   subscribe = (listener: (u: LiveUpdate) => void): (() => void) => {

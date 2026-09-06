@@ -6,10 +6,12 @@
 
 import {
   MODE_RANGE,
-  SCHEDULE_DURATION_MINUTES,
+  WARMING_FLOOR_C,
   type DeviceState,
   type Mode,
   type Schedule,
+  type SleepStage,
+  type Stage,
 } from './types'
 
 const MINUTE = 60_000
@@ -22,10 +24,19 @@ export function mondayFirstDay(d: Date): number {
 export const DAY_INITIALS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 export const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+export interface StageStep {
+  stage: Stage
+  startsAt: Date
+  endsAt: Date
+  tempC: number
+  mode: Mode
+}
+
 export interface NightPlan {
   precoolAt: Date | null
-  armAt: Date
+  bedtimeAt: Date
   wakeAt: Date
+  steps: StageStep[]
 }
 
 function parseHhMm(value: string): [number, number] {
@@ -34,22 +45,38 @@ function parseHhMm(value: string): [number, number] {
 }
 
 /**
- * Work backwards from the morning you want to wake up:
+ * Work backwards from the morning you want to wake up.
  *
- *   armAt     = wakeAt - 8h30m
- *   precoolAt = armAt  - lead
- *
- * Wake 06:30 gives arm 22:00 the evening before, gives pre-cool 21:30.
+ * The stages run in order and finish at the wake time, so bedtime falls out of
+ * how long they add up to. There is no fixed length any more: that was the unit's
+ * own scheduler, and dropping it is what allows heating and cooling in one night.
  */
 export function planForWake(wakeOn: Date, schedule: Schedule): NightPlan {
   const [h, m] = parseHhMm(schedule.wake_time)
   const wakeAt = new Date(wakeOn)
   wakeAt.setHours(h, m, 0, 0)
-  const armAt = new Date(wakeAt.getTime() - SCHEDULE_DURATION_MINUTES * MINUTE)
+
+  const total = schedule.stages.reduce((n, s) => n + s.duration_minutes, 0)
+  const bedtimeAt = new Date(wakeAt.getTime() - total * MINUTE)
+
+  const steps: StageStep[] = []
+  let cursor = bedtimeAt
+  for (const stage of schedule.stages) {
+    const endsAt = new Date(cursor.getTime() + stage.duration_minutes * MINUTE)
+    steps.push({
+      stage: stage.stage,
+      startsAt: cursor,
+      endsAt,
+      tempC: stage.temp_c,
+      mode: stage.mode,
+    })
+    cursor = endsAt
+  }
+
   const precoolAt = schedule.precool_enabled
-    ? new Date(armAt.getTime() - schedule.precool_lead_minutes * MINUTE)
+    ? new Date(bedtimeAt.getTime() - schedule.precool_lead_minutes * MINUTE)
     : null
-  return { precoolAt, armAt, wakeAt }
+  return { precoolAt, bedtimeAt, wakeAt, steps }
 }
 
 /** The next night that has not started yet, or null if the schedule is off. */
@@ -60,7 +87,7 @@ export function nextPlan(schedule: Schedule, now: Date = new Date()): NightPlan 
     day.setDate(day.getDate() + offset)
     if (!schedule.days_of_week.includes(mondayFirstDay(day))) continue
     const plan = planForWake(day, schedule)
-    const startsAt = plan.precoolAt ?? plan.armAt
+    const startsAt = plan.precoolAt ?? plan.bedtimeAt
     if (startsAt.getTime() > now.getTime()) return plan
   }
   return null
@@ -159,10 +186,29 @@ export function clampToMode(tempC: number, mode: Mode, maxC: number): number {
 }
 
 /**
- * Temperature adjustment is dead while the sleep schedule is running, and dead
- * when the unit is off, where only the power button responds. Mirrors
- * DeviceState.can_set_temperature on the backend.
+ * Only dead when the unit is off, where the power button is the only one that
+ * responds. It used to also be dead during the unit's own sleep schedule; the app
+ * never arms that now.
  */
 export function canSetTemperature(state: DeviceState): boolean {
-  return state.power === 'on' && state.in_schedule === 'false'
+  return state.power === 'on'
+}
+
+/** "4h 30m", or "45m" when it is under an hour. */
+export function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
+/**
+ * Whether a stage cools or warms, worked out from its temperature.
+ *
+ * Below 25°C it has to cool, because warming mode cannot express a number that
+ * low. At 25°C and above it warms, because nobody asks for a bed at 27°C unless
+ * they want it actively warmed there.
+ */
+export function stageIsWarming(stage: SleepStage): boolean {
+  return stage.temp_c >= WARMING_FLOOR_C
 }

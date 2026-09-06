@@ -17,7 +17,6 @@ import type {
   PowerSample,
   Schedule,
   ServiceInfo,
-  WriteProgress,
 } from '../types'
 
 /** Pushed over the WebSocket whenever anything changes, so the app is never stale. */
@@ -34,22 +33,19 @@ export interface ApiClient {
   getState(): Promise<DeviceState>
   getSchedule(): Promise<Schedule>
 
-  /** Saves locally in the service. Does NOT touch the unit. */
-  putSchedule(patch: Partial<Schedule>): Promise<Schedule>
-
   /**
-   * Pushes the saved phase temperatures to the unit over infrared. Long running,
-   * around 45 seconds, and never triggered by automation: user action only.
+   * Saves the night. Takes effect from the next stage boundary onwards.
+   *
+   * Nothing is pushed to the unit here, because the unit holds no schedule any
+   * more: the service drives every stage itself. There is no forty-five second
+   * infrared ritual and nothing to stand and watch.
    */
-  writeSchedule(onProgress: (p: WriteProgress) => void): Promise<void>
-
-  /** Arm the unit's own schedule now, with whatever it already has saved. */
-  armSchedule(): Promise<void>
+  putSchedule(patch: Partial<Schedule>): Promise<Schedule>
 
   powerOn(): Promise<void>
   powerOff(): Promise<void>
 
-  /** Immediate temperature change. Rejected while a schedule is running. */
+  /** Immediate temperature change. Rejected only when the unit is off. */
   setTemperature(targetC: number): Promise<void>
   setMode(mode: Mode): Promise<void>
 

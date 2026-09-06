@@ -22,7 +22,6 @@ from .config import Settings
 from .db import Database
 from .events import Event, EventLog
 from .models import (
-    PRECOOL_MODE,
     Activity,
     DeviceState,
     Mode,
@@ -30,11 +29,13 @@ from .models import (
     Power,
     Precondition,
     Schedule,
-    Tristate,
+    Stage,
+    StageStep,
+    mode_for_target,
     range_for,
 )
-from .scheduler import Scheduler
-from .sequences import CommandFailed, Commands, WriteProgress
+from .scheduler import Job, Scheduler
+from .sequences import CommandFailed, Commands
 
 log = logging.getLogger(__name__)
 
@@ -131,27 +132,31 @@ class Service:
 
     async def _tick(self) -> None:
         now = self.clock.now()
-        missed = self.scheduler.missed_arming(self.schedule, now)
-        if missed is not None:
-            self.scheduler.fired.mark("arm", missed)
-            self.events.error(
-                "schedule_arm",
-                f"Missed the arming window for {missed.wake_at:%a %H:%M}. Not arming late, "
-                "because the schedule would then run past the wake time.",
-            )
-            self._set_state(in_schedule=Tristate.UNKNOWN)
 
-        due = self.scheduler.due(self.schedule, now)
-        if due is None:
+        # A missed stage means the bed spent that stretch of the night at the
+        # wrong temperature. Worth saying out loud rather than passing over.
+        for job in self.scheduler.missed(self.schedule, now):
+            self.scheduler.fired.mark(job)
+            assert job.step is not None
+            self.events.error(
+                "stage",
+                f"Missed the {job.step.label} stage at {job.step.starts_at:%H:%M}. "
+                f"The bed stayed where it was instead of going to {job.step.temp_c}C.",
+            )
+
+        job = self.scheduler.due(self.schedule, now)
+        if job is None:
             return
-        job, plan = due
-        self.scheduler.fired.mark(job, plan)
-        handler = {
-            "precool": self._run_precool,
-            "arm": self._run_arm,
-            "wake_check": self._run_wake_check,
-        }[job]
-        await handler(plan)
+        self.scheduler.fired.mark(job)
+        if job.kind == "stage":
+            self._report_stage_start(job)
+        await self._run_job(job)
+
+    def _report_stage_start(self, job: Job) -> None:
+        """The first stage of a night is also the moment to check pre-conditioning
+        actually did something."""
+        if job.step is not None and job.plan.steps and job.step is job.plan.steps[0]:
+            self._report_idle_preconditioning(job.plan)
 
     async def _power_loop(self) -> None:
         while True:
@@ -174,15 +179,12 @@ class Service:
         if watts is not None:
             power = Power.OFF if watts < self.settings.off_threshold_w else Power.ON
 
-        in_schedule = self.state.in_schedule
-        if power is Power.OFF and in_schedule is Tristate.TRUE:
-            in_schedule = Tristate.FALSE
-
+        step = self.scheduler.stage_now(self.schedule, now)
         self._set_state(
             observed_power_w=watts,
             inferred_activity=activity,
             power=power,
-            in_schedule=in_schedule,
+            current_stage=step.stage if step and power is Power.ON else None,
         )
         if watts is not None:
             self.db.add_power_sample(now, watts)
@@ -191,44 +193,100 @@ class Service:
 
     # --- Nightly jobs ---------------------------------------------------------
 
+    async def _run_job(self, job: Job) -> None:
+        if job.kind == "precool":
+            await self._run_precool(job.plan)
+        elif job.kind == "stage" and job.step is not None:
+            await self._run_stage(job.plan, job.step)
+        elif job.kind == "power_off":
+            await self._run_power_off(job.plan)
+
     async def _run_precool(self, plan: NightPlan) -> None:
-        # A cooler cannot warm a bed. When phase 1 is above whatever the bed is
-        # resting at, only warming mode can get there, and only down to 25C.
+        # A cooler cannot warm a bed. When the first stage is above whatever the
+        # bed is resting at, only warming mode gets there, and only down to 25C.
         problem = self.schedule.precondition_problem()
         if problem is not None:
             self.events.warning("precool", f"{problem} Pre-cooling instead.")
 
+        target = self.schedule.first_temp_c
         mode = (
             self.schedule.precondition_mode
             if problem is None
-            else Precondition.COOL.mode_for(self.schedule.mode)
+            else Precondition.COOL.mode_for(self.schedule.cooling_speed)
         )
         verb = "Pre-heating" if mode is Mode.WARMING else "Pre-cooling"
         self.events.info(
             "precool",
-            f"{verb} in {mode.value} to {self.schedule.phase1_temp_c}C for a "
-            f"{plan.arm_at:%H:%M} arm and a {plan.wake_at:%a %H:%M} wake",
+            f"{verb} in {mode.value} to {target}C, for a {plan.bedtime_at:%H:%M} bedtime "
+            f"and a {plan.wake_at:%a %H:%M} wake",
         )
         async with self._lock:
             try:
                 await self.commands.power_on()
-                self._set_state(power=Power.ON, in_schedule=Tristate.FALSE)
-                await self.commands.set_mode(mode)
-                self._set_state(assumed_mode=mode)
-                await self.commands.set_temperature(self.schedule.phase1_temp_c, mode)
-                self._set_state(
-                    assumed_target_c=self.schedule.phase1_temp_c, last_command_at=self.clock.now()
-                )
+                self._set_state(power=Power.ON, current_stage=None)
+                # Roughly thirty presses land at each stage boundary through the
+                # night, and the unit beeps on every one of them.
+                await self.commands.mute()
+                await self._apply(mode, target)
             except CommandFailed as exc:
                 self._fail("precool", exc)
+
+    async def _run_stage(self, plan: NightPlan, step: StageStep) -> None:
+        self.events.info(
+            "stage",
+            f"{step.label}: {step.temp_c}C in {step.mode.value} until {step.ends_at:%H:%M}",
+        )
+        async with self._lock:
+            try:
+                # The unit may have switched itself off, or never been on if the
+                # pre-conditioning step was skipped.
+                watts = await self.power.read_watts()
+                if watts is not None and watts < self.settings.off_threshold_w:
+                    self.events.warning("stage", "Unit was off at a stage boundary, powering on")
+                    await self.commands.power_on()
+                    self._set_state(power=Power.ON)
+                    await self.commands.mute()
+                await self._apply(step.mode, step.temp_c)
+            except CommandFailed as exc:
+                self._fail("stage", exc)
+
+    async def _run_power_off(self, plan: NightPlan) -> None:
+        """Not optional. Without the unit's own schedule, nothing else does this.
+
+        The unit's twelve hour inactivity cutoff is reset by every stage
+        transition, so it will not save us. If this fails, the only thing left
+        standing between a dead Pi and a bed running all day is the Shelly's own
+        auto-off timer.
+        """
+        self.events.info("power_off", f"Night finished at {plan.wake_at:%H:%M}, switching off")
+        async with self._lock:
+            try:
+                await self.commands.power_off()
+                self._set_state(
+                    power=Power.OFF, assumed_target_c=None, last_command_at=self.clock.now()
+                )
+            except CommandFailed as exc:
+                self.events.error(
+                    "power_off",
+                    f"{exc} The unit will not switch itself off. Check it, and check the "
+                    "Shelly's own auto-off timer is set.",
+                )
+                self._set_state(last_error=str(exc), power=Power.UNKNOWN)
+
+    async def _apply(self, mode: Mode, target_c: int) -> None:
+        """Put the unit into a mode at a temperature. The whole night is this."""
+        if self.state.assumed_mode is not mode:
+            await self.commands.set_mode(mode)
+            self._set_state(assumed_mode=mode)
+        await self.commands.set_temperature(target_c, mode)
+        self._set_state(assumed_target_c=target_c, last_command_at=self.clock.now())
 
     def _report_idle_preconditioning(self, plan: NightPlan) -> None:
         """Say so when the pre-conditioning run never actually did anything.
 
-        The plug is the only real sensor in this project, and it can answer this.
-        If the draw never rose above idle between the pre-cool starting and the
-        schedule arming, the unit was never working, which means the bed was
-        already at or past the target. Cooling cannot go the other way.
+        The plug is the only real sensor here, and it can answer this. If the draw
+        never rose above idle between pre-conditioning starting and bedtime, the
+        unit was never working, which means the bed was already past the target.
         """
         if plan.precool_at is None:
             return
@@ -239,71 +297,13 @@ class Service:
         if peak >= self.settings.idle_max_w:
             return
 
-        was_heating = self.schedule.precondition_mode is Mode.WARMING
-        wanted = "warm" if was_heating else "cool"
+        wanted = "warm" if self.schedule.precondition_mode is Mode.WARMING else "cool"
         self.events.warning(
             "precool",
             f"The unit never drew more than {peak:.0f} W while pre-conditioning, so it was "
-            f"not working. The bed was most likely already past {self.schedule.phase1_temp_c}C, "
+            f"not working. The bed was most likely already past {self.schedule.first_temp_c}C, "
             f"and it cannot {wanted} in the other direction.",
         )
-
-    async def _run_arm(self, plan: NightPlan) -> None:
-        self.events.info("schedule_arm", f"Arming for a {plan.wake_at:%a %H:%M} wake")
-        self._report_idle_preconditioning(plan)
-
-        async with self._lock:
-            try:
-                current = self.state.assumed_mode or PRECOOL_MODE
-
-                # Cooling and warming cannot be switched once a schedule is
-                # running. So if the bed was pre-heated, the night mode has to be
-                # set BEFORE arming. Getting this the wrong way round would arm
-                # the unit into a night of warming, which is the worst outcome
-                # this project can produce.
-                preheated = current is Mode.WARMING and self.schedule.mode.is_cooling
-                if preheated:
-                    await self.commands.set_mode(self.schedule.mode)
-                    current = self.schedule.mode
-                    self._set_state(assumed_mode=current)
-
-                await self.commands.arm_schedule()
-                self._set_state(in_schedule=Tristate.TRUE, last_command_at=self.clock.now())
-
-                # After pre-cooling the unit is in Turbo, and dropping to the
-                # quieter night speed is the one mode change allowed mid-schedule.
-                # It goes immediately, while the display is still awake from
-                # arming, because the preamble cannot be used during a schedule.
-                if not preheated and self.schedule.mode.is_cooling and current is not self.schedule.mode:
-                    try:
-                        await self.commands.set_cooling_speed(self.schedule.mode, current)
-                        self._set_state(assumed_mode=self.schedule.mode)
-                    except CommandFailed as exc:
-                        # A dropped mode press leaves the unit noisier than asked
-                        # for but the schedule still runs correctly. Log it rather
-                        # than retrying, since a second press advances the cycle
-                        # rather than correcting anything.
-                        self.events.warning("mode", f"Could not drop the cooling speed: {exc}")
-                        self._set_state(assumed_mode=None)
-            except CommandFailed as exc:
-                self._fail("schedule_arm", exc)
-
-    async def _run_wake_check(self, plan: NightPlan) -> None:
-        watts = await self.power.read_watts()
-        if watts is None:
-            self.events.warning("wake_check", "Plug unreachable, cannot confirm the unit is off")
-            self._set_state(power=Power.UNKNOWN, in_schedule=Tristate.UNKNOWN)
-            return
-        if watts >= self.settings.off_threshold_w:
-            self.events.error(
-                "wake_check",
-                f"The schedule should have finished at {plan.wake_at:%H:%M} but the plug "
-                f"still reads {watts:.1f} W. The unit did not switch itself off.",
-            )
-            self._set_state(in_schedule=Tristate.UNKNOWN)
-            return
-        self.events.info("wake_check", "Schedule finished and the unit switched itself off")
-        self._set_state(power=Power.OFF, in_schedule=Tristate.FALSE, assumed_target_c=None)
 
     # --- Commands from the app ------------------------------------------------
 
@@ -311,9 +311,7 @@ class Service:
         async with self._lock:
             try:
                 await self.commands.power_on()
-                self._set_state(
-                    power=Power.ON, in_schedule=Tristate.FALSE, last_command_at=self.clock.now()
-                )
+                self._set_state(power=Power.ON, last_command_at=self.clock.now())
             except CommandFailed as exc:
                 self._fail("power", exc, power=Power.UNKNOWN)
 
@@ -323,7 +321,7 @@ class Service:
                 await self.commands.power_off()
                 self._set_state(
                     power=Power.OFF,
-                    in_schedule=Tristate.FALSE,
+                    current_stage=None,
                     assumed_target_c=None,
                     last_command_at=self.clock.now(),
                 )
@@ -331,9 +329,14 @@ class Service:
                 self._fail("power", exc, power=Power.UNKNOWN)
 
     async def set_temperature(self, target_c: int) -> None:
-        mode = self.state.assumed_mode or self.schedule.mode
+        # Below 25C has to cool, at or above 25C it warms. The unit switches
+        # freely now that its own scheduler is never armed.
+        mode = mode_for_target(target_c, self.schedule.cooling_speed)
         async with self._lock:
             try:
+                if self.state.assumed_mode is not mode:
+                    await self.commands.set_mode(mode)
+                    self._set_state(assumed_mode=mode)
                 await self.commands.set_temperature(target_c, mode)
                 self._set_state(assumed_target_c=target_c, last_command_at=self.clock.now())
             except CommandFailed as exc:
@@ -355,36 +358,6 @@ class Service:
                 )
             except CommandFailed as exc:
                 self._fail("mode", exc, assumed_mode=None)
-                raise
-
-    async def arm_now(self) -> None:
-        async with self._lock:
-            try:
-                await self.commands.arm_schedule()
-                self._set_state(in_schedule=Tristate.TRUE, last_command_at=self.clock.now())
-            except CommandFailed as exc:
-                self._fail("schedule_arm", exc, in_schedule=Tristate.UNKNOWN)
-                raise
-
-    async def write_schedule(
-        self, on_progress: Callable[[WriteProgress], None] | None = None
-    ) -> None:
-        """Never called from the tick loop. User action only."""
-        async with self._lock:
-            try:
-                await self.commands.write_schedule(
-                    self.schedule.phase_temps, self.schedule.mode, on_progress=on_progress
-                )
-                self.schedule.last_written_at = self.clock.now()
-                self.db.save_schedule(self.schedule)
-                self._set_state(
-                    assumed_mode=self.schedule.mode,
-                    in_schedule=Tristate.TRUE,
-                    last_command_at=self.clock.now(),
-                )
-                self._push_schedule()
-            except CommandFailed as exc:
-                self._fail("schedule_write", exc, in_schedule=Tristate.UNKNOWN)
                 raise
 
     def update_schedule(self, patch: dict[str, Any]) -> Schedule:

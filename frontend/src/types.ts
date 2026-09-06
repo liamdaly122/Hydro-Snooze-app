@@ -46,8 +46,29 @@ export type Precondition = 'cool' | 'warm'
  */
 export const WARMING_FLOOR_C = 25
 
-/** Fixed by the unit: 4h + 4h + 30m. Not configurable, which is the whole trick. */
-export const SCHEDULE_DURATION_MINUTES = 8 * 60 + 30
+/**
+ * The parts of a night, in the order they happen.
+ *
+ * Deep sleep is concentrated in the first third and REM lengthens through the
+ * second half, so the order is chronological rather than alphabetical.
+ */
+export type Stage = 'deep' | 'rem' | 'wake'
+
+export const STAGE_ORDER: Stage[] = ['deep', 'rem', 'wake']
+
+export const STAGE_LABEL: Record<Stage, string> = {
+  deep: 'Deep',
+  rem: 'REM',
+  wake: 'Wake',
+}
+
+export interface SleepStage {
+  stage: Stage
+  duration_minutes: number
+  temp_c: number
+  /** Derived by the service from the temperature, not chosen. */
+  mode: Mode
+}
 
 export interface Schedule {
   id: number
@@ -57,24 +78,23 @@ export interface Schedule {
   days_of_week: number[]
   /** "HH:MM", 24 hour. */
   wake_time: string
-  phase1_temp_c: number
-  phase2_temp_c: number
-  phase3_temp_c: number
-  mode: Mode
+  /** The night, in order. Bedtime falls out of how long these add up to. */
+  stages: SleepStage[]
+  /** Which speed a cooling stage runs at. Warming stages ignore it. */
+  cooling_speed: Mode
   precool_enabled: boolean
   /** How to get the bed to the phase 1 temperature before the schedule arms. */
   precondition: Precondition
   /** False when phase 1 is below warming's floor, so pre-heating cannot work. */
   preheat_is_possible: boolean
   precool_lead_minutes: number
-  /** ISO timestamp of the last successful write to the unit, or null if never. */
-  last_written_at: string | null
   updated_at: string | null
 }
 
 export interface DeviceState {
   power: Power
-  in_schedule: Tristate
+  /** Which part of the night is running. Known, not assumed: the app drives it. */
+  current_stage: Stage | null
   /** Set by us, never read back off the unit. */
   assumed_mode: Mode | null
   /** The last target we commanded. null means we genuinely do not know. */
@@ -98,14 +118,6 @@ export interface DeviceEvent {
   at: string
   level: EventLevel
   kind: string
-  message: string
-}
-
-/** Progress frames streamed while write_schedule runs. */
-export interface WriteProgress {
-  phase: 'mode' | 'phase1' | 'phase2' | 'phase3' | 'exit' | 'done' | 'failed'
-  presses_sent: number
-  presses_total: number
   message: string
 }
 

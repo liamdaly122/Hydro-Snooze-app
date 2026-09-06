@@ -19,15 +19,13 @@ lands somewhere unintended the failure is a slightly colder bed rather than a
 hotter one, and in cooling it simply bottoms out at 15C. Never `temp_up`, never
 `power`, never `schedule`.
 
-The preamble must never be sent during an active schedule, where temperature
-presses are swallowed *without* waking the display, and it is never sent inside the
-setup wizard, where presses act immediately.
+The unit's own Smart Sleep Schedule is never armed, so the case where temperature
+presses are swallowed without waking the display cannot arise. That was the
+sharpest edge in the original design, and dropping their scheduler removes it.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Protocol
 
 from .adapters.base import PowerMonitor, Transmitter
 from .clock import Clock
@@ -35,26 +33,9 @@ from .config import Settings
 from .events import EventLog
 from .models import Button, Mode, rail_count, range_for
 
-#: Warn if any single gap inside the setup wizard exceeds this. The wizard gives
-#: up after about eight seconds of silence and arms with whatever it already had,
-#: which is a safe failure but not the one that was asked for.
-WIZARD_GAP_WARNING_S = 6.0
-
 
 class CommandFailed(RuntimeError):
     """A sequence could not be verified. State goes to unknown, no blind retry."""
-
-
-@dataclass
-class WriteProgress:
-    phase: str
-    presses_sent: int
-    presses_total: int
-    message: str
-
-
-class ProgressSink(Protocol):
-    def __call__(self, progress: WriteProgress) -> None: ...
 
 
 class Commands:
@@ -195,125 +176,17 @@ class Commands:
 
         raise CommandFailed("Pressed power three times and the plug still reads on")
 
-    async def arm_schedule(self) -> None:
-        """The routine nightly operation, and the one that must not fail quietly.
+    async def mute(self) -> None:
+        """Silence the button beep.
 
-        It runs about half an hour after the pre-cool step, by which time the
-        display has gone dark again. Without the preamble a single schedule press
-        onto a dark display only wakes it: the app would report success, nothing
-        would be armed, and the first anyone would know is at 3am.
-
-        Self-correcting if a press is dropped: landing in phase 1 or phase 2 makes
-        no difference, because doing nothing for eight seconds applies the saved
-        temperatures either way.
+        Not decorative any more. Driving the night live means roughly thirty
+        presses at each stage boundary, and the unit beeps on every one of them,
+        at two in the morning, next to a bed.
         """
-        self._banner("arm_schedule()")
+        self._banner("mute()")
         await self.wake()
-        await self.clock.sleep(0.5)
-        await self._press(Button.SCHEDULE, "enter setup", gap=0)
-        await self.clock.sleep(self.settings.arm_wait_s)
-        self.events.info(
-            "schedule_arm",
-            f"Armed the schedule, {self.settings.arm_wait_s}s auto-apply wait",
-        )
-
-    async def write_schedule(
-        self,
-        phase_temps: tuple[int, int, int],
-        mode: Mode,
-        on_progress: ProgressSink | None = None,
-    ) -> None:
-        """Walk the unit through its setup wizard. The risky one.
-
-        Never run automatically. It has to be triggered by an explicit action in
-        the app, with an on-screen message telling Liam to watch the unit, because
-        nothing in software can read back what was written.
-        """
-        low, _ = range_for(mode)
-        for temp in phase_temps:
-            if temp > self.settings.max_temperature_c:
-                raise CommandFailed(
-                    f"{temp}C is above the {self.settings.max_temperature_c}C safety cap"
-                )
-
-        mode_presses = 2 + 1 + (0 if mode is Mode.WARMING else {Mode.QUIET: 1, Mode.STANDARD: 2, Mode.TURBO: 3}[mode])
-        per_phase = [rail_count(mode) + (t - low) for t in phase_temps]
-        total = mode_presses + sum(per_phase) + 4
-        sent = 0
-
-        def report(phase: str, message: str) -> None:
-            if on_progress:
-                on_progress(WriteProgress(phase, sent, total, message))
-
-        self._banner(f"write_schedule({phase_temps}, {mode.value})")
-        report("mode", "Setting the mode")
-
-        # The mode cannot be changed once inside the schedule, so it goes first.
-        await self.set_mode(mode)
-        sent += mode_presses
-
-        slow_phases: list[int] = []
-
-        for index, temp in enumerate(phase_temps, start=1):
-            await self._press(Button.SCHEDULE, f"-> phase {index}", gap=0.5)
-            sent += 1
-            report(f"phase{index}", f"Writing phase {index}")
-
-            # Same rail and count, but no preamble and no trailing save wait:
-            # inside the wizard presses act immediately.
-            worst_gap = 0.0
-            rail = rail_count(mode)
-            for i in range(rail):
-                worst_gap = max(worst_gap, await self._press(Button.TEMP_DOWN, f"rail {i + 1}/{rail}"))
-                sent += 1
-                if i % 5 == 0:
-                    report(f"phase{index}", f"Writing phase {index}")
-            ups = temp - low
-            for i in range(ups):
-                worst_gap = max(worst_gap, await self._press(Button.TEMP_UP, f"up {i + 1}/{ups}"))
-                sent += 1
-            report(f"phase{index}", f"Phase {index} set to {temp}C")
-
-            if worst_gap > WIZARD_GAP_WARNING_S:
-                slow_phases.append(index)
-
-        await self._press(Button.SCHEDULE, "exit, armed", gap=0)
-        sent += 1
-        report("done", "Schedule written")
-
-        if slow_phases:
-            # The wizard gives up after about eight seconds of silence and arms
-            # with the previously saved temperatures. Safe, but not what was asked
-            # for, and impossible to detect any other way.
-            self.events.warning(
-                "schedule_write",
-                f"Phases {slow_phases} had gaps over {WIZARD_GAP_WARNING_S}s between presses. "
-                "The wizard may have timed out and kept its old temperatures.",
-            )
-        self.events.info(
-            "schedule_write",
-            f"Wrote {phase_temps[0]}/{phase_temps[1]}/{phase_temps[2]}C in {mode.value}, "
-            f"{total} presses. Nothing can verify this from here.",
-        )
-
-    async def set_cooling_speed(self, target: Mode, current: Mode) -> None:
-        """Change cooling speed during a running schedule.
-
-        The only mode change the unit allows mid-schedule. There is no preamble,
-        because temperature presses are swallowed without waking the display
-        there, so this only works while the display is already awake. Send it
-        within seconds of a previous press, never as a separate scheduled job.
-        """
-        if target is Mode.WARMING or current is Mode.WARMING:
-            raise CommandFailed("Cooling and warming cannot be switched mid-schedule")
-        order = [Mode.QUIET, Mode.STANDARD, Mode.TURBO]
-        steps = (order.index(target) - order.index(current)) % 3
-        if steps == 0:
-            return
-        self._banner(f"set_cooling_speed({current.value} -> {target.value})")
-        for i in range(steps):
-            await self._press(Button.COOL, f"cool {i + 1}/{steps}")
-        self.events.info("mode", f"Dropped from {current.value} to {target.value} mid-schedule")
+        await self._press(Button.MUTE, "silence")
+        self.events.info("mute", "Muted the unit's button beep")
 
     # --- Verification ---------------------------------------------------------
 

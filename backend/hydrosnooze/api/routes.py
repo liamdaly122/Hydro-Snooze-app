@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 from dataclasses import replace
 from datetime import time, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..models import Mode, Precondition, range_for
-from ..sequences import CommandFailed, WriteProgress
+from ..models import Mode, Precondition, SleepStage, Stage, mode_for_target, range_for
+from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import schedule_json, state_json
 
@@ -26,15 +23,19 @@ def _service(request: Request) -> Service:
 # --- Bodies -------------------------------------------------------------------
 
 
+class StagePatch(BaseModel):
+    stage: Stage
+    duration_minutes: int = Field(ge=5, le=720)
+    temp_c: int
+
+
 class SchedulePatch(BaseModel):
     name: str | None = None
     enabled: bool | None = None
     days_of_week: list[int] | None = None
     wake_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
-    phase1_temp_c: int | None = None
-    phase2_temp_c: int | None = None
-    phase3_temp_c: int | None = None
-    mode: Mode | None = None
+    stages: list[StagePatch] | None = None
+    cooling_speed: Mode | None = None
     precool_enabled: bool | None = None
     precondition: Precondition | None = None
     precool_lead_minutes: int | None = Field(default=None, ge=0, le=240)
@@ -92,11 +93,24 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
     service = _service(request)
     data = patch.model_dump(exclude_none=True)
 
-    mode = data.get("mode", service.schedule.mode)
-    for key in ("phase1_temp_c", "phase2_temp_c", "phase3_temp_c"):
-        if key not in data:
-            continue
-        _guard_temperature(service, data[key], mode)
+    if "cooling_speed" in data and not Mode(data["cooling_speed"]).is_cooling:
+        raise HTTPException(422, "cooling_speed must be one of quiet, standard or turbo")
+
+    if "stages" in data:
+        speed = Mode(data.get("cooling_speed", service.schedule.cooling_speed))
+        seen = set()
+        for raw in data["stages"]:
+            stage = Stage(raw["stage"])
+            if stage in seen:
+                raise HTTPException(422, f"{stage.value} appears twice")
+            seen.add(stage)
+            # Every stage decides for itself whether it cools or warms, worked out
+            # from its temperature, so it is checked against that mode's range.
+            _guard_temperature(service, raw["temp_c"], mode_for_target(raw["temp_c"], speed))
+        data["stages"] = [
+            SleepStage(Stage(r["stage"]), r["duration_minutes"], r["temp_c"])
+            for r in data["stages"]
+        ]
 
     if "wake_time" in data:
         hour, minute = (int(p) for p in data["wake_time"].split(":"))
@@ -118,48 +132,6 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
     return schedule_json(service.update_schedule(data))
 
 
-@router.post("/schedule/write")
-async def post_schedule_write(request: Request) -> StreamingResponse:
-    """Long running. Streams one JSON object per line as the presses go out.
-
-    Only ever reached from an explicit action in the app. Never from the tick
-    loop, and never from anything automatic.
-    """
-    service = _service(request)
-    queue: asyncio.Queue[WriteProgress | None] = asyncio.Queue()
-
-    async def run() -> None:
-        try:
-            await service.write_schedule(on_progress=queue.put_nowait)
-        except CommandFailed as exc:
-            queue.put_nowait(WriteProgress("failed", 0, 1, str(exc)))
-        finally:
-            queue.put_nowait(None)
-
-    async def stream():
-        task = asyncio.create_task(run())
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield json.dumps(item.__dict__) + "\n"
-        finally:
-            await task
-
-    return StreamingResponse(stream(), media_type="application/x-ndjson")
-
-
-@router.post("/schedule/arm")
-async def post_arm(request: Request) -> dict[str, object]:
-    service = _service(request)
-    try:
-        await service.arm_now()
-    except CommandFailed as exc:
-        raise HTTPException(502, str(exc)) from exc
-    return state_json(service.state)
-
-
 @router.post("/power/on")
 async def post_power_on(request: Request) -> dict[str, object]:
     service = _service(request)
@@ -177,14 +149,11 @@ async def post_power_off(request: Request) -> dict[str, object]:
 @router.post("/temperature")
 async def post_temperature(request: Request, body: TemperatureBody) -> dict[str, object]:
     service = _service(request)
-    mode = service.state.assumed_mode or service.schedule.mode
+    mode = mode_for_target(body.target_c, service.schedule.cooling_speed)
     _guard_temperature(service, body.target_c, mode)
 
     if not service.state.can_set_temperature:
-        raise HTTPException(
-            409,
-            "The unit ignores temperature presses unless it is on and no schedule is running.",
-        )
+        raise HTTPException(409, "The unit ignores every button but power while it is off.")
     try:
         await service.set_temperature(body.target_c)
     except CommandFailed as exc:

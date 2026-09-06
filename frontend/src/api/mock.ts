@@ -19,7 +19,6 @@ import type {
   PowerSample,
   Schedule,
   ServiceInfo,
-  WriteProgress,
 } from '../types'
 import { MAX_TEMPERATURE_C, MODE_RANGE, WARMING_FLOOR_C } from '../types'
 
@@ -32,7 +31,7 @@ function nowIso(): string {
 export class MockApiClient implements ApiClient {
   private state: DeviceState = {
     power: 'on',
-    in_schedule: 'false',
+    current_stage: 'deep',
     assumed_mode: 'quiet',
     assumed_target_c: 19,
     observed_power_w: 168,
@@ -47,15 +46,17 @@ export class MockApiClient implements ApiClient {
     enabled: true,
     days_of_week: [0, 1, 2, 3, 4],
     wake_time: '06:30',
-    phase1_temp_c: 19,
-    phase2_temp_c: 17,
-    phase3_temp_c: 21,
-    mode: 'quiet',
+    stages: [
+      { stage: 'deep', duration_minutes: 240, temp_c: 17, mode: 'quiet' },
+      { stage: 'rem', duration_minutes: 210, temp_c: 20, mode: 'quiet' },
+      // The one the unit's own scheduler made impossible.
+      { stage: 'wake', duration_minutes: 30, temp_c: 26, mode: 'warming' },
+    ],
+    cooling_speed: 'quiet',
     precool_enabled: true,
     precondition: 'cool',
     preheat_is_possible: false,
     precool_lead_minutes: 30,
-    last_written_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
     updated_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
   }
 
@@ -97,52 +98,22 @@ export class MockApiClient implements ApiClient {
     const next = { ...this.schedule, ...patch, updated_at: nowIso() }
     // Mirrors the service: warming cannot express a target below its floor, so
     // the combination is refused rather than quietly downgraded.
-    next.preheat_is_possible = next.phase1_temp_c >= WARMING_FLOOR_C
+    const first = next.stages[0]?.temp_c ?? 20
+    // Derived the same way the service derives it: below 25 has to cool.
+    next.stages = next.stages.map((st) => ({
+      ...st,
+      mode: st.temp_c >= WARMING_FLOOR_C ? 'warming' : next.cooling_speed,
+    }))
+    next.preheat_is_possible = first >= WARMING_FLOOR_C
     if (next.precondition === 'warm' && !next.preheat_is_possible) {
       throw new ApiError(
-        `Pre-heating cannot reach ${next.phase1_temp_c}C. Warming mode only goes down to ` +
+        `Pre-heating cannot reach ${first}C. Warming mode only goes down to ` +
           `${WARMING_FLOOR_C}C, so the unit has no way to warm the bed to it.`,
       )
     }
     this.schedule = next
     this.emit({ schedule: { ...this.schedule } })
     return { ...this.schedule }
-  }
-
-  async writeSchedule(onProgress: (p: WriteProgress) => void): Promise<void> {
-    // Roughly what the real sequence costs: a mode set, then three rail-and-count
-    // temperature runs inside the wizard, then the exit press.
-    const steps: Array<[WriteProgress['phase'], number, string]> = [
-      ['mode', 6, 'Setting cooling mode'],
-      ['phase1', 25 + (this.schedule.phase1_temp_c - 15), 'Writing phase 1'],
-      ['phase2', 25 + (this.schedule.phase2_temp_c - 15), 'Writing phase 2'],
-      ['phase3', 25 + (this.schedule.phase3_temp_c - 15), 'Writing phase 3'],
-      ['exit', 1, 'Leaving setup'],
-    ]
-    const total = steps.reduce((n, [, presses]) => n + presses, 0)
-    let sent = 0
-    for (const [phase, presses, message] of steps) {
-      for (let i = 0; i < presses; i += 1) {
-        sent += 1
-        onProgress({ phase, presses_sent: sent, presses_total: total, message })
-        await sleep(24)
-      }
-    }
-    onProgress({
-      phase: 'done',
-      presses_sent: total,
-      presses_total: total,
-      message: 'Schedule saved',
-    })
-    this.schedule = { ...this.schedule, last_written_at: nowIso() }
-    this.emit({ schedule: { ...this.schedule } })
-    this.log('info', 'schedule_write', `Wrote schedule to the unit, ${total} presses`)
-  }
-
-  async armSchedule(): Promise<void> {
-    await sleep(600)
-    this.patchState({ in_schedule: 'true', last_command_at: nowIso() })
-    this.log('info', 'schedule_arm', 'Armed the sleep schedule')
   }
 
   async powerOn(): Promise<void> {
@@ -160,7 +131,7 @@ export class MockApiClient implements ApiClient {
     await sleep(400)
     this.patchState({
       power: 'off',
-      in_schedule: 'false',
+      current_stage: null,
       observed_power_w: 0.4,
       inferred_activity: 'off',
       last_command_at: nowIso(),
@@ -171,9 +142,6 @@ export class MockApiClient implements ApiClient {
   async setTemperature(targetC: number): Promise<void> {
     if (targetC > MAX_TEMPERATURE_C) {
       throw new ApiError(`Refused: ${targetC}C is above the ${MAX_TEMPERATURE_C}C safety cap.`)
-    }
-    if (this.state.in_schedule === 'true') {
-      throw new ApiError('Refused: the unit ignores temperature presses while a schedule is running.')
     }
     await sleep(500)
     this.patchState({ assumed_target_c: targetC, last_command_at: nowIso() })
@@ -242,12 +210,12 @@ export class MockApiClient implements ApiClient {
     const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString()
     const seed: Array<[number, DeviceEvent['level'], string, string]> = [
       [8, 'info', 'power_check', 'Plug reads 168 W, consistent with cooling'],
-      [38, 'info', 'schedule_arm', 'Armed the sleep schedule, 20 s auto-apply wait'],
-      [39, 'warning', 'mode', 'Cooling speed press sent, cannot be confirmed'],
-      [68, 'info', 'temperature', 'Pre-cool: railed to 15C then counted up to 19C'],
-      [69, 'info', 'mode', 'Pre-cool: forced Turbo via warm then three cool presses'],
-      [70, 'info', 'power', 'Powered on for pre-cool, plug confirms 174 W'],
-      [640, 'info', 'power', 'Schedule finished, unit switched itself off'],
+      [38, 'info', 'stage', 'Deep: 17C in quiet until 02:30'],
+      [70, 'info', 'temperature', 'Railed to 15C then counted up to 17C (25 + 2)'],
+      [71, 'info', 'mute', "Muted the unit's button beep"],
+      [72, 'info', 'power', 'Powered on for pre-cool, plug confirms 174 W'],
+      [640, 'info', 'power_off', 'Night finished at 06:30, switching off'],
+      [641, 'info', 'stage', 'Wake: 26C in warming until 06:30'],
     ]
     this.events = seed.map(([mins, level, kind, message]) => ({
       id: this.nextEventId++,

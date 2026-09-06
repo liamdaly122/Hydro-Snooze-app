@@ -1,31 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card } from './Card'
 import { Minus, Plus } from './Icons'
-import { canSetTemperature, clampToMode, formatTemp, tint, tintAlpha } from '../domain'
-import { MODE_RANGE, type DeviceState, type Mode, type Schedule } from '../types'
+import { canSetTemperature, formatTemp, tint, tintAlpha } from '../domain'
+import {
+  MODE_RANGE,
+  STAGE_LABEL,
+  STAGE_ORDER,
+  WARMING_FLOOR_C,
+  type DeviceState,
+  type Schedule,
+  type Stage,
+} from '../types'
 
-export type TabKey = 'now' | 'phase1' | 'phase2' | 'phase3'
+/** "Now" is the live temperature. The rest are the parts of the night. */
+export type TabKey = 'now' | Stage
 
-const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: 'now', label: 'Now' },
-  { key: 'phase1', label: 'Phase 1' },
-  { key: 'phase2', label: 'Phase 2' },
-  { key: 'phase3', label: 'Wake' },
-]
+const TABS: TabKey[] = ['now', ...STAGE_ORDER]
 
 /** How long to wait after the last tap before firing a real infrared run. */
 const COMMIT_DELAY_MS = 900
 
 interface Props {
   state: DeviceState
-  /** The locally edited schedule, which may differ from what the unit holds. */
+  /** The locally edited night. */
   draft: Schedule
   maxC: number
-  onDraftChange: (patch: Partial<Schedule>) => void
+  onStageChange: (stage: Stage, tempC: number) => void
   onSetNow: (targetC: number) => void
 }
 
-export function TemperatureCard({ state, draft, maxC, onDraftChange, onSetNow }: Props) {
+export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }: Props) {
   const [tab, setTab] = useState<TabKey>('now')
 
   // "Now" is edited optimistically and committed once the tapping stops, because
@@ -37,56 +41,53 @@ export function TemperatureCard({ state, draft, maxC, onDraftChange, onSetNow }:
   useEffect(() => setPendingNow(null), [state.assumed_target_c])
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  const nowMode: Mode = state.assumed_mode ?? draft.mode
   const nowValue = pendingNow ?? state.assumed_target_c
   const editable = canSetTemperature(state)
 
-  const values: Record<TabKey, number | null> = {
-    now: nowValue,
-    phase1: draft.phase1_temp_c,
-    phase2: draft.phase2_temp_c,
-    phase3: draft.phase3_temp_c,
-  }
+  const stageOf = (stage: Stage) => draft.stages.find((s) => s.stage === stage)
+  const valueFor = (key: TabKey): number | null =>
+    key === 'now' ? nowValue : (stageOf(key)?.temp_c ?? null)
 
-  const selected = values[tab]
-  const mode = tab === 'now' ? nowMode : draft.mode
-  const [low] = MODE_RANGE[mode]
-  const ceiling = Math.min(MODE_RANGE[mode][1], maxC)
+  const selected = valueFor(tab)
+  const fallback = draft.stages[0]?.temp_c ?? 20
 
-  // The glow takes its colour from whichever tab is selected, so changing tabs
-  // washes the card through blue, purple and pink as the temperatures do.
-  const glowTemp = selected ?? draft.phase1_temp_c
+  // Each stage works out for itself whether it cools or warms, so the range it
+  // can be set to follows from the temperature rather than from a mode setting.
+  const rangeFor = (value: number) =>
+    MODE_RANGE[value >= WARMING_FLOOR_C ? 'warming' : draft.cooling_speed]
 
   function step(delta: number) {
+    const current = selected ?? fallback
+    const next = current + delta
+    // 24 to 25 crosses from cooling into warming, and both can express those, so
+    // stepping across the boundary needs no special handling beyond the ranges.
+    const [low, high] = rangeFor(next)
+    const clamped = Math.max(low, Math.min(Math.min(high, maxC), next))
+
     if (tab === 'now') {
       if (!editable) return
-      // With no confirmed target there is nothing to step from, so seed at the
-      // phase 1 temperature. Railing makes the command absolute either way.
-      const base = nowValue ?? draft.phase1_temp_c
-      const next = clampToMode(base + delta, nowMode, maxC)
-      setPendingNow(next)
+      setPendingNow(clamped)
       clearTimeout(timer.current)
-      timer.current = setTimeout(() => onSetNow(next), COMMIT_DELAY_MS)
+      timer.current = setTimeout(() => onSetNow(clamped), COMMIT_DELAY_MS)
       return
     }
-    const current = values[tab] ?? draft.phase1_temp_c
-    const next = clampToMode(current + delta, draft.mode, maxC)
-    const key = ({ phase1: 'phase1_temp_c', phase2: 'phase2_temp_c', phase3: 'phase3_temp_c' } as const)[
-      tab
-    ]
-    onDraftChange({ [key]: next })
+    onStageChange(tab, clamped)
   }
 
-  const canDown = tab !== 'now' || editable
-  const canUp = canDown
+  const glowTemp = selected ?? fallback
+  const [low, high] = rangeFor(selected ?? fallback)
+  const ceiling = Math.min(high, maxC)
+  const canEdit = tab !== 'now' || editable
   const atFloor = selected !== null && selected <= low
   const atCeiling = selected !== null && selected >= ceiling
 
   return (
     <Card label="Temperature">
-      <div className="tabs" role="tablist" aria-label="Temperature to edit">
-        {TABS.map(({ key, label }) => {
-          const value = values[key]
+      <div className="tabs" role="tablist" aria-label="Part of the night to edit">
+        {TABS.map((key) => {
+          const value = valueFor(key)
+          const label = key === 'now' ? 'Now' : STAGE_LABEL[key]
+          const running = key !== 'now' && state.current_stage === key
           return (
             <button
               key={key}
@@ -103,7 +104,10 @@ export function TemperatureCard({ state, draft, maxC, onDraftChange, onSetNow }:
                 {formatTemp(value)}
                 {value === null ? '' : '°'}
               </span>
-              <span className="tab__label">{label}</span>
+              <span className="tab__label">
+                {label}
+                {running && <span className="tab__live" aria-label="running now" />}
+              </span>
             </button>
           )
         })}
@@ -123,7 +127,7 @@ export function TemperatureCard({ state, draft, maxC, onDraftChange, onSetNow }:
           type="button"
           className="step"
           onClick={() => step(-1)}
-          disabled={!canDown || atFloor}
+          disabled={!canEdit || atFloor}
           aria-label="Colder"
         >
           <Minus />
@@ -142,48 +146,56 @@ export function TemperatureCard({ state, draft, maxC, onDraftChange, onSetNow }:
           type="button"
           className="step"
           onClick={() => step(1)}
-          disabled={!canUp || atCeiling}
+          disabled={!canEdit || atCeiling}
           aria-label="Warmer"
         >
           <Plus />
         </button>
 
-        {tab === 'now' && <StageNote state={state} unknown={nowValue === null} ceiling={ceiling} atCeiling={atCeiling} maxC={maxC} />}
+        <StageNote
+          state={state}
+          tab={tab}
+          value={selected}
+          atCeiling={atCeiling}
+          ceiling={ceiling}
+          maxC={maxC}
+        />
       </div>
     </Card>
   )
 }
 
 /**
- * The card never guesses. When a control is dead, it says which of the unit's
- * real constraints made it dead.
+ * The card never guesses. When a control is dead, or a temperature means
+ * something other than it looks like, it says so.
  */
 function StageNote({
   state,
-  unknown,
+  tab,
+  value,
   atCeiling,
   ceiling,
   maxC,
 }: {
   state: DeviceState
-  unknown: boolean
+  tab: TabKey
+  value: number | null
   atCeiling: boolean
   ceiling: number
   maxC: number
 }) {
   let note: string | null = null
-  if (state.power === 'off') {
-    note = 'Unit is off. Only the power button responds.'
-  } else if (state.power === 'unknown') {
-    note = 'Unit state unknown. Check the plug reading below.'
-  } else if (state.in_schedule === 'true') {
-    note = 'Schedule running. The unit ignores temperature presses until it ends.'
-  } else if (state.in_schedule === 'unknown') {
-    note = 'Not sure whether a schedule is running, so this may be ignored.'
-  } else if (unknown) {
-    note = 'No confirmed target. Press + or − to set one.'
-  } else if (atCeiling && ceiling === maxC) {
-    note = `${maxC}°C safety cap.`
+
+  if (tab === 'now') {
+    if (state.power === 'off') note = 'Unit is off. Only the power button responds.'
+    else if (state.power === 'unknown') note = 'Unit state unknown. Check the plug reading below.'
+    else if (value === null) note = 'No confirmed target. Press + or − to set one.'
+  } else if (value !== null && value >= WARMING_FLOOR_C) {
+    note = `Heats the bed to ${value}°C.`
+  } else if (value !== null) {
+    note = `Cools the bed to ${value}°C.`
   }
+
+  if (atCeiling && ceiling === maxC) note = `${maxC}°C safety cap.`
   return note ? <p className="stage__note">{note}</p> : null
 }

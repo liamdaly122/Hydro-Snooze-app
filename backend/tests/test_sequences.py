@@ -92,50 +92,46 @@ async def test_set_mode_uses_the_documented_press_count(rig):
 # --- The wake preamble --------------------------------------------------------
 
 
-async def test_arm_schedule_works_when_the_display_has_gone_dark(rig):
-    rig.unit_on(mode=Mode.QUIET, display_dark=True)
-    await rig.commands.arm_schedule()
-    assert rig.unit.schedule_running()
+async def test_a_command_lands_even_when_the_display_has_gone_dark(rig):
+    """The preamble still earns its place.
 
-
-async def test_arming_without_the_preamble_silently_fails_to_arm(rig):
-    """The 3am failure, caught here instead.
-
-    A single schedule press onto a dark display only wakes it. Without the
-    preamble the app would report success, nothing would be armed, and the first
-    anyone would know is waking up hot at 3am.
+    Stage boundaries fall hours apart, so the display is always dark by the time
+    the next one arrives, and the first press of anything is eaten waking it.
     """
-    rig.unit_on(mode=Mode.QUIET, display_dark=True)
-    await rig.tx.press(Button.SCHEDULE, "no preamble")
-    await rig.clock.sleep(20)
-    assert not rig.unit.schedule_running()
-    assert rig.unit.wizard_phase is None
+    rig.unit_on(mode=Mode.QUIET, target=30, display_dark=True)
+    await rig.commands.set_temperature(18, Mode.QUIET)
+    assert rig.unit.target == 18
 
 
-async def test_arming_is_self_correcting_if_a_press_is_dropped(rig):
-    # Landing in phase 2 rather than phase 1 makes no difference: doing nothing
-    # for eight seconds applies the saved temperatures either way.
-    rig.unit_on(mode=Mode.QUIET, display_dark=False)
-    rig.unit.press(Button.SCHEDULE)  # phase 1
-    rig.unit.press(Button.SCHEDULE)  # phase 2
-    await rig.clock.sleep(20)
-    assert rig.unit.schedule_running()
+async def test_without_a_preamble_the_first_press_is_lost(rig):
+    # What the two discarded presses are for, shown directly.
+    rig.unit_on(mode=Mode.QUIET, target=20, display_dark=True)
+    result = rig.unit.press(Button.TEMP_DOWN)
+    assert result.swallowed
+    assert rig.unit.target == 20
 
 
-async def test_the_preamble_is_swallowed_without_waking_during_a_schedule(rig):
-    """Why the preamble must never be sent during an active schedule.
+async def test_the_unit_switches_itself_off_after_twelve_hours_untouched(rig):
+    """The cutoff that cannot be disabled.
 
-    Temperature presses are ignored there and do not wake the display either, so
-    the app would believe the unit was awake when it was not, and the next press
-    would be eaten.
+    Every stage transition resets it, so across a normal night it never fires.
+    It is a backstop of last resort, not something the app relies on.
     """
-    rig.unit_on(mode=Mode.QUIET, display_dark=True)
-    await rig.commands.arm_schedule()
-    assert rig.unit.schedule_running()
+    import datetime as _dt
 
-    rig.clock.advance(__import__("datetime").timedelta(minutes=6))  # display dark again
-    await rig.commands.wake()
-    assert rig.unit.display_dark(rig.clock.now()), "the preamble did not wake it, as expected"
+    rig.unit_on(display_dark=True)
+    rig.clock.advance(_dt.timedelta(hours=11, minutes=59))
+    assert rig.unit.describe() != "OFF"
+    rig.clock.advance(_dt.timedelta(minutes=2))
+    assert rig.unit.describe() == "OFF"
+
+
+async def test_muting_stops_the_unit_beeping_all_night(rig):
+    # Roughly thirty presses land at each stage boundary, at two in the morning,
+    # next to a bed.
+    rig.unit_on(display_dark=True)
+    await rig.commands.mute()
+    assert any("mute" in line for line in rig.tx.lines)
 
 
 # --- Power --------------------------------------------------------------------
@@ -176,45 +172,31 @@ async def test_an_unreachable_plug_fails_rather_than_guessing(rig):
         await rig.commands.power_on()
 
 
-# --- Writing the schedule -----------------------------------------------------
+# --- Cooling and warming in the same night ------------------------------------
 
 
-async def test_write_schedule_leaves_the_right_temperatures_on_the_unit(rig):
-    rig.unit_on(mode=Mode.TURBO, display_dark=True)
-    await rig.commands.write_schedule((19, 17, 21), Mode.QUIET)
-    assert rig.unit.phase_temps == [19, 17, 21]
-    assert rig.unit.mode is Mode.QUIET
-    assert rig.unit.schedule_running()
+async def test_the_unit_moves_between_cooling_and_warming_freely(rig):
+    """The whole reason for dropping the unit's own scheduler.
+
+    While its Smart Sleep Schedule runs, the unit refuses to switch between
+    cooling and warming, which capped every night at "somewhere at or below the
+    bedroom". Outside it, this is just two commands.
+    """
+    rig.unit_on(mode=Mode.QUIET, display_dark=True)
+    await rig.commands.set_mode(Mode.QUIET)
+    await rig.commands.set_temperature(17, Mode.QUIET)
+    assert rig.unit.target == 17
+
+    await rig.commands.set_mode(Mode.WARMING)
+    await rig.commands.set_temperature(28, Mode.WARMING)
+    assert rig.unit.mode is Mode.WARMING
+    assert rig.unit.target == 28
 
 
-async def test_write_schedule_reports_progress_that_adds_up(rig):
-    frames = []
-    rig.unit_on(display_dark=True)
-    await rig.commands.write_schedule((19, 17, 21), Mode.QUIET, on_progress=frames.append)
-    assert frames[-1].phase == "done"
-    assert frames[-1].presses_sent == frames[-1].presses_total
-    assert frames[-1].presses_total == rig.tx.presses_sent
-
-
-async def test_write_schedule_refuses_a_phase_above_the_safety_cap(rig, settings):
-    rig.unit_on()
-    with pytest.raises(CommandFailed, match="safety cap"):
-        await rig.commands.write_schedule((19, settings.max_temperature_c + 1, 21), Mode.QUIET)
-
-
-# --- Dropping out of turbo mid-schedule ---------------------------------------
-
-
-async def test_cooling_speed_can_be_changed_during_a_schedule(rig):
-    rig.unit_on(mode=Mode.TURBO, display_dark=True)
-    await rig.commands.arm_schedule()
-    # Sent immediately, while the display is still awake from arming.
-    await rig.commands.set_cooling_speed(Mode.QUIET, Mode.TURBO)
-    assert rig.unit.mode is Mode.QUIET
-    assert rig.unit.schedule_running()
-
-
-async def test_warming_cannot_be_reached_mid_schedule(rig):
-    rig.unit_on(mode=Mode.TURBO)
-    with pytest.raises(CommandFailed, match="cannot be switched"):
-        await rig.commands.set_cooling_speed(Mode.WARMING, Mode.TURBO)
+async def test_a_whole_night_of_transitions_lands_on_every_temperature(rig):
+    rig.unit_on(mode=Mode.TURBO, target=33, display_dark=True)
+    for mode, temp in [(Mode.QUIET, 17), (Mode.QUIET, 20), (Mode.WARMING, 26)]:
+        await rig.commands.set_mode(mode)
+        await rig.commands.set_temperature(temp, mode)
+        assert rig.unit.mode is mode
+        assert rig.unit.target == temp

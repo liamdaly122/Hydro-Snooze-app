@@ -162,6 +162,17 @@ button:disabled {
   color: var(--text);
 }
 
+/* A dot on whichever stage the night is currently in. */
+.tab__live {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 5px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
 /*
  * The stage bleeds to the card's edges, because in the reference the glow reaches
  * the left, right and bottom of the card exactly rather than sitting in a padded
@@ -775,4 +786,66 @@ button:disabled {
 
 .nav--three {
   grid-template-columns: repeat(3, 1fr);
+}
+
+/* --- Stage durations ------------------------------------------------------- */
+
+.stages {
+  margin-top: 12px;
+}
+
+.stagerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.stagerow:last-child {
+  border-bottom: 0;
+}
+
+.stagerow__name {
+  font-size: 15px;
+  font-weight: 500;
+  min-width: 0;
+}
+
+.stagerow__at {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.stagerow__controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stagerow__btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--control);
+  font-size: 17px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.stagerow__btn:disabled {
+  color: var(--text-faint);
+}
+
+.stagerow__value {
+  min-width: 62px;
+  text-align: center;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-mid);
 }

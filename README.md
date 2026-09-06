@@ -61,17 +61,29 @@ up at 3am.
 
 ## The idea
 
-The unit has no clock, no Wi-Fi and no way to be read back. Three facts make it controllable anyway:
+The unit has no clock, no Wi-Fi and no way to be read back.
 
-1. **Its sleep schedule always runs 8 hours 30 minutes.** Three phases of 4h, 4h and 30m, fixed.
-   So "wake me at 06:30" is exactly "arm the schedule at 22:00", and the unit never needs to know
-   what time it is.
-2. **It remembers its schedule through a power cut.** So the nightly routine is two button presses:
-   power, then the sleep schedule button, then wait about 8 seconds while it arms itself with the
-   temperatures it already has.
-3. **Every temperature can be forced rather than tracked.** Press down 25 times to pin it at the
+It does have its own Smart Sleep Schedule: three phases of 4h, 4h and 30m, armed with two presses
+and then left to run itself. This project used to drive that, and it was elegant. It is also a
+straitjacket. While it runs, the unit refuses to change temperature and refuses to switch between
+cooling and warming. Since a cooler cannot warm a bed, that capped every night at "somewhere at or
+below the bedroom temperature".
+
+So the app drives the night itself. It powers the unit on, sets a temperature, and comes back at
+each stage boundary to set another. Outside the unit's own schedule everything is unlocked, which
+means any number of stages, any durations, and heating and cooling in the same night.
+
+Two things make that work:
+
+1. **Every temperature is forced rather than tracked.** Press down 25 times to pin the unit at the
    mode's minimum, then count up to the target. Idempotent from any starting state, including after
    I have used the physical remote.
+2. **Every command starts with two throwaway presses.** The display goes dark after five minutes and
+   swallows the first press waking up. Stage boundaries are hours apart, so it is always dark.
+
+**What it costs.** The unit no longer switches itself off, so the app must, and the Pi has to stay
+running all night. If it dies at 3am the bed stays where it was. The Shelly's own auto-off timer is
+no longer a nicety, it is the last line of defence.
 
 ## Layout
 

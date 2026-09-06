@@ -124,23 +124,20 @@ the service looks for button entities called exactly `power`, `schedule`, `temp_
 
 ---
 
-## Step 4: answer the one open question
+## Step 4: check the mute button works
 
-Ten minutes, now that presses can be fired on demand.
+Two minutes, once presses can be fired on demand.
 
-The unit's schedule setup wizard arms itself with saved temperatures after about eight seconds of no
-input. What is not known is whether that works from **any** phase, or only from phase 1.
+The app drives every part of the night itself, which means roughly thirty presses land at each stage
+boundary, at two in the morning, next to a bed. The unit beeps on every press.
 
-Press the schedule button to enter setup, then press it once more to reach phase 2. Then wait twenty
-seconds without touching anything.
+- Fire the `mute` code and check the beeping stops
 
-- **It armed itself:** good, the default is right, nothing to change
-- **It did not:** set `HS_SIM_AUTO_APPLY_FROM_ANY_PHASE=false` in `.env`
+If that code did not capture cleanly, go back to step 3 for that one button. It matters more than it
+looks.
 
-This blocks nothing. It only changes how much the app should trust a single attempt at arming, and
-whether arming is genuinely self-correcting when a press gets dropped.
-
----
+There used to be a question here about the unit's own scheduler timing out from phase 2. The app no
+longer arms that scheduler at all, so the question no longer needs an answer.
 
 ## Step 5: the Shelly
 
@@ -162,8 +159,9 @@ Then read the watts in four states and write each one down:
 Those four numbers are how the app knows whether a power command actually worked. Until they are
 measured they are guesses from the manual.
 
-**While here:** set the Shelly's own auto-off timer, in its own app, to something like ten hours.
-That is an independent backstop that switches the unit off even if the Pi is dead.
+**While here: set the Shelly's own auto-off timer**, in its own app, to about ten hours. This is not
+optional any more. The app drives the night itself, so the unit never switches itself off, and if the
+Pi dies at 3am this timer is the only thing that stops the bed running all day.
 
 ---
 
@@ -260,9 +258,9 @@ Watch the unit step through three phases. If it does not, the codes or the timin
 
 Let it run a full night. In the morning, open the History tab and check:
 
-- Did it power on around 21:30?
-- Did it arm at 22:00?
-- Did it switch itself off at 06:30?
+- Did it power on before bedtime?
+- Did each stage change at the right time?
+- Did the app switch it off at the wake time? Nothing else will.
 
 The event log says what it tried and the power chart says what actually happened.
 
@@ -280,5 +278,6 @@ And keep the Shelly's auto-off timer set as a backstop.
 | App loads but is blank | The app was not copied across. Run `./scripts/deploy.sh` from the Mac |
 | Everything says `unknown` | The Shelly is unreachable. Check `HS_SHELLY_HOST` matches its real IP |
 | Presses sent, unit ignores them | The codes are wrong, or the blaster cannot see the unit. Back to step 3 |
-| It armed but nothing happened overnight | Check the event log for the arming entry, then the power chart for whether the draw changed |
+| A stage did not change | Check the event log for a missed stage warning, then the power chart for whether the draw changed |
+| The unit was still on in the morning | Check the event log for the power off entry. Then check the Shelly's auto-off timer is set |
 | Anything else | `journalctl -u hydrosnooze -n 100`, and send me the output |

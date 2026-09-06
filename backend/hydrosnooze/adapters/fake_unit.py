@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from ..clock import Clock
-from ..models import SCHEDULE_DURATION, Button, Mode, range_for
+from ..models import INACTIVITY_CUTOFF, UNIT_SCHEDULE_DURATION, Button, Mode, range_for
 
 #: The manual says fifteen seconds. Liam measured about eight. Take the measured
 #: figure, because arming is built to rely on it.
@@ -91,6 +91,8 @@ class FakeUnit:
     wizard_last_press_at: datetime | None = None
     schedule_armed_at: datetime | None = None
     powered_at: datetime | None = None
+    #: For the twelve hour inactivity cutoff, which cannot be disabled.
+    last_press_at: datetime | None = None
 
     # --- Observation ----------------------------------------------------------
 
@@ -113,7 +115,7 @@ class FakeUnit:
             return "OFF"
         bits = [self.mode.value, f"target {self.target}C"]
         if self.schedule_armed_at is not None:
-            ends = self.schedule_armed_at + SCHEDULE_DURATION
+            ends = self.schedule_armed_at + UNIT_SCHEDULE_DURATION
             bits.append(f"schedule until {ends:%H:%M}")
         if self.wizard_phase is not None:
             bits.append(f"wizard phase {self.wizard_phase}")
@@ -134,7 +136,7 @@ class FakeUnit:
             "wizard_phase": self.wizard_phase,
             "schedule_running": self.schedule_armed_at is not None,
             "schedule_ends_at": (
-                (self.schedule_armed_at + SCHEDULE_DURATION).isoformat()
+                (self.schedule_armed_at + UNIT_SCHEDULE_DURATION).isoformat()
                 if self.schedule_armed_at
                 else None
             ),
@@ -172,6 +174,7 @@ class FakeUnit:
     def press(self, button: Button) -> PressResult:
         now = self.clock.now()
         self._settle(now)
+        self.last_press_at = now
 
         # Inside the wizard presses act immediately. The wake preamble does not
         # apply here, and must not be sent here.
@@ -290,6 +293,18 @@ class FakeUnit:
 
     def _settle(self, now: datetime) -> None:
         """Resolve anything the unit would have done on its own since last time."""
+        # Twelve hours with no button press and it switches itself off. Cannot be
+        # disabled. Every stage transition resets it, so across a normal night it
+        # never fires, but a night that loses its scheduler would end here.
+        # Powering on counts as activity, so the clock starts from whichever
+        # happened last.
+        last_touched = self.last_press_at or self.powered_at
+        if self.powered and last_touched is not None and now - last_touched >= INACTIVITY_CUTOFF:
+            self.powered = False
+            self.powered_at = None
+            self.schedule_armed_at = None
+            self.display_awake_until = None
+
         if self.wizard_phase is not None and self.wizard_last_press_at is not None:
             idle = (now - self.wizard_last_press_at).total_seconds()
             if idle >= AUTO_APPLY_SECONDS:
@@ -303,7 +318,7 @@ class FakeUnit:
 
         if (
             self.schedule_armed_at is not None
-            and now >= self.schedule_armed_at + SCHEDULE_DURATION
+            and now >= self.schedule_armed_at + UNIT_SCHEDULE_DURATION
         ):
             self.schedule_armed_at = None
             self.powered = False

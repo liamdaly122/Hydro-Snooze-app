@@ -19,7 +19,7 @@ def _iso(value: datetime | None) -> str | None:
 def state_json(state: DeviceState) -> dict[str, Any]:
     return {
         "power": state.power.value,
-        "in_schedule": state.in_schedule.value,
+        "current_stage": state.current_stage.value if state.current_stage else None,
         "assumed_mode": state.assumed_mode.value if state.assumed_mode else None,
         "assumed_target_c": state.assumed_target_c,
         "observed_power_w": state.observed_power_w,
@@ -36,16 +36,23 @@ def schedule_json(schedule: Schedule) -> dict[str, Any]:
         "enabled": schedule.enabled,
         "days_of_week": schedule.days_of_week,
         "wake_time": schedule.wake_time.strftime("%H:%M"),
-        "phase1_temp_c": schedule.phase1_temp_c,
-        "phase2_temp_c": schedule.phase2_temp_c,
-        "phase3_temp_c": schedule.phase3_temp_c,
-        "mode": schedule.mode.value,
+        "stages": [
+            {
+                "stage": s.stage.value,
+                "duration_minutes": s.duration_minutes,
+                "temp_c": s.temp_c,
+                # Derived, not stored: below 25C has to cool because warming
+                # cannot express it, and at or above 25C it warms.
+                "mode": s.mode(schedule.cooling_speed).value,
+            }
+            for s in schedule.stages
+        ],
+        "cooling_speed": schedule.cooling_speed.value,
         "precool_enabled": schedule.precool_enabled,
         "precondition": schedule.precondition.value,
         "precool_lead_minutes": schedule.precool_lead_minutes,
         # Sent so the app can disable pre-heating with a reason rather than
         # offering a setting that cannot work.
         "preheat_is_possible": schedule.preheat_is_possible,
-        "last_written_at": _iso(schedule.last_written_at),
         "updated_at": _iso(schedule.updated_at),
     }

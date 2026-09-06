@@ -2,11 +2,7 @@ import { Card } from './Card'
 import { formatWatts } from '../domain'
 import type { DeviceState } from '../types'
 
-const SCHEDULE_LABEL: Record<DeviceState['in_schedule'], string> = {
-  true: 'Running',
-  false: 'Not running',
-  unknown: 'unknown',
-}
+import { STAGE_LABEL } from '../types'
 
 const POWER_LABEL: Record<DeviceState['power'], string> = {
   on: 'On',
@@ -28,9 +24,9 @@ export function StatusStrip({ state }: { state: DeviceState }) {
       <div className="status">
         <Cell label="Unit" value={POWER_LABEL[state.power]} unknown={state.power === 'unknown'} />
         <Cell
-          label="Schedule"
-          value={SCHEDULE_LABEL[state.in_schedule]}
-          unknown={state.in_schedule === 'unknown'}
+          label="Stage"
+          value={state.current_stage ? STAGE_LABEL[state.current_stage] : 'Not running'}
+          unknown={false}
         />
         <Cell
           label="Draw"
