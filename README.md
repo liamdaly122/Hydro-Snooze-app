@@ -13,6 +13,9 @@ The hardware has not arrived yet. That does not block the app, so I am building 
 **Right now this repository contains the design**, running on seed data, plus the shared domain
 layer both halves depend on. The service that drives the real unit comes next.
 
+`ROADMAP.md` has the whole route from here to a working unit, in order, including the parts only I
+can do.
+
 The important thing about the design push is that it is not a throwaway prototype. Every screen
 talks to the `ApiClient` interface in `frontend/src/api/client.ts`, and the seed data is one
 implementation of it. When the service exists, `HttpApiClient` implements the same interface and
