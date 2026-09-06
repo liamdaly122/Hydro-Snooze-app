@@ -47,6 +47,13 @@ export interface ApiClient {
 
   /** Immediate temperature change. Rejected only when the unit is off. */
   setTemperature(targetC: number): Promise<void>
+
+  /**
+   * Toggle the unit's button beep. A one-time setup action, never automatic:
+   * the unit remembers the setting, so sending it on a schedule would unmute it
+   * every other night.
+   */
+  mute(): Promise<void>
   setMode(mode: Mode): Promise<void>
 
   getEvents(limit?: number): Promise<DeviceEvent[]>

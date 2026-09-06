@@ -161,6 +161,20 @@ async def post_temperature(request: Request, body: TemperatureBody) -> dict[str,
     return state_json(service.state)
 
 
+@router.post("/mute")
+async def post_mute(request: Request) -> dict[str, object]:
+    """Toggle the unit's button beep. A one-time setup action, never automatic.
+
+    The unit remembers this across power cycles, so firing it on a schedule would
+    unmute it every other night.
+    """
+    service = _service(request)
+    if not service.state.can_set_temperature:
+        raise HTTPException(409, "The unit ignores every button but power while it is off.")
+    await service.mute()
+    return state_json(service.state)
+
+
 @router.post("/mode")
 async def post_mode(request: Request, body: ModeBody) -> dict[str, object]:
     service = _service(request)

@@ -15,7 +15,13 @@ const POWER_LABEL: Record<DeviceState['power'], string> = {
  * over infrared, so a confident-looking value the app has not confirmed would be
  * a lie, and at 3am a lie here is worse than a blank.
  */
-export function StatusStrip({ state }: { state: DeviceState }) {
+export function StatusStrip({
+  state,
+  onMute,
+}: {
+  state: DeviceState
+  onMute?: () => void
+}) {
   const watts = formatWatts(state.observed_power_w)
   const activity = state.inferred_activity === 'unknown' ? null : state.inferred_activity
 
@@ -36,6 +42,21 @@ export function StatusStrip({ state }: { state: DeviceState }) {
         />
       </div>
       {state.last_error && <p className="status__error">{state.last_error}</p>}
+
+      {/*
+        A setup action, not a nightly one. The unit remembers whether it is
+        muted, so this is a toggle you press once and never think about again.
+      */}
+      {onMute && (
+        <button
+          type="button"
+          className="status__link"
+          disabled={state.power !== 'on'}
+          onClick={onMute}
+        >
+          Toggle the unit's beep
+        </button>
+      )}
     </Card>
   )
 }

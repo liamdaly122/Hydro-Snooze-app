@@ -200,3 +200,47 @@ async def test_a_whole_night_of_transitions_lands_on_every_temperature(rig):
         await rig.commands.set_temperature(temp, mode)
         assert rig.unit.mode is mode
         assert rig.unit.target == temp
+
+
+# --- The mute button ----------------------------------------------------------
+
+
+async def test_mute_is_a_toggle_the_unit_remembers(rig):
+    """Why muting is never automatic.
+
+    The unit saves this setting. Firing it on every power on would unmute it
+    every other night, and the press that unmuted it would beep.
+    """
+    rig.unit_on(display_dark=True)
+    assert not rig.unit.muted
+
+    await rig.commands.mute()
+    assert rig.unit.muted
+
+    await rig.commands.mute()
+    assert not rig.unit.muted, "a second mute press unmutes, which is the trap"
+
+
+async def test_muting_survives_a_power_cycle(rig):
+    rig.unit_on(display_dark=True)
+    await rig.commands.mute()
+    assert rig.unit.muted
+
+    await rig.commands.power_off()
+    await rig.commands.power_on()
+    assert rig.unit.muted, "the unit remembers it, so there is nothing to re-send"
+
+
+async def test_a_whole_night_never_touches_the_mute_button(rig):
+    # The bug this replaced: mute fired at every power on, so the unit spent
+    # every other night beeping through thirty presses at two in the morning.
+    rig.unit_on(display_dark=True)
+    await rig.commands.mute()
+    rig.tx.lines.clear()
+
+    for mode, temp in [(Mode.QUIET, 17), (Mode.QUIET, 20), (Mode.WARMING, 26)]:
+        await rig.commands.set_mode(mode)
+        await rig.commands.set_temperature(temp, mode)
+
+    assert not any("mute" in line for line in rig.tx.lines)
+    assert rig.unit.muted

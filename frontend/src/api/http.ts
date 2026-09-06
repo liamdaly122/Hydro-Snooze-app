@@ -68,6 +68,10 @@ export class HttpApiClient implements ApiClient {
     })
   }
 
+  mute = async () => {
+    await request<DeviceState>('/api/mute', { method: 'POST' })
+  }
+
   setMode = async (mode: Mode) => {
     await request<DeviceState>('/api/mode', { method: 'POST', body: JSON.stringify({ mode }) })
   }

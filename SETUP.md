@@ -124,17 +124,22 @@ the service looks for button entities called exactly `power`, `schedule`, `temp_
 
 ---
 
-## Step 4: check the mute button works
+## Step 4: mute the unit, once
 
 Two minutes, once presses can be fired on demand.
 
 The app drives every part of the night itself, which means roughly thirty presses land at each stage
 boundary, at two in the morning, next to a bed. The unit beeps on every press.
 
-- Fire the `mute` code and check the beeping stops
+- Fire the `mute` code once and check the beeping stops
 
-If that code did not capture cleanly, go back to step 3 for that one button. It matters more than it
-looks.
+**Once only.** The unit saves this setting and keeps it through a power cut, so mute is a toggle
+rather than a command. Sending it again turns the beep back on, and the press that does it beeps.
+That is why nothing in the app sends it automatically, and why there is a "Toggle the unit's beep"
+button under the Status card rather than a mute step in the nightly routine.
+
+If the `mute` code did not capture cleanly, go back to step 3 for that one button. It matters more
+than it looks.
 
 There used to be a question here about the unit's own scheduler timing out from phase 2. The app no
 longer arms that scheduler at all, so the question no longer needs an answer.

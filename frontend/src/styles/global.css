@@ -474,6 +474,19 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.status__link {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.status__link:disabled {
+  color: var(--text-faint);
+  text-decoration: none;
+}
+
 .status__error {
   margin-top: 14px;
   padding: 10px 12px;

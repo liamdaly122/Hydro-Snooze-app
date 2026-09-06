@@ -81,7 +81,12 @@ export function Home({ client, state, schedule, maxC }: Props) {
         note="How hard the unit works when a stage is cooling. Quiet is the slowest and the least noisy, which matters next to a bed. Warming stages ignore this."
       />
 
-      <StatusStrip state={state} />
+      <StatusStrip
+        state={state}
+        onMute={() => {
+          void client.mute().catch((e: Error) => setError(e.message))
+        }}
+      />
 
       {error && (
         <p className="footnote" onClick={() => setError(null)}>

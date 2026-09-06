@@ -148,6 +148,15 @@ export class MockApiClient implements ApiClient {
     this.log('info', 'temperature', `Railed to minimum and counted up to ${targetC}C`)
   }
 
+  private muted = false
+
+  async mute(): Promise<void> {
+    await sleep(400)
+    // A toggle the unit remembers, which is exactly why it is never automatic.
+    this.muted = !this.muted
+    this.log('info', 'mute', this.muted ? "Muted the unit's beep" : "UNMUTED the unit")
+  }
+
   async setMode(mode: Mode): Promise<void> {
     await sleep(400)
     const [low, high] = MODE_RANGE[mode]

@@ -25,6 +25,8 @@ The behaviour that matters, and that the sequences are built to survive:
 - inside the setup wizard presses act immediately, and eight seconds of silence
   arms the schedule with whatever temperatures were already saved
 - the schedule runs 8h30m and then the unit switches itself off
+- the mute button is a toggle and the unit remembers it, so sending it every time
+  the unit powers on unmutes it every other night
 """
 
 from __future__ import annotations
@@ -93,6 +95,9 @@ class FakeUnit:
     powered_at: datetime | None = None
     #: For the twelve hour inactivity cutoff, which cannot be disabled.
     last_press_at: datetime | None = None
+    #: The button beep. The unit REMEMBERS this, so the mute button is a toggle,
+    #: not a command. Sending it on every power on would unmute every other night.
+    muted: bool = False
 
     # --- Observation ----------------------------------------------------------
 
@@ -120,6 +125,8 @@ class FakeUnit:
         if self.wizard_phase is not None:
             bits.append(f"wizard phase {self.wizard_phase}")
         bits.append("display awake" if not self.display_dark(now) else "display dark")
+        if self.muted:
+            bits.append("muted")
         return "ON  " + "  ".join(bits)
 
     def snapshot(self) -> dict[str, object]:
@@ -133,6 +140,7 @@ class FakeUnit:
             "phase_temps": list(self.phase_temps),
             "display_awake": self.powered and not self.display_dark(now),
             "adjusting": self.adjusting,
+            "muted": self.muted,
             "wizard_phase": self.wizard_phase,
             "schedule_running": self.schedule_armed_at is not None,
             "schedule_ends_at": (
@@ -257,6 +265,12 @@ class FakeUnit:
 
         if button is Button.TIMER:
             return self._result(button, False, "timer set, not modelled")
+
+        if button is Button.MUTE:
+            # A toggle, and the unit remembers it across power cycles. Firing it
+            # blind is how you end up unmuting a unit that was already quiet.
+            self.muted = not self.muted
+            return self._result(button, False, "muted" if self.muted else "UNMUTED")
 
         return self._result(button, False, "no effect")
 

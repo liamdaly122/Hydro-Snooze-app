@@ -75,6 +75,15 @@ Write down all eight:
 
 ---
 
+## Two minutes: mute the unit
+
+- [ ] Fire the `mute` code once and check the beeping stops
+
+**Once only.** The unit remembers it. Sending it again turns the beep back on. Nothing in the app
+does this automatically; there is a button under the Status card for it.
+
+---
+
 ## Half an hour: the Shelly
 
 Detail in [SETUP.md](SETUP.md#step-5-the-shelly).

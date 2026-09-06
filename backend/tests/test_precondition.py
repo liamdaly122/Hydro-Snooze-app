@@ -143,13 +143,23 @@ async def test_a_stage_powers_the_unit_on_if_it_is_off(service):
 
 
 @pytest.mark.asyncio
-async def test_the_unit_is_muted_before_a_night_of_presses(service):
-    # Roughly thirty presses at each stage boundary, and it beeps on all of them.
+async def test_a_night_never_touches_the_mute_button(service):
+    """The unit remembers whether it is muted, so this is never automatic.
+
+    Sending it at each power on would unmute it every other night, and the press
+    that unmuted it would beep.
+    """
     service.schedule = _schedule()
     plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+
     service.clock.jump_to(plan.precool_at)
     await service._run_precool(plan)
-    assert any("mute()" in line for line in service.transmitter.lines)
+    for step in plan.steps:
+        service.clock.jump_to(step.starts_at)
+        await service._run_stage(plan, step)
+
+    assert not any("mute" in line for line in service.transmitter.lines)
+    assert not service.unit.muted, "left exactly as it was found"
 
 
 @pytest.mark.asyncio

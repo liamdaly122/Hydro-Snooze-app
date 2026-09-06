@@ -224,9 +224,6 @@ class Service:
             try:
                 await self.commands.power_on()
                 self._set_state(power=Power.ON, current_stage=None)
-                # Roughly thirty presses land at each stage boundary through the
-                # night, and the unit beeps on every one of them.
-                await self.commands.mute()
                 await self._apply(mode, target)
             except CommandFailed as exc:
                 self._fail("precool", exc)
@@ -245,7 +242,6 @@ class Service:
                     self.events.warning("stage", "Unit was off at a stage boundary, powering on")
                     await self.commands.power_on()
                     self._set_state(power=Power.ON)
-                    await self.commands.mute()
                 await self._apply(step.mode, step.temp_c)
             except CommandFailed as exc:
                 self._fail("stage", exc)
@@ -342,6 +338,21 @@ class Service:
             except CommandFailed as exc:
                 self._fail("temperature", exc, assumed_target_c=None)
                 raise
+
+    async def mute(self) -> None:
+        """Toggle the unit's button beep.
+
+        Never automatic. The unit remembers this setting across power cycles, so
+        firing it on every power on would unmute it every other night, and the
+        press that unmuted it would beep. It is a one-time setup action, done from
+        the app once the codes are captured.
+        """
+        async with self._lock:
+            try:
+                await self.commands.mute()
+                self._set_state(last_command_at=self.clock.now())
+            except CommandFailed as exc:
+                self._fail("mute", exc)
 
     async def set_mode(self, mode: Mode) -> None:
         async with self._lock:
