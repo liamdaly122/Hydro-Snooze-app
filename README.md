@@ -63,6 +63,31 @@ To check a production build:
 npm run build && npm run preview
 ```
 
+## Putting it on a phone while the design is being settled
+
+Right now there is no service, only seed data, so the app is a plain static site and can be hosted
+anywhere. There is a `vercel.json` at the root for exactly this: point Vercel at this repository and
+it builds `frontend/` and gives me a URL I can open on the phone without my Mac being switched on.
+
+**This is for the design phase only.** The finished thing cannot live on Vercel, and neither can any
+other hosting company. See below.
+
+## Why the finished app runs in the house and not on the internet
+
+The service has to do three things that a hosting company physically cannot:
+
+1. **Shout at the unit in infrared.** The commands leave through a small blaster sitting in the
+   bedroom. A server in a data centre has no way to reach a device on my home network.
+2. **Be awake at 21:30 with nobody watching.** Hosting like Vercel runs code when somebody loads the
+   page and then stops. The whole point of this app is that it fires while I am downstairs or
+   asleep, so it needs a process that stays running.
+3. **Remember things between commands.** The schedule, the event log and the power history all have
+   to survive a restart.
+
+So the service runs on a small always-on computer in the house, and the app is served from there
+too. The frontend is still built on my Mac and copied across as static files, which is the same
+build Vercel would run.
+
 ## Running the tests
 
 ```sh
