@@ -19,18 +19,33 @@ need() {
   }
 }
 
-need python3 "Install Python 3.11 or newer from python.org."
 need node "Install Node from nodejs.org."
 
-PY_OK=$(python3 -c 'import sys; print(1 if sys.version_info >= (3, 11) else 0)')
-if [ "$PY_OK" != "1" ]; then
-  echo "Python 3.11 or newer is needed. You have $(python3 --version)." >&2
+# macOS ships Python 3.9 as `python3` and always has, so a freshly installed 3.12
+# may not be what `python3` points at until Terminal is restarted. Look for the
+# versioned names too, rather than refusing to run and telling someone to install
+# the thing they just installed.
+PYTHON=""
+for candidate in python3.13 python3.12 python3.11 python3; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+
+if [ -z "$PYTHON" ]; then
+  echo "Python 3.11 or newer is needed." >&2
+  if command -v python3 >/dev/null 2>&1; then
+    echo "The python3 on this Mac is $(python3 --version 2>&1)." >&2
+  fi
+  echo "Install it from python.org/downloads, then quit Terminal (Cmd Q) and open it again." >&2
   exit 1
 fi
 
 if [ ! -d backend/.venv ]; then
   echo "Setting up Python (once, takes a minute)"
-  python3 -m venv backend/.venv
+  "$PYTHON" -m venv backend/.venv
 fi
 # shellcheck disable=SC1091
 . backend/.venv/bin/activate

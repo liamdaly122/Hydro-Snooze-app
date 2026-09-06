@@ -28,6 +28,9 @@ starts the service.
 ./scripts/dev.sh
 ```
 
+**Never used Terminal before?** `GETTING-STARTED.md` walks through the whole
+thing from nothing, including getting the code onto the Mac in the first place.
+
 Then open `http://localhost:8000`, or the address it prints for the phone, which
 works from anything on the same Wi-Fi.
 
