@@ -483,6 +483,11 @@ class PowerThresholds:
         return Activity.HEATING
 
 
-#: Hard safety cap. This is a heater capable of 55C under a bed, so the API rejects
-#: anything above this regardless of what the mode's range allows.
-DEFAULT_MAX_TEMPERATURE_C = 30
+#: The highest temperature the API will accept. Set to the unit's own maximum by
+#: Liam's decision, so in practice the only ceiling is the hardware's: a warming
+#: stage can be set anywhere in 25 to 55.
+#:
+#: Lower it in .env to put a software ceiling back. With it here, the Shelly's own
+#: auto-off timer is the only thing that limits how long a hot bed stays hot, which
+#: is why SETUP.md treats setting that timer as required rather than optional.
+DEFAULT_MAX_TEMPERATURE_C = WARMING_RANGE[1]

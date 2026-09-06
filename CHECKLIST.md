@@ -98,8 +98,8 @@ Measure and write down the watts in four states:
 - [ ] Actively cooling (expect around 170 W)
 - [ ] Actively heating (expect around 300 W)
 - [ ] Set the Shelly's own auto-off timer to about ten hours. **Not optional.** The unit no longer
-      switches itself off, so if the Pi dies mid-night this is the only thing that stops the bed
-      running all day
+      switches itself off, and the temperature ceiling is set to the unit's own maximum, so if the Pi
+      dies mid-night this is the only thing that stops a hot bed staying hot
 
 ---
 

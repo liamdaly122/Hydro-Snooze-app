@@ -57,10 +57,27 @@ async def test_the_rail_absorbs_the_preamble(rig):
     assert rig.unit.target == 22
 
 
-async def test_temperature_above_the_safety_cap_is_refused(rig, settings):
-    rig.unit_on(mode=Mode.WARMING, target=30)
+async def test_the_default_cap_is_the_units_own_maximum(settings):
+    # Liam's call: no software ceiling beyond what the hardware allows. Which
+    # makes the Shelly's own auto-off timer the only thing limiting how long a hot
+    # bed stays hot, and why SETUP.md treats setting it as required.
+    assert settings.max_temperature_c == 55
+
+
+async def test_a_lowered_cap_is_still_enforced(clock):
+    # The setting still does its job for anyone who wants a ceiling back.
+    from hydrosnooze.adapters import build_adapters
+    from hydrosnooze.config import Settings
+    from hydrosnooze.events import EventLog
+    from hydrosnooze.sequences import Commands
+
+    capped = Settings(max_temperature_c=30)
+    tx, power, unit = build_adapters(capped, clock, echo=False)
+    commands = Commands(tx, power, clock, capped, EventLog(clock))
+    unit.powered, unit.powered_at, unit.mode = True, clock.now(), Mode.WARMING
+
     with pytest.raises(CommandFailed, match="safety cap"):
-        await rig.commands.set_temperature(settings.max_temperature_c + 1, Mode.WARMING)
+        await commands.set_temperature(31, Mode.WARMING)
 
 
 async def test_temperature_outside_the_modes_range_is_refused(rig):

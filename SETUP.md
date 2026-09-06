@@ -165,8 +165,9 @@ Those four numbers are how the app knows whether a power command actually worked
 measured they are guesses from the manual.
 
 **While here: set the Shelly's own auto-off timer**, in its own app, to about ten hours. This is not
-optional any more. The app drives the night itself, so the unit never switches itself off, and if the
-Pi dies at 3am this timer is the only thing that stops the bed running all day.
+optional any more, for two reasons. The app drives the night itself, so the unit never switches
+itself off; and the software temperature ceiling is set to the unit's own maximum, so nothing in the
+app stops a warming stage running at 55°C. If the Pi dies at 3am, this timer is the only thing left.
 
 ---
 

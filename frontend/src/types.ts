@@ -28,8 +28,11 @@ export const MODE_RANGE: Record<Mode, [number, number]> = {
   warming: [25, 55],
 }
 
-/** Hard safety cap. A heater capable of 55C under a bed gets a ceiling. */
-export const MAX_TEMPERATURE_C = 30
+/**
+ * The highest temperature the app will accept. The service is the authority and
+ * sends its own value; this is only the fallback before that arrives.
+ */
+export const MAX_TEMPERATURE_C = 55
 
 /**
  * How the bed is brought to the phase 1 temperature before the schedule arms.

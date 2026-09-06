@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     power_settle_s: int = 10
 
     # --- Safety ---------------------------------------------------------------
-    #: A heater capable of 55C under a bed gets a ceiling, enforced at the API.
+    #: The highest temperature the API accepts. Defaults to the unit's own maximum,
+    #: so lower it here to put a software ceiling back on an unattended heater.
     max_temperature_c: int = DEFAULT_MAX_TEMPERATURE_C
 
     # --- Storage --------------------------------------------------------------

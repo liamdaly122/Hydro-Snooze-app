@@ -25,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     // FastAPI puts the reason in `detail`, and it is written to be read by a
-    // person: "22C is above the 30C safety cap".
+    // person: "40C is outside quiet's range of 15 to 35".
     let message = `${response.status} ${response.statusText}`
     try {
       const body = await response.json()
