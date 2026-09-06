@@ -116,25 +116,27 @@ export function formatDays(days: number[]): string {
 
 // --- Temperature tinting ------------------------------------------------------
 //
-// The brief asks for blue when cold, purple in the middle, warm orange when
-// heating. The reference screenshot runs blue to purple to pink across a narrow
-// band around the temperatures you actually sleep at, which is what gives it its
-// character. These stops do both: the cooling band 15-30 carries the blue to
-// purple to pink sweep so ordinary use is never flat, and the warming band beyond
-// carries on into orange.
+// Deep blue at 15, deep red at 55, sweeping through violet, magenta and rose in
+// between. The middle of the ramp is deliberately busy across 15 to 31, because
+// that is the band you actually sleep in and a flat run of near-identical blues
+// there would tell you nothing.
+//
+// These are the colours the glow uses directly. Because it composites them over
+// black at well under full opacity, the ends read deeper still: 55 lands somewhere
+// around a dried-blood red rather than the pillar-box the swatch suggests.
 
 type Rgb = [number, number, number]
 
 const STOPS: Array<[number, Rgb]> = [
-  [15, [0x3b, 0x6f, 0xe8]],
-  [18, [0x6a, 0x5f, 0xe0]],
-  [21, [0x90, 0x58, 0xce]],
-  [24, [0xb4, 0x5b, 0xb8]],
-  [27, [0xcc, 0x5c, 0x9e]],
-  [30, [0xd8, 0x60, 0x7f]],
-  [38, [0xde, 0x70, 0x57]],
-  [47, [0xe4, 0x82, 0x3f]],
-  [55, [0xee, 0x9a, 0x33]],
+  [15, [0x2a, 0x5f, 0xea]],
+  [19, [0x58, 0x52, 0xe4]],
+  [23, [0x83, 0x48, 0xd2]],
+  [27, [0xa9, 0x3f, 0xb0]],
+  [31, [0xc4, 0x3c, 0x86]],
+  [36, [0xd4, 0x40, 0x5e]],
+  [42, [0xd6, 0x3a, 0x44]],
+  [48, [0xd3, 0x32, 0x30]],
+  [55, [0xc4, 0x25, 0x25]],
 ]
 
 function lerp(a: number, b: number, t: number): number {
