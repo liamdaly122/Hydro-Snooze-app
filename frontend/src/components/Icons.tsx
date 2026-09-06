@@ -90,3 +90,18 @@ export function ChartIcon({ size = 25 }: IconProps) {
     </svg>
   )
 }
+
+export function WrenchIcon({ size = 24 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M15.5 3a5.5 5.5 0 00-5.1 7.6L3 18l3 3 7.4-7.4A5.5 5.5 0 1015.5 3z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle cx="15.5" cy="8.5" r="1.6" fill="currentColor" />
+    </svg>
+  )
+}

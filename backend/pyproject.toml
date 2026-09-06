@@ -7,11 +7,15 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
   "pydantic>=2.9",
+  "pydantic-settings>=2.5",
   "httpx>=0.27",
-  "aioesphomeapi>=24.6",
 ]
 
 [project.optional-dependencies]
+# Only needed once the infrared blaster exists. Keeping it out of the base
+# install means a Pi Zero, or a Mac just running the simulation, does not have to
+# build it.
+hardware = ["aioesphomeapi>=24.6"]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7"]
 
 [build-system]
@@ -23,6 +27,7 @@ include = ["hydrosnooze*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

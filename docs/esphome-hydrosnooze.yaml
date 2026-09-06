@@ -1,0 +1,106 @@
+# ESPHome configuration for the XIAO Smart IR Mate.
+#
+# A template for step 6 of the roadmap, not a working file. Two things have to be
+# filled in before it does anything:
+#
+#   1. The real GPIO pins. Get them from Seeed's published configuration on
+#      GitHub for this exact board. Do not guess: the wrong pin silently does
+#      nothing, which is the worst possible failure to debug.
+#
+#   2. The eight captured codes. Flash the capture configuration at the bottom
+#      first, point the remote at the blaster from about 10cm, press each button
+#      once, and read the codes out of the log.
+#
+# The service looks for one button entity per remote button, with these exact
+# names: power, schedule, temp_up, temp_down, cool, warm, timer, mute.
+
+esphome:
+  name: hydrosnooze-ir
+  friendly_name: HydroSnooze IR
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+api:
+  encryption:
+    # Generate with: openssl rand -base64 32
+    key: !secret hydrosnooze_api_key
+ota:
+  - platform: esphome
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+remote_transmitter:
+  # TODO: the real pin, from Seeed's published configuration.
+  pin: GPIO_TODO
+  carrier_duty_percent: 50%
+
+# --- The eight buttons --------------------------------------------------------
+#
+# If the codes decoded as a named protocol such as NEC, use the protocol block
+# below and record the address and command. That is far more reliable than raw
+# timings. If they only came out as raw, use the raw form instead.
+
+button:
+  - platform: template
+    name: power
+    id: btn_power
+    on_press:
+      - remote_transmitter.transmit_nec:
+          address: 0x0000   # TODO
+          command: 0x0000   # TODO
+
+  - platform: template
+    name: schedule
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+  - platform: template
+    name: temp_up
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+  - platform: template
+    name: temp_down
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+  - platform: template
+    name: cool
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+  - platform: template
+    name: warm
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+  - platform: template
+    name: timer
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+  - platform: template
+    name: mute
+    on_press:
+      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+
+# --- Capture mode -------------------------------------------------------------
+#
+# Flash this part FIRST, on its own, with everything above commented out. Watch
+# the log while pressing each remote button, and write down what it decodes as.
+#
+# remote_receiver:
+#   pin:
+#     number: GPIO_TODO
+#     inverted: true
+#     mode:
+#       input: true
+#       pullup: true
+#   dump: all
+#   tolerance: 55%
+#   idle: 25ms

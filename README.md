@@ -8,18 +8,52 @@ unit through an infrared blaster and a smart plug.
 
 ## Where this is up to
 
-The hardware has not arrived yet. That does not block the app, so I am building the app first.
+The hardware has not arrived yet. That does not block the app, so I am building
+the app first.
 
-**Right now this repository contains the design**, running on seed data, plus the shared domain
-layer both halves depend on. The service that drives the real unit comes next.
+**The whole thing works, end to end, against a simulated unit.** The service, the
+scheduler, every command sequence, and the app driving all of it. What it is
+missing is a real HS1001 on the other end, and swapping to one is two lines in
+`.env`.
 
-`ROADMAP.md` has the whole route from here to a working unit, in order, including the parts only I
-can do.
+`ROADMAP.md` has the whole route from here to a working unit, in order, including
+the parts only I can do.
 
-The important thing about the design push is that it is not a throwaway prototype. Every screen
-talks to the `ApiClient` interface in `frontend/src/api/client.ts`, and the seed data is one
-implementation of it. When the service exists, `HttpApiClient` implements the same interface and
-`main.tsx` changes by one line. Nothing gets built twice.
+## Running it
+
+One command. It sets up Python, installs what it needs, builds the app, and
+starts the service.
+
+```sh
+./scripts/dev.sh
+```
+
+Then open `http://localhost:8000`, or the address it prints for the phone, which
+works from anything on the same Wi-Fi.
+
+Every button press the service would have sent is printed in the terminal as it
+happens. That press log is the most useful debugging tool in this project.
+
+### Watching an evening without waiting for one
+
+The app has a third tab, a spanner, which only appears when the service is
+talking to a simulated unit. It has a clock that can be jumped.
+
+Jump to 21:29, set the speed to 60x, and the whole evening plays out in about
+half a minute: the unit powers on, forces Turbo, rails down and counts up to the
+phase 1 temperature, waits until 22:00, arms the schedule, and drops out of Turbo
+while the display is still awake from arming.
+
+### Running the tests
+
+```sh
+cd backend && . .venv/bin/activate && pytest
+```
+
+96 of them. The ones that matter check that every temperature sequence lands on
+exactly the right number from every plausible starting state, and that arming
+without the wake preamble fails, which is the failure that would otherwise turn
+up at 3am.
 
 ## The idea
 
@@ -38,32 +72,25 @@ The unit has no clock, no Wi-Fi and no way to be read back. Three facts make it 
 ## Layout
 
 ```
-backend/hydrosnooze/models.py    the domain: modes, ranges, rail counts, the night plan derivation
-backend/tests/                   the derivations that everything else is built on
-frontend/src/types.ts            the same vocabulary, mirrored for the app
-frontend/src/domain.ts           night plan, temperature tinting, formatting
-frontend/src/api/client.ts       the interface between app and service
-frontend/src/api/mock.ts         seed data, the one temporary file in here
-frontend/src/components/         cards, tabs, controls
-scripts/make_icons.py            regenerates the PWA icons
-```
-
-## Running the app
-
-```sh
-cd frontend
-npm install
-npm run dev
-```
-
-The dev server binds to all interfaces, so it is reachable from my phone on the home Wi-Fi at
-`http://<mac-hostname>.local:5173`. That is the only honest way to judge a design meant to be used
-one-handed in a dark bedroom.
-
-To check a production build:
-
-```sh
-npm run build && npm run preview
+backend/hydrosnooze/
+  models.py            modes, ranges, rail counts, the night plan derivation
+  clock.py             real, simulated and virtual time
+  sequences.py         the button recipes: rail and count, the wake preamble
+  scheduler.py         what should be happening, and when it is too late to bother
+  service.py           everything wired together, and the only place holding state
+  adapters/
+    fake_unit.py       a simulated HS1001 with all the documented quirks
+    fake_transmitter.py  prints every press instead of sending it
+    esphome.py         the real infrared, untested against hardware
+    shelly.py          the real plug, untested against hardware
+frontend/src/
+  types.ts             the same vocabulary, mirrored for the app
+  api/client.ts        the interface between app and service
+  api/http.ts          the live client
+  api/mock.ts          seed data, for the Vercel copy
+  screens/Dev.tsx      the time machine and the press log
+scripts/dev.sh         run the whole thing on this machine
+docs/esphome-*.yaml    a template to fill in with the captured codes
 ```
 
 ## Putting it on a phone while the design is being settled

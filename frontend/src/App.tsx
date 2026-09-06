@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BottomNav, type Screen } from './components/BottomNav'
 import { Home } from './screens/Home'
 import { History } from './screens/History'
+import { Dev } from './screens/Dev'
 import { useService } from './useService'
 import type { ApiClient } from './api/client'
 import { MAX_TEMPERATURE_C } from './types'
@@ -21,6 +22,8 @@ export function App({ client }: { client: ApiClient }) {
       <main className="app__scroll">
         {!ready ? (
           <p className="empty">Connecting…</p>
+        ) : screen === 'dev' ? (
+          <Dev />
         ) : screen === 'home' ? (
           <Home
             client={client}
@@ -33,7 +36,7 @@ export function App({ client }: { client: ApiClient }) {
         )}
       </main>
 
-      <BottomNav screen={screen} onChange={setScreen} />
+      <BottomNav screen={screen} onChange={setScreen} showDev={info?.fake_transmitter ?? false} />
     </div>
   )
 }

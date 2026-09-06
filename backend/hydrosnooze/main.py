@@ -1,0 +1,106 @@
+"""The FastAPI application.
+
+Serves the API, the live feed, and the built frontend as static files. One
+process, one port, no reverse proxy, because on a Pi that is one fewer thing to
+go wrong at 3am.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from .api import dev, routes
+from .api.schemas import schedule_json, state_json
+from .config import get_settings
+from .service import Service
+
+logging.basicConfig(
+    level=os.environ.get("HS_LOG_LEVEL", "INFO"),
+    format="%(asctime)s  %(levelname)-7s %(name)s  %(message)s",
+)
+log = logging.getLogger("hydrosnooze")
+
+
+def static_dir() -> Path | None:
+    """Where the built frontend lives.
+
+    Built on the Mac and copied across, never built on the Pi.
+    """
+    override = os.environ.get("HS_STATIC_DIR")
+    candidates = [Path(override)] if override else []
+    here = Path(__file__).resolve().parent
+    candidates += [here.parent.parent / "frontend" / "dist", here.parent / "static"]
+    return next((c for c in candidates if (c / "index.html").exists()), None)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    service = Service(settings)
+    app.state.service = service
+    await service.start()
+    log.info(
+        "HydroSnooze up. transmitter=%s power=%s", settings.transmitter, settings.power_monitor
+    )
+    try:
+        yield
+    finally:
+        await service.stop()
+
+
+app = FastAPI(title="HydroSnooze", lifespan=lifespan)
+app.include_router(routes.router)
+app.include_router(dev.router)
+
+
+@app.websocket("/api/live")
+async def live(websocket: WebSocket) -> None:
+    """Push state changes so the app is never stale."""
+    service: Service = websocket.app.state.service
+    await websocket.accept()
+    queue = service.subscribe()
+    try:
+        await websocket.send_json(
+            {"state": state_json(service.state), "schedule": schedule_json(service.schedule)}
+        )
+        while True:
+            try:
+                payload = await asyncio.wait_for(queue.get(), timeout=25)
+            except asyncio.TimeoutError:
+                # Keep the connection alive through a phone's idle timeouts.
+                await websocket.send_json({"ping": True})
+                continue
+            await websocket.send_json(payload)
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # pragma: no cover
+        log.debug("live socket closed", exc_info=True)
+    finally:
+        service.unsubscribe(queue)
+        with contextlib.suppress(Exception):
+            await websocket.close()
+
+
+_static = static_dir()
+if _static is not None:
+    app.mount("/assets", StaticFiles(directory=_static / "assets"), name="assets")
+
+    @app.get("/{path:path}")
+    async def spa(path: str) -> FileResponse:
+        """Serve the app shell, and any file next to it, but never for /api."""
+        candidate = (_static / path).resolve()
+        if path and _static in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_static / "index.html")
+
+else:  # pragma: no cover
+    log.warning("No built frontend found. Run: npm --prefix frontend run build")

@@ -1,21 +1,24 @@
 # HydroSnooze: from the concept to a working unit
 
-The design is finished and running on my phone from Vercel. It looks right, but everything on the
-screen is invented. Nothing is connected to anything yet, and none of the hardware has arrived.
+This is the roadmap to a unit that cools the bed by itself every night.
 
-This is the roadmap from here to a unit that cools the bed by itself every night.
+**Steps 1 to 3 are done.** The whole thing works end to end against a simulated unit: the service,
+the scheduler, every button sequence, and the app driving all of it. What is left is the hardware
+and the swap.
 
 ---
 
 ## Where I am now
 
-The app half is done and the service half has not been started.
-
 | Done | Not done |
 |---|---|
-| Every screen, styled and working on the phone | The thing that actually presses buttons |
-| The maths that turns 06:30 into 22:00, with tests | The scheduler that fires at 21:30 |
-| The shared vocabulary both halves use | Anything touching real hardware |
+| Every screen, working on the phone against the real service | Anything touching real hardware |
+| A simulated HS1001 with every documented quirk | The eight captured infrared codes |
+| Every button sequence, with 96 tests behind them | Real power readings from the plug |
+| The scheduler, the database, the live feed | The Pi it will eventually live on |
+| A clock that can be jumped to 21:29 to watch an evening | |
+
+Run it with `./scripts/dev.sh`.
 
 ## The idea that makes the rest of this easy
 
@@ -41,7 +44,7 @@ suits, while the software gets built in parallel. Realistically the app will be 
 
 # Track one: the software
 
-## Step 1. Build the pretend unit
+## Step 1. Build the pretend unit ✅
 
 Code that behaves like an HS1001. It knows the display goes dark after five minutes and swallows the
 first two presses. It knows the temperature buttons do nothing at all while the sleep schedule is
@@ -53,7 +56,7 @@ a fact, the code says so in a comment, so it can be corrected once I can test it
 
 **Done when:** I can tell it to press buttons and it reacts the way the manual says it should.
 
-## Step 2. Write the button sequences
+## Step 2. Write the button sequences ✅
 
 The actual recipes: power on, set the mode, set a temperature, arm the schedule, write the schedule.
 Each one prints every press as it goes, like this:
@@ -75,7 +78,7 @@ starting state, so I know the counts are right before a single infrared photon i
 This is the step that de-risks the whole project. Counting presses wrong is the easiest mistake to
 make here and the hardest to spot at 3am.
 
-## Step 3. Build the service and connect the app
+## Step 3. Build the service and connect the app ✅
 
 Three things at once:
 
@@ -92,6 +95,8 @@ sequences run press by press.
 
 **At this point the app is finished.** It genuinely works, end to end. It is just talking to
 something imaginary.
+
+Done. `./scripts/dev.sh`, then the spanner tab, jump to 21:29 and set the speed to 60x.
 
 ---
 
@@ -228,7 +233,7 @@ The app never pretends otherwise, which is why Step 12 involves standing in the 
 
 | | |
 |---|---|
-| Software | Three sessions |
+| Software | Done |
 | Hardware | Three evenings, plus waiting for the post |
 | Building trust | About a week of not quite trusting it |
 

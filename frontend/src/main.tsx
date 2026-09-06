@@ -1,18 +1,22 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { HttpApiClient } from './api/http'
 import { MockApiClient } from './api/mock'
 import './styles/global.css'
 
 /**
- * The one line that swaps the whole app between seed data and the real service.
+ * The one line that swaps the whole app between the real service and seed data.
  *
- *   const client = new HttpApiClient()
+ * HttpApiClient is the real one. MockApiClient stays for the Vercel deployment,
+ * which has no service behind it and can only ever show invented data, and for
+ * looking at the design on a phone without anything else running.
  *
- * Everything else talks to the ApiClient interface, not to either implementation,
- * so nothing built against the mock has to be rewritten.
+ * Everything else talks to the ApiClient interface rather than to either
+ * implementation, so neither one is ever built twice.
  */
-const client = new MockApiClient()
+const useSeedData = import.meta.env.VITE_SEED_DATA === 'true'
+const client = useSeedData ? new MockApiClient() : new HttpApiClient()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
