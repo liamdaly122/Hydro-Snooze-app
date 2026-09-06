@@ -69,10 +69,18 @@ Right now there is no service, only seed data, so the app is a plain static site
 anywhere. There is a `vercel.json` at the root for exactly this: point Vercel at this repository and
 it builds `frontend/` and gives me a URL I can open on the phone without my Mac being switched on.
 
-`.vercelignore` keeps `backend/` out of the upload. Without it Vercel sees `backend/pyproject.toml`,
-decides this is a two-part app with a website and an API, and asks for a multi-service `vercel.json`
-routing `/api` to a Python service. That is the wrong shape for this project: there is no service in
-`backend/` yet, and when there is one it will not live on Vercel.
+Vercel scans the repository, sees `backend/pyproject.toml`, and decides this is a two-part app with
+a website and a FastAPI service. It then refuses to deploy until it is told how to handle both. That
+is the wrong shape here: there is no service in `backend/` yet, and when there is one it will not
+live on Vercel.
+
+Either answer works, and both are in the repository:
+
+- **Set Root Directory to `frontend`** in the Vercel project settings. Vercel then only ever looks
+  inside that folder, sees one Vite app, and reads `frontend/vercel.json`. This is the one to
+  prefer.
+- **Or leave Root Directory at the repository root**, where `vercel.json` declares a single service
+  pointing at `frontend/` and routes everything to it.
 
 **This is for the design phase only.** The finished thing cannot live on Vercel, and neither can any
 other hosting company. See below.
