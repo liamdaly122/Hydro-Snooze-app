@@ -144,8 +144,9 @@ Detail in [SETUP.md](SETUP.md#step-3-the-infrared-blaster). **This is the step e
 - [ ] Install ESPHome on the Pi and open the dashboard at `hydrosnooze.local:6052`
 - [ ] Get the real GPIO pin numbers from Seeed's published config on GitHub. **Do not guess.** A
       wrong pin does nothing at all and gives no error
-- [ ] Flash the capture configuration from `docs/esphome-hydrosnooze.yaml`
-- [ ] Point the remote at the blaster from 10cm and press each of the eight buttons, watching the log
+- [ ] Flash the capture configuration: `~/esphome/bin/esphome run docs/esphome-capture.yaml`
+- [ ] Run `./scripts/capture.py` and follow it. Three agreeing presses per button, and it rejects a
+      button whose presses disagree rather than letting a bad code through
 
 Write down all eight:
 

@@ -348,8 +348,30 @@ or the flash is wrong, and there is no point capturing eight of nothing before f
 If it cannot find the board, hold the small button on the IR Mate while plugging the cable in. That
 forces the ESP32-C3 into its download mode.
 
-Then point the remote at the blaster from about 10cm and press each of the eight buttons once,
-slowly, watching what appears:
+### Let the script walk you through it
+
+```sh
+./scripts/capture.py
+```
+
+That starts the ESPHome log itself, asks for one button at a time, and waits for **three presses
+that agree with each other** before moving on. It rejects and retries a button whose presses
+disagree, and at the end writes a summary to the Desktop worth sending on.
+
+It checks four things that are hard to see by eye:
+
+- three presses of one button really produced the same code, allowing for the jitter that stops raw
+  timings ever repeating exactly
+- a button held a fraction too long is forgiven rather than counted as a different code
+- all eight decoded as the same protocol and share one address
+- no two buttons produced an identical code, which is what pressing the same button twice looks like
+
+Press Enter to restart the button you are on, `q` to stop and keep what you have.
+
+### Or by hand, which still works
+
+Run the log directly, point the remote at the blaster from about 10cm, and press each of the eight
+buttons once, slowly, watching what appears:
 
 | Press this | Write it down as |
 |---|---|
