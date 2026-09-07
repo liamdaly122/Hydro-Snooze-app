@@ -16,6 +16,12 @@ frontend/dist/
 *.db
 *.db-journal
 .env
+# Editors leave backups next to it. nano writes .env.save, vim writes .env~,
+# and one of those has already been committed once. The ESPHome encryption key
+# lives in this file, so anything shaped like it stays out of the repository.
+.env.*
+.env~
+!.env.example
 data/
 
 # OS
