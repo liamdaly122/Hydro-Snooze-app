@@ -3,11 +3,23 @@
 # Flash this as it is. Nothing needs filling in. It turns the IR Mate into a
 # receiver that prints every code it hears, and does nothing else.
 #
-#   esphome run docs/esphome-capture.yaml
+# Flash it, over USB:
+#
+#   ~/esphome/bin/esphome run docs/esphome-capture.yaml
+#
+# It streams the log straight after. Ctrl-C when you want out, then reconnect any
+# time with a copy saved to the Desktop, which is the thing to paste back:
+#
+#   ~/esphome/bin/esphome logs docs/esphome-capture.yaml | tee ~/Desktop/ir-capture.txt
 #
 # Then point the HydroSnooze remote at it from about 10cm and press each of the
-# eight buttons once, slowly, watching the log. Write down what each one decodes
-# as. When all eight are recorded, move to esphome-hydrosnooze.yaml.
+# eight buttons once, slowly, watching the log. Press ONE button first and check
+# something appears at all before doing the other seven: nothing at all means the
+# distance, the aim or the flash is wrong, and there is no point capturing eight
+# of nothing.
+#
+# Press each button two or three times. The same button must give the same code
+# every time. If it does not, you are too close, too far, or off to one side.
 #
 # Pins are from Seeed's own configuration for this board, not guessed:
 # https://github.com/Seeed-Studio/xiao-esphome-projects/blob/main/projects/xiao_smart_ir_mate/xiao_smart_ir_mate.yaml

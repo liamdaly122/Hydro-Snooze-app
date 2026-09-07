@@ -310,6 +310,15 @@ prints every code it hears and does nothing else:
 Pick the USB port when it asks. The first build takes a few minutes; after that it stays connected
 and streams the log.
 
+To reconnect later, and keep a copy worth pasting back:
+
+```sh
+~/esphome/bin/esphome logs docs/esphome-capture.yaml | tee ~/Desktop/ir-capture.txt
+```
+
+**Press one button first and check something appears at all.** Nothing means the aim, the distance
+or the flash is wrong, and there is no point capturing eight of nothing before finding that out.
+
 If it cannot find the board, hold the small button on the IR Mate while plugging the cable in. That
 forces the ESP32-C3 into its download mode.
 
