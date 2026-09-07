@@ -31,10 +31,26 @@ class Settings(BaseSettings):
     esphome_button_service: str = "send_ir"
     shelly_host: str = "hydrosnooze-plug.local"
 
-    # --- Power thresholds, guesses until the Shelly measures them -------------
-    off_threshold_w: float = 5.0
-    idle_max_w: float = 60.0
-    cooling_max_w: float = 220.0
+    # --- Power thresholds, measured ------------------------------------------
+    #
+    # Taken off a King HS1001 through a Shelly Plug S Gen3, walking the unit
+    # through all four states with the physical remote. 429 settled readings:
+    #
+    #   off at the wall     1.2 to   1.6 W
+    #   on, idle            4.9 to  10.2 W   (5 in warming, 9 in cooling)
+    #   cooling           161.1 to 188.3 W
+    #   heating           303.7 to 393.4 W
+    #
+    # Each threshold sits at the midpoint of the gap it separates. Rounded, but
+    # every gap is wide enough that the rounding is free.
+    #
+    # The first of these used to be 5.0, and that was actively dangerous rather
+    # than merely wrong. Idling in warming mode draws 4.9 W, so the app read the
+    # unit as OFF at a stage boundary and pressed power to "turn it on", which
+    # turned it off. Mid-night. Measuring found it; nothing else would have.
+    off_threshold_w: float = 3.0
+    idle_max_w: float = 85.0
+    cooling_max_w: float = 245.0
 
     # --- Timing, all from Part 3 of the brief ---------------------------------
     command_gap_ms: int = 300

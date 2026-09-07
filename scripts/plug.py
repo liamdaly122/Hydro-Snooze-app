@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read the Shelly plug, live, and say what the service would make of it.
 
-    ./scripts/plug.py 192.168.1.42
+    ./scripts/plug.py 192.168.1.194
     ./scripts/plug.py                    # uses HS_SHELLY_HOST, or the .local name
 
 Nothing else is needed: no Pi, no blaster, no virtual environment. It talks to

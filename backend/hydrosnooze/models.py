@@ -199,9 +199,10 @@ def mode_for_target(
 
     So: going up warms, going down cools, and standing still changes nothing.
 
-    ASSUMPTION, worth a Shelly reading before it is treated as fact: that warming
-    mode does not actively cool. Set warming to 25C with the bed at 30C and watch
-    the plug. Around 170 W and it is cooling after all, and none of this matters.
+    Confirmed on the real unit, not assumed: warming mode does not cool. With the
+    bed already warm and warming set to 25C, the plug read 5 W for ninety seconds.
+    Cooling draws 166 W and heating draws 306 W, so the unit was doing nothing at
+    all, which is exactly what a heater asked to make a bed colder should do.
 
     With nothing to come from, the target alone decides and 25C and above warms:
     nobody asks for a bed at 27C unless they want it warmed to 27C.
@@ -638,14 +639,15 @@ class DeviceState:
 
 @dataclass(frozen=True)
 class PowerThresholds:
-    """Calibrate against the real unit at setup.
+    """What the plug's draw says the unit is really doing.
 
-    Starting points from the manual's 170W cooling and 300W heating.
+    Measured off a King HS1001 rather than taken from the manual. See the note in
+    config.py for the four states and the readings behind them.
     """
 
-    off_max_w: float = 5.0
-    idle_max_w: float = 60.0
-    cooling_max_w: float = 220.0
+    off_max_w: float = 3.0
+    idle_max_w: float = 85.0
+    cooling_max_w: float = 245.0
 
     def classify(self, watts: float | None) -> Activity:
         if watts is None:

@@ -71,7 +71,7 @@ If the app cannot find the plug at all, the fallback is its own Wi-Fi: connect t
 Paste this into a browser on the Mac, with the real IP:
 
 ```
-http://192.168.1.42/rpc/Switch.GetStatus?id=0
+http://192.168.1.194/rpc/Switch.GetStatus?id=0
 ```
 
 A blob of JSON comes back with `"apower"` in it. That is the exact endpoint the service uses, so
@@ -94,35 +94,45 @@ unattended.
 Plug the unit into the Shelly and the Shelly into the wall. Then on the Mac, in the project folder:
 
 ```sh
-./scripts/plug.py 192.168.1.42
+./scripts/plug.py 192.168.1.194
 ```
 
 That reads the plug once a second and says which of the four states the service would call it, using
 the service's own classifier so the two cannot drift apart. Put the unit into each state with the
 physical remote, wait for the settled column to stop moving, and write it down.
 
-| Do this on the remote | State | Expected, roughly | Mine |
+| Do this on the remote | State | Mine, measured | Notes |
 |---|---|---|---|
-| Power the unit off | Off at the wall | under 5 W | |
-| On, set close to where the bed already is, left to stop working | Idle | 5 to 60 W | |
-| Cooling, set to 15°C | Cooling | around 170 W | |
-| Warming, set to 40°C | Heating | around 300 W | |
+| Power the unit off | Off at the wall | **1.2 to 1.6 W** | standby only |
+| On, set close to where the bed already is, left to stop working | Idle | **4.9 to 10.2 W** | 5 in warming, 9 in cooling |
+| Cooling, set to 15°C | Cooling | **161 to 188 W** | settles around 166 |
+| Warming, set to 40°C | Heating | **304 to 393 W** | settles around 310 |
 
-Those four numbers are how the app knows whether a power command actually worked. They are the only
-measured values in the whole project; everything else it holds is belief.
+Taken on 7 September off a King HS1001, 429 settled readings. Those four numbers are how the app
+knows whether a power command actually worked. They are the only measured values in the whole
+project; everything else it holds is belief.
 
-### Settle the one open assumption
+**Idle has two levels, and that is the important part.** Warming idles at about 5 W and cooling at
+about 9 W, so the gap between "off at the wall" and "on but doing nothing" is only three and a half
+watts. The thresholds shipped before this measurement put the off line at 5 W, which read a unit
+idling in warming as switched off. At a stage boundary the app would then have pressed power to turn
+on a unit that was already on, which turns it off, in the middle of the night. Nothing but a real
+reading would have found that.
 
-While the bed is still warm from the heating reading, set warming to **25°C** on the remote and
-watch the draw for a couple of minutes.
+### The one open assumption, now answered
 
 Cooling covers 15 to 35°C and warming covers 25 to 55°C, so between 25 and 35 both modes can be set
 to the same number and the app has to pick one. It picks from the direction the bed has to move: a
 stage climbing into that band warms, a stage dropping into it, 30°C down to 25°C for instance,
-cools. That rests on warming mode only ever heating.
+cools. That rested on warming mode only ever heating.
 
-- Stays around 170 W: warming cools too, and the direction rule is unnecessary, though harmless.
-- Falls to idle: warming only heats, and the rule is doing real work.
+**Tested, and it holds.** Bed already warm, warming set to 25°C, and the plug read a flat 5 W for
+ninety seconds. Cooling draws 166 W and heating draws 306 W, so the unit was doing nothing at all.
+The 5 W reading is itself the proof the bed was at or above 25°C, because below it the unit would
+have been heating.
+
+So a heater asked to make a bed colder sits there, exactly as assumed, and the direction rule is
+doing real work rather than guarding against nothing.
 
 ### Run the app against the real plug
 
@@ -139,16 +149,16 @@ cp backend/.env.example backend/.env
 ```
 HS_TRANSMITTER=fake
 HS_POWER_MONITOR=shelly
-HS_SHELLY_HOST=192.168.1.42
+HS_SHELLY_HOST=192.168.1.194
 ```
 
 Then the three thresholds. **These are boundaries between states, not the readings themselves**, so
 each one goes roughly halfway between the two numbers it separates:
 
 ```
-HS_OFF_THRESHOLD_W=5      # between the off and idle readings
-HS_IDLE_MAX_W=100         # between the idle and cooling readings
-HS_COOLING_MAX_W=235      # between the cooling and heating readings
+HS_OFF_THRESHOLD_W=3      # between 1.6 (standby) and 4.9 (idling in warming)
+HS_IDLE_MAX_W=85          # between 10.2 (idling in cooling) and 161 (cooling)
+HS_COOLING_MAX_W=245      # between 188 (cooling) and 304 (heating)
 ```
 
 Then:
@@ -330,10 +340,10 @@ And add the ESPHome details, plus the Shelly lines already worked out on the Mac
 ```
 HS_ESPHOME_HOST=hydrosnooze-ir.local
 HS_ESPHOME_ENCRYPTION_KEY=the key from the ESPHome configuration
-HS_SHELLY_HOST=192.168.1.42
-HS_OFF_THRESHOLD_W=5
-HS_IDLE_MAX_W=100
-HS_COOLING_MAX_W=235
+HS_SHELLY_HOST=192.168.1.194
+HS_OFF_THRESHOLD_W=3
+HS_IDLE_MAX_W=85
+HS_COOLING_MAX_W=245
 ```
 
 Save with Ctrl-O then Enter, exit with Ctrl-X. Then:

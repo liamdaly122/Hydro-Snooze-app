@@ -284,3 +284,51 @@ def test_bedtime_in_the_plan_is_the_bedtime_that_was_set():
     assert plan.bedtime_at == datetime(2026, 9, 7, 23, 15)
     assert plan.wake_at == datetime(2026, 9, 8, 6, 30)
     assert plan.steps[-1].ends_at == plan.wake_at
+
+
+# --- The four states, as the plug actually reads them --------------------------
+#
+# Real readings from a King HS1001 through a Shelly Plug S Gen3, walked through
+# every state with the physical remote. These are a regression test, not a
+# derivation: if someone retunes the thresholds, these say what breaks.
+
+
+@pytest.mark.parametrize(
+    ("watts", "expected"),
+    [
+        # Off at the wall. Standby only.
+        (1.2, Activity.OFF),
+        (1.4, Activity.OFF),
+        (1.6, Activity.OFF),
+        # On and idling. Warming idles at 5, cooling idles at 9.
+        (4.9, Activity.IDLE),
+        (5.0, Activity.IDLE),
+        (9.2, Activity.IDLE),
+        (10.2, Activity.IDLE),
+        # Actively cooling.
+        (161.1, Activity.COOLING),
+        (166.9, Activity.COOLING),
+        (188.3, Activity.COOLING),
+        # Actively heating.
+        (303.7, Activity.HEATING),
+        (310.4, Activity.HEATING),
+        (393.4, Activity.HEATING),
+    ],
+)
+def test_the_measured_states_classify_correctly(watts, expected):
+    assert PowerThresholds().classify(watts) is expected
+
+
+def test_idling_in_warming_is_not_mistaken_for_off():
+    """The one that mattered. Warming idles at 4.9 W, and the old 5 W threshold
+    read that as off, so the app pressed power at a stage boundary to turn on a
+    unit that was already on. Which turned it off. In the middle of the night."""
+    assert PowerThresholds().classify(4.9) is Activity.IDLE
+    assert PowerThresholds().off_max_w < 4.9
+
+
+def test_every_threshold_sits_clear_of_both_states_it_separates():
+    t = PowerThresholds()
+    assert 1.6 < t.off_max_w < 4.9, "between standby and idle"
+    assert 10.2 < t.idle_max_w < 161.1, "between idle and cooling"
+    assert 188.3 < t.cooling_max_w < 303.7, "between cooling and heating"

@@ -68,18 +68,20 @@ thing standing between that and a bed that stays hot all day.
 Plug the unit into the Shelly, then on the Mac:
 
 ```sh
-./scripts/plug.py 192.168.1.42
+./scripts/plug.py 192.168.1.194
 ```
 
 Put the unit into each state with the physical remote, let it settle a minute or two, write down the
 settled column:
 
-- [ ] Off at the wall (expect under 5 W)
-- [ ] On, set close to where the bed already is, left to stop working (expect 5 to 60 W)
-- [ ] Cooling, set to 15°C (expect around 170 W)
-- [ ] Heating, warming set to 40°C (expect around 300 W)
+- [x] Off at the wall: **1.2 to 1.6 W**
+- [x] On and idling: **4.9 to 10.2 W** (5 in warming, 9 in cooling)
+- [x] Cooling: **161 to 188 W**, settling around 166
+- [x] Heating: **304 to 393 W**, settling around 310
 
-These are the only measured numbers in the project. Everything else is a guess from the manual.
+Done on 7 September, 429 settled readings. These are the only measured numbers in the project;
+everything else is a guess from the manual. They are now the defaults in `config.py`, so there is
+nothing to copy into `.env` unless a different unit reads differently.
 
 ### Settle the one open assumption
 
@@ -96,11 +98,11 @@ Half the hardware proven, a week early. `backend/hydrosnooze/adapters/shelly.py`
 real, so any bug in it turns up now rather than on the evening I am also debugging a blaster.
 
 - [ ] Copy `backend/.env.example` to `backend/.env` and set `HS_POWER_MONITOR=shelly` and
-      `HS_SHELLY_HOST=<its IP>`, leaving `HS_TRANSMITTER=fake`
-- [ ] Put the three thresholds in, each roughly halfway between the two readings it separates:
-      `HS_OFF_THRESHOLD_W`, `HS_IDLE_MAX_W`, `HS_COOLING_MAX_W`
+      `HS_SHELLY_HOST=192.168.1.194`, leaving `HS_TRANSMITTER=fake`
 - [ ] `./scripts/dev.sh`, and check the status strip, the power chart and the History tab are all
       showing real watts
+
+The thresholds need no lines in `.env` any more. The measured values are the defaults.
 
 ---
 
