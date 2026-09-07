@@ -22,6 +22,7 @@ from .config import Settings
 from .db import Database
 from .events import Event, EventLog
 from .models import (
+    STAGE_LABEL,
     Activity,
     DeviceState,
     Mode,
@@ -336,9 +337,16 @@ class Service:
         )
 
     async def set_temperature(self, target_c: int) -> None:
-        # The unit switches between cooling and warming freely now that its own
-        # scheduler is never armed.
+        """Set the temperature now, by hand.
+
+        Which mode that needs is worked out the same way a stage works it out,
+        from the direction the bed has to travel. Below 25C only cooling can
+        express it, above 35C only warming can, and in between the direction
+        decides. A cooling correction uses the night's own speed, which is Quiet
+        unless it has been changed, because this happens next to a sleeping head.
+        """
         mode = self.mode_for_now(target_c)
+        stage = self.state.current_stage
         async with self._lock:
             try:
                 if self.state.assumed_mode is not mode:
@@ -349,6 +357,10 @@ class Service:
             except CommandFailed as exc:
                 self._fail("temperature", exc, assumed_target_c=None)
                 raise
+
+        # Outside the lock: the presses have landed, and this is bookkeeping.
+        if stage is not None:
+            self._adopt_into_running_stage(stage, target_c)
 
     async def mute(self) -> None:
         """Toggle the unit's button beep.
@@ -390,12 +402,47 @@ class Service:
                 raise
 
     def update_schedule(self, patch: dict[str, Any]) -> Schedule:
+        """Save a change to the schedule. Deliberately does not touch the unit.
+
+        It also deliberately does not clear the fired marks, which it used to.
+        They are keyed by the plan's wake time already, so moving the wake time
+        invalidates them by itself and clearing was never needed. What clearing
+        did do was make every completed stage look un-run, so the next tick
+        reported "Missed the Deep stage" for a stage that had gone perfectly.
+        Editing anything at 2am produced a screen of errors about the past.
+        """
         self.schedule = replace(self.schedule, **patch, updated_at=self.clock.now())
         self.db.save_schedule(self.schedule)
-        # A changed wake time means tonight's jobs are a different night now.
-        self.scheduler.fired = type(self.scheduler.fired)()
         self._push_schedule()
         return self.schedule
+
+    def _adopt_into_running_stage(self, stage: Stage, target_c: int) -> None:
+        """Remember a correction made in the middle of the night.
+
+        Reaching for the temperature at 2am is not a one-off. It is the answer to
+        "this stage is wrong", and the stage will be just as wrong tomorrow unless
+        something is done about it. So the schedule takes the new number and says
+        so. Changing it back is one tap on that stage's tab.
+        """
+        current = next((s for s in self.schedule.stages if s.stage is stage), None)
+        if current is None or current.temp_c == target_c:
+            return
+
+        was = current.temp_c
+        self.update_schedule(
+            {
+                "stages": [
+                    replace(s, temp_c=target_c) if s.stage is stage else s
+                    for s in self.schedule.stages
+                ]
+            }
+        )
+        label = STAGE_LABEL[stage]
+        self.events.info(
+            "stage",
+            f"{label} changed from {was}C to {target_c}C while it was running, so {label} "
+            f"is {target_c}C from now on. Change it back on the {label} tab.",
+        )
 
     # --- State ----------------------------------------------------------------
 

@@ -189,6 +189,12 @@ function StageNote({
     if (state.power === 'off') note = 'Unit is off. Only the power button responds.'
     else if (state.power === 'unknown') note = 'Unit state unknown. Check the plug reading below.'
     else if (value === null) note = 'No confirmed target. Press + or − to set one.'
+    else if (state.current_stage !== null) {
+      // Said before it happens rather than after. Reaching for the temperature
+      // mid-stage is a correction, not a one-off, so it sticks; better to know
+      // that while deciding than to find the schedule changed in the morning.
+      note = `${STAGE_LABEL[state.current_stage]} is running. Changing this sets ${STAGE_LABEL[state.current_stage]} to it from tomorrow too.`
+    }
   } else if (value !== null && value >= WARMING_FLOOR_C) {
     note = `Heats the bed to ${value}°C.`
   } else if (value !== null) {

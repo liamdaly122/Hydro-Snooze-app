@@ -16,7 +16,8 @@ import pytest
 
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
-from hydrosnooze.models import Mode, Schedule, SleepStage, Stage
+from hydrosnooze.models import Mode, Power, Schedule, SleepStage, Stage
+from hydrosnooze.scheduler import Job
 from hydrosnooze.service import Service
 
 
@@ -330,3 +331,158 @@ async def test_setting_a_higher_temperature_by_hand_still_warms(service):
     await service.set_temperature(28)
     assert service.unit.mode is Mode.WARMING
     assert service.unit.target == 28
+
+
+# --- Reaching for the temperature in the middle of the night --------------------
+#
+# A change made at 2am is not a one-off. It is the answer to "this stage is
+# wrong", and the stage will be just as wrong tomorrow unless something is done.
+
+
+def _running(service, stage: Stage, temp: int) -> None:
+    """Put the service in the state the poll loop would leave it in mid-stage."""
+    service.unit.powered = True
+    service.unit.powered_at = service.clock.now()
+    service._set_state(power=Power.ON, current_stage=stage, assumed_target_c=temp)
+
+
+@pytest.mark.asyncio
+async def test_a_change_during_a_stage_becomes_that_stage_from_now_on(service):
+    service.schedule = _schedule()  # deep 17, rem 20, wake 26
+    _running(service, Stage.DEEP, 17)
+
+    await service.set_temperature(22)
+
+    deep = next(s for s in service.schedule.stages if s.stage is Stage.DEEP)
+    assert deep.temp_c == 22, "tomorrow's Deep takes tonight's correction"
+    assert [s.temp_c for s in service.schedule.stages] == [22, 20, 26], "only that stage moves"
+
+
+@pytest.mark.asyncio
+async def test_it_says_what_it_changed_and_how_to_undo_it(service):
+    service.schedule = _schedule()
+    _running(service, Stage.REM, 20)
+
+    await service.set_temperature(24)
+
+    messages = [e.message for e in service.events.recent(50)]
+    assert any("REM changed from 20C to 24C" in m for m in messages)
+    assert any("REM tab" in m for m in messages), "a way back, not just a notification"
+
+
+@pytest.mark.asyncio
+async def test_the_correction_survives_a_restart(service):
+    service.schedule = _schedule()
+    _running(service, Stage.DEEP, 17)
+    await service.set_temperature(22)
+
+    reloaded = service.db.load_schedule()
+    assert next(s for s in reloaded.stages if s.stage is Stage.DEEP).temp_c == 22
+
+
+@pytest.mark.asyncio
+async def test_a_change_with_no_stage_running_is_left_as_a_one_off(service):
+    """Adjusting it in the afternoon says nothing about tonight's schedule."""
+    service.schedule = _schedule()
+    service.unit.powered = True
+    service.unit.powered_at = service.clock.now()
+    service._set_state(power=Power.ON, current_stage=None, assumed_target_c=17)
+
+    await service.set_temperature(22)
+
+    assert [s.temp_c for s in service.schedule.stages] == [17, 20, 26]
+
+
+@pytest.mark.asyncio
+async def test_setting_it_to_what_it_already_is_changes_nothing(service):
+    service.schedule = _schedule()
+    _running(service, Stage.DEEP, 17)
+    before = service.schedule.updated_at
+
+    await service.set_temperature(17)
+
+    assert service.schedule.updated_at == before, "no write, and nothing in the log"
+    assert not any("changed from" in e.message for e in service.events.recent(50))
+
+
+@pytest.mark.asyncio
+async def test_a_correction_downwards_cools_at_the_night_speed(service):
+    """Not Turbo. Pre-conditioning can be loud because nobody is in the bed yet;
+    this happens next to a sleeping head."""
+    service.schedule = _schedule(cooling_speed=Mode.QUIET)
+    _running(service, Stage.WAKE, 26)
+
+    await service.set_temperature(22)
+
+    assert service.unit.mode is Mode.QUIET
+    assert service.unit.target == 22
+
+
+@pytest.mark.asyncio
+async def test_a_correction_upwards_into_the_overlap_warms(service):
+    service.schedule = _schedule()
+    _running(service, Stage.DEEP, 17)
+
+    await service.set_temperature(28)
+
+    assert service.unit.mode is Mode.WARMING
+    assert service.unit.target == 28
+
+
+# --- The bug that would have made all of the above unusable ---------------------
+
+
+@pytest.mark.asyncio
+async def test_editing_mid_night_does_not_report_finished_stages_as_missed(service):
+    """update_schedule used to clear the fired marks. Every completed stage then
+    looked un-run, and the next tick logged an error about each one. Adjusting
+    anything at 2am produced a screen of complaints about the past."""
+    service.schedule = _schedule()
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    deep, rem, _ = plan.steps
+
+    # Both stages ran at their boundaries, as they would have.
+    for step in (deep, rem):
+        service.clock.jump_to(step.starts_at)
+        await service._run_stage(plan, step)
+        service.scheduler.fired.mark(service.scheduler.due(service.schedule, step.starts_at))
+
+    # Two hours into REM, well past every earlier stage's window.
+    service.clock.jump_to(rem.starts_at + timedelta(hours=2))
+    _running(service, Stage.REM, 20)
+    await service.set_temperature(23)
+
+    missed = service.scheduler.missed(service.schedule, service.clock.now())
+    assert [j.step.stage for j in missed if j.step] == [], "nothing in the past is missed"
+
+
+def test_moving_the_wake_time_invalidates_the_marks_by_itself(service):
+    """Which is why clearing them was never needed: they are keyed by wake time."""
+    service.schedule = _schedule()
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    job = Job("stage", plan, plan.steps[0])
+    service.scheduler.fired.mark(job)
+    assert service.scheduler.fired.has_fired(job)
+
+    service.update_schedule({"wake_time": time(7, 30)})
+    moved = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    assert not service.scheduler.fired.has_fired(Job("stage", moved, moved.steps[0]))
+
+
+@pytest.mark.asyncio
+async def test_any_schedule_edit_mid_night_leaves_the_past_alone(service):
+    """Not just a temperature correction. Changing the days, or a duration, or
+    anything else at 2am used to have the same effect."""
+    service.schedule = _schedule()
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    deep, rem, _ = plan.steps
+    for step in (deep, rem):
+        service.clock.jump_to(step.starts_at)
+        await service._run_stage(plan, step)
+        service.scheduler.fired.mark(service.scheduler.due(service.schedule, step.starts_at))
+
+    service.clock.jump_to(rem.starts_at + timedelta(hours=2))
+    service.update_schedule({"name": "Renamed at 2am"})
+
+    missed = service.scheduler.missed(service.schedule, service.clock.now())
+    assert missed == []
