@@ -75,22 +75,29 @@ curl -s http://192.168.1.194/rpc/WiFi.GetStatus
 That returns an `rssi` figure in dBm. Above -60 is fine, -60 to -70 is workable, and below -70 is
 where reads start dropping.
 
-**Mine came back at -87.** That is weak enough to matter, and it is worth stopping on, because the
-plug is not the only thing that ends up in that room. The Pi has to stay reachable all night, and the
-infrared blaster is a Wi-Fi device too. A dropped plug read only costs an `unknown`. A dropped
-blaster means a stage boundary passes and the bed does not change.
+**Mine came back at -87 the first time.** That is weak enough to matter, and it was worth stopping
+on, because the plug is not the only thing that ends up in that room. The Pi has to stay reachable
+all night, and the infrared blaster is a Wi-Fi device too. A dropped plug read only costs an
+`unknown`. A dropped blaster means a stage boundary passes and the bed does not change.
 
-So this is a coverage problem for the room, not a plug problem, and it is worth fixing before the
-blaster arrives rather than after. In order of cost:
+So it is a coverage problem for the room, not a plug problem, and worth fixing before the blaster
+arrives rather than after.
+
+**Fixed with a Wi-Fi extender**, and the plug now sits on `VM1876778_EXT` at **-50 dBm**. That is 37
+dB, which is a factor of about five thousand in signal power. It took the read failures from 5 in 59
+to 0 in 44.
+
+When the Pi and the blaster go in, put them on the extended network too. They are in the same room
+with the same problem, and the blaster is the one where a dropped connection actually costs a night.
+
+If the number is still poor after an extender, the order of things to try is:
 
 1. **Move the plug out from behind the unit.** A short mains extension, so it is not sitting behind a
    metal chassis and a mattress. Free if there is one in a drawer, and often worth 10 dB.
-2. **Put an access point or mesh node in or near the bedroom.** This is the real fix given three
-   devices will live there. If ethernet reaches the room, an access point is better than anything
-   wireless, and the Pi can then go on a cable and stop caring.
-3. **A plug-in repeater, last.** It works, but place it where it still has a *strong* link back to
-   the router, roughly halfway. Putting a repeater next to the weak device just repeats a weak
-   signal, which is the usual way these disappoint.
+2. **An access point or mesh node rather than a repeater.** If ethernet reaches the room, an access
+   point beats anything wireless, and the Pi can go on a cable and stop caring entirely.
+3. **Placement.** A repeater needs a *strong* link back to the router, so roughly halfway. Putting
+   one next to the weak device just repeats a weak signal, which is the usual way these disappoint.
 
 Re-run the command after any change. The number tells you immediately whether it helped.
 

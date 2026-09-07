@@ -54,11 +54,13 @@ the whole reason it comes first.
 - [ ] Open `http://<its IP>/rpc/Switch.GetStatus?id=0` in a browser and get JSON back with `apower`
       in it. That is the exact endpoint the service uses, so this one check proves the whole plug
       half of the project
-- [x] `curl -s http://192.168.1.194/rpc/WiFi.GetStatus` and read the `rssi`. **Mine is -87 dBm**,
-      which is weak
-- [ ] Fix the bedroom coverage before the blaster arrives. The Pi and the blaster live in that room
-      too, and a dropped blaster command means a stage boundary passes with the bed unchanged. Try
-      moving the plug out from behind the unit first, then an access point or mesh node in the room
+- [x] `curl -s http://192.168.1.194/rpc/WiFi.GetStatus` and read the `rssi`. Started at **-87 dBm**,
+      which is weak enough to drop reads
+- [x] Fix the bedroom coverage. **Done with a Wi-Fi extender: -50 dBm on `VM1876778_EXT`**, and read
+      failures went from 5 in 59 to 0 in 44
+- [ ] Put the Pi and the blaster on the extended network too when they go in. Same room, same
+      problem, and the blaster is the one where a dropped connection costs a night rather than an
+      `unknown`
 
 ### Set the auto-off timer while I am in the app
 
