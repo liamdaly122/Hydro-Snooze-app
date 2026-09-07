@@ -46,14 +46,14 @@ the whole reason it comes first.
 
 ### Get it on the network
 
-- [ ] Plug it into the wall on its own and give it thirty seconds
-- [ ] Set it up in the Shelly Smart Control app. **It needs the 2.4 GHz network**, which is where
+- [x] Plug it into the wall on its own and give it thirty seconds
+- [x] Set it up in the Shelly Smart Control app. **It needs the 2.4 GHz network**, which is where
       most Shelly setups stall
-- [ ] Write down its IP address
-- [ ] Give it a fixed address in the router, if that is easy
-- [ ] Open `http://<its IP>/rpc/Switch.GetStatus?id=0` in a browser and get JSON back with `apower`
-      in it. That is the exact endpoint the service uses, so this one check proves the whole plug
-      half of the project
+- [x] Write down its IP address: **192.168.1.194**
+- [ ] Give it a fixed address in the router, if that is easy. Worth doing: the app is configured
+      with the number, so a new one from the router means editing `.env` again
+- [x] Open `http://<its IP>/rpc/Switch.GetStatus?id=0` and get JSON back with `apower` in it. That is
+      the exact endpoint the service uses, so this one check proves the whole plug half
 - [x] `curl -s http://192.168.1.194/rpc/WiFi.GetStatus` and read the `rssi`. Started at **-87 dBm**,
       which is weak enough to drop reads
 - [x] Fix the bedroom coverage. **Done with a Wi-Fi extender: -50 dBm on `VM1876778_EXT`**, and read
@@ -64,7 +64,8 @@ the whole reason it comes first.
 
 ### Set the auto-off timer while I am in the app
 
-- [ ] Auto-off, 10 hours (36000 seconds on screens that want seconds)
+- [ ] Auto-off, 10 hours (36000 seconds on screens that want seconds). **Not confirmed done.** The
+      one item on this page nothing in software can check for me
 
 **Not optional.** The app drives the night itself, so the unit never switches itself off, and the
 temperature ceiling is the unit's own maximum of 55°C. If the Pi dies at 3am this timer is the only
@@ -92,22 +93,28 @@ nothing to copy into `.env` unless a different unit reads differently.
 
 ### Settle the one open assumption
 
-- [ ] With the bed still warm, set warming to 25°C on the remote and watch the draw for two minutes
+- [x] With the bed still warm, set warming to 25°C and watch the draw. **Answered: the assumption
+      holds.** Flat 5 W for ninety seconds, against 166 W cooling and 306 W heating, so warming does
+      not cool
 
 Cooling covers 15 to 35°C and warming covers 25 to 55°C, so between 25 and 35 both modes hold the
-same number and the app has to pick one. It assumes warming only heats, so a stage dropping from
-30°C to 25°C is run in cooling. Staying around 170 W means warming cools too and the assumption is
-wrong. Falling to idle means it holds.
+same number and the app has to pick one. It picks from the direction the bed has to travel, and that
+rested on warming only ever heating. The 5 W reading is itself the proof the bed was at or above
+25°C, because below it the unit would have been heating. So the direction rule is doing real work.
 
 ### Run the app against the real plug
 
 Half the hardware proven, a week early. `backend/hydrosnooze/adapters/shelly.py` has never run against anything
 real, so any bug in it turns up now rather than on the evening I am also debugging a blaster.
 
-- [ ] Copy `backend/.env.example` to `backend/.env` and set `HS_POWER_MONITOR=shelly` and
-      `HS_SHELLY_HOST=192.168.1.194`, leaving `HS_TRANSMITTER=fake`
-- [ ] `./scripts/dev.sh`, and check the status strip, the power chart and the History tab are all
-      showing real watts
+- [x] Copy `backend/.env.example` to `backend/.env` and set `HS_POWER_MONITOR=shelly` and
+      `HS_SHELLY_HOST=192.168.1.194`, leaving `HS_TRANSMITTER=fake`. **Both lines, including the
+      address**: the mode alone leaves it talking to a default that is not there
+- [x] `./scripts/dev.sh` and check the startup line reads `power=shelly at 192.168.1.194`
+- [ ] Watch the app follow the unit. Power on with the physical remote and the Status card should
+      change within thirty seconds, then set it cooling and watch it say `cooling`. That is the app
+      observing real hardware through nothing but current draw, and it is the only closed loop in
+      the project
 
 The thresholds need no lines in `.env` any more. The measured values are the defaults.
 
