@@ -61,7 +61,9 @@ class ShellyPowerMonitor:
                 if attempt == 1:
                     await asyncio.sleep(RETRY_GAP_S)
                     continue
-                log.warning("Shelly at %s unreachable, twice: %s", self.host, exc)
+                # %r not %s: a failed DNS lookup arrives as a ConnectError whose
+                # message is an empty string, which logs as a colon and nothing.
+                log.warning("Shelly at %s unreachable, twice: %r", self.host, exc)
                 return None
 
             watts = payload.get("apower")

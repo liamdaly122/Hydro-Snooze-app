@@ -48,9 +48,16 @@ async def lifespan(app: FastAPI):
     service = Service(settings)
     app.state.service = service
     await service.start()
-    log.info(
-        "HydroSnooze up. transmitter=%s power=%s", settings.transmitter, settings.power_monitor
-    )
+    # Naming the address, not just the mode. "power=shelly" looks like success
+    # whether or not the host was ever set, and a missing host falls back to a
+    # default that is nobody's real plug.
+    transmitter = settings.transmitter
+    if transmitter != "fake":
+        transmitter += f" at {settings.esphome_host}"
+    power = settings.power_monitor
+    if power != "fake":
+        power += f" at {settings.shelly_host}"
+    log.info("HydroSnooze up. transmitter=%s, power=%s", transmitter, power)
     try:
         yield
     finally:
