@@ -291,7 +291,33 @@ They are already filled into both configurations in `docs/`.
 The board arrives pre-flashed with Seeed's own configuration. Flashing over it is expected, and it
 means the touch button and the vibration motor stop doing anything. Neither is used here.
 
-**Done when** ESPHome is installed and `docs/secrets.yaml` has real values in it.
+### Build it before the board arrives
+
+`esphome compile` does everything except talk to the board, so it can be done the day before. The
+first run fetches the whole ESP-IDF toolchain and builds from scratch, which is where all the time
+goes. Doing it in advance turns the first flash into a copy over USB.
+
+```sh
+~/esphome/bin/esphome compile docs/esphome-capture.yaml
+```
+
+Confirmed working, ESPHome 2026.8.2 against ESP-IDF 5.5.5:
+
+```
+hydrosnooze-ir.bin binary size 0xbf1e0 bytes
+RAM:   [===       ]  32.2% (used 103412 bytes from 321296 bytes)
+Flash: [====      ]  42.6% (used 782454 bytes from 1835008 bytes)
+INFO Successfully compiled program.
+```
+
+Plenty of room, which also settles the `receive_symbols: 512` question: 512 symbols is about 2 kB
+against 217 kB of DRAM still free.
+
+The toolchain caches in `~/Library/Caches/esphome/`, and both configurations share the build
+directory because they share a name, so the second one builds in a fraction of the time.
+
+**Done when** ESPHome is installed, `docs/secrets.yaml` has real values in it, and the compile has
+printed `Successfully compiled program.`
 
 ---
 
