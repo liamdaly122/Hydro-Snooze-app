@@ -49,7 +49,7 @@ export function App({ client }: { client: ApiClient }) {
         {!ready ? (
           <p className="empty">Connecting…</p>
         ) : screen === 'dev' ? (
-          <Dev />
+          <Dev state={state} realPlug={!(info?.fake_power_monitor ?? true)} />
         ) : screen === 'history' ? (
           <History power={power} events={events} />
         ) : editingSchedule ? (

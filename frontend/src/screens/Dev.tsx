@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card } from '../components/Card'
 import { sim, type SimSnapshot } from '../api/http'
+import { formatWatts } from '../domain'
+import type { DeviceState } from '../types'
 
 /**
  * The time machine, and a window into the simulated unit.
@@ -11,8 +13,12 @@ import { sim, type SimSnapshot } from '../api/http'
  *
  * The press log is the point of the whole exercise: every press, what the unit
  * did about it, and which ones were swallowed.
+ *
+ * With a real plug attached this screen shows only half the picture, and says
+ * so. The presses drive a simulation; the plug measures a real unit that nothing
+ * here is commanding. Two different objects, and the numbers will not agree.
  */
-export function Dev() {
+export function Dev({ state, realPlug }: { state: DeviceState; realPlug: boolean }) {
   const [snap, setSnap] = useState<SimSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -91,6 +97,14 @@ export function Dev() {
       </Card>
 
       <Card label="Simulated unit">
+        {realPlug && (
+          <p className="footnote" style={{ marginTop: 0, marginBottom: 14 }}>
+            The plug is real and this unit is not. Every press below lands on the simulation, so
+            the two draws are measuring different things: one is what the simulation would pull,
+            the other is what your actual HydroSnooze is pulling right now. Nothing here is
+            commanding that one.
+          </p>
+        )}
         {unit ? (
           <dl className="dev__facts">
             <Fact k="Power" v={unit.powered ? 'On' : 'Off'} />
@@ -100,7 +114,8 @@ export function Dev() {
             <Fact k="Schedule" v={unit.schedule_running ? 'Running' : 'Not running'} />
             <Fact k="Ends" v={unit.schedule_ends_at ? unit.schedule_ends_at.slice(11, 16) : '--'} />
             <Fact k="Phases" v={unit.phase_temps.map((t) => `${t}°`).join(' ')} />
-            <Fact k="Draw" v={`${unit.watts} W`} />
+            <Fact k={realPlug ? 'Draw, simulated' : 'Draw'} v={`${unit.watts} W`} />
+            {realPlug && <Fact k="Draw, real plug" v={formatWatts(state.observed_power_w)} />}
           </dl>
         ) : (
           <p className="empty">Not connected.</p>
