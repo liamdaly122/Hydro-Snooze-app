@@ -1,21 +1,38 @@
 # Setting up the hardware
 
-The six evenings-worth of work that turns the simulation into a bed that cools itself.
+The work that turns the simulation into a bed that cools itself. Six steps, none of them a whole
+evening except the blaster.
 
-Written for someone who has never used a Raspberry Pi. If a line looks like nonsense, it is
-explained underneath.
+Written so that a version of me who has never used a Raspberry Pi can follow it. If a line looks
+like nonsense, it is explained underneath.
 
-**Read `GETTING-STARTED.md` first** if the app has not been run on the Mac yet. Everything here
-assumes it has, because knowing what the press log looks like when it works is what makes a broken
-one obvious.
+**Read [GETTING-STARTED.md](GETTING-STARTED.md) first** if the app has not been run on the Mac yet.
+Everything here assumes it has, because knowing what the press log looks like when it works is what
+makes a broken one obvious.
 
-**A word of honesty.** None of the hardware steps below have been tested by me against real
-equipment, because none of it existed when this was written. The parts that talk to the blaster and
-the plug are written in full and never run. Expect to correct something in step 3.
+**A word of honesty.** The code that talks to the blaster and the plug is written in full and has
+never run against real equipment. That is no longer true of both halves at once: step 1 tests the
+plug on its own, with nothing else in the project involved, so by the time I get to the blaster only
+one untested thing is left. Expect to correct something in step 4 anyway.
 
 ---
 
-## Before starting
+## The order, and why
+
+| Step | Needs | Roughly |
+|---|---|---|
+| 1. The Shelly | Nothing at all | An hour |
+| 2. The Raspberry Pi | The Pi and a card | An evening |
+| 3. The infrared blaster | The Pi | An hour |
+| 4. Capture the eight codes | Step 3, and the physical remote | An evening |
+| 5. Mute the unit | Step 4 | Two minutes |
+| 6. Install and swap | Everything above | An hour |
+
+The Shelly comes first because it is the only part that needs nothing else. It joins the Wi-Fi and
+answers HTTP by itself, and the Mac is already on that network, so it can be measured and proven the
+day it arrives.
+
+### What to buy
 
 | Item | Roughly |
 |---|---|
@@ -29,7 +46,125 @@ is the most likely way the whole thing stops working.
 
 ---
 
-## Step 1: the Raspberry Pi
+## Step 1: the Shelly
+
+About an hour, and it needs no Pi, no blaster and no Python setup.
+
+### Get it on the network
+
+1. Plug it into the wall on its own, with nothing plugged into it. Wait about thirty seconds
+2. Install the **Shelly Smart Control** app on the phone and let it find the plug over Bluetooth. It
+   appears as something like `ShellyPlugSG3-XXXXXX`
+3. Join it to the Wi-Fi. **It needs the 2.4 GHz network.** If the router broadcasts one name for
+   both bands this usually just works; if 2.4 and 5 GHz have separate names, pick the 2.4 one. This
+   is where most Shelly setups stall
+4. Write down its IP address. It is in the app under the device's information, or in the router's
+   list of connected devices
+5. Give it a fixed address in the router if that is easy. Usually called a DHCP reservation. Skip it
+   if the router makes it painful; it only matters so the address does not move later
+
+If the app cannot find the plug at all, the fallback is its own Wi-Fi: connect the Mac to the
+`ShellyPlugSG3-XXXXXX` network and open `http://192.168.33.1`.
+
+### Prove it answers
+
+Paste this into a browser on the Mac, with the real IP:
+
+```
+http://192.168.1.42/rpc/Switch.GetStatus?id=0
+```
+
+A blob of JSON comes back with `"apower"` in it. That is the exact endpoint the service uses, so
+this one check proves the whole plug half of the project.
+
+### Set the auto-off timer, while I am already in the app
+
+Find the auto-off setting under the device's output options and set it to **10 hours**. Some screens
+want seconds, in which case that is **36000**.
+
+**This is not optional.** The app drives the night itself, so the unit never switches itself off,
+and the software temperature ceiling is set to the unit's own maximum, so nothing in the app stops a
+warming stage running at 55°C. If the Pi dies at 3am, this timer is the only thing left.
+
+Doing it now rather than later means the backstop is in place before anything is ever left running
+unattended.
+
+### Read the four states
+
+Plug the unit into the Shelly and the Shelly into the wall. Then on the Mac, in the project folder:
+
+```sh
+./scripts/plug.py 192.168.1.42
+```
+
+That reads the plug once a second and says which of the four states the service would call it, using
+the service's own classifier so the two cannot drift apart. Put the unit into each state with the
+physical remote, wait for the settled column to stop moving, and write it down.
+
+| Do this on the remote | State | Expected, roughly | Mine |
+|---|---|---|---|
+| Power the unit off | Off at the wall | under 5 W | |
+| On, set close to where the bed already is, left to stop working | Idle | 5 to 60 W | |
+| Cooling, set to 15°C | Cooling | around 170 W | |
+| Warming, set to 40°C | Heating | around 300 W | |
+
+Those four numbers are how the app knows whether a power command actually worked. They are the only
+measured values in the whole project; everything else it holds is belief.
+
+### Settle the one open assumption
+
+While the bed is still warm from the heating reading, set warming to **25°C** on the remote and
+watch the draw for a couple of minutes.
+
+Cooling covers 15 to 35°C and warming covers 25 to 55°C, so between 25 and 35 both modes can be set
+to the same number and the app has to pick one. It picks from the direction the bed has to move: a
+stage climbing into that band warms, a stage dropping into it, 30°C down to 25°C for instance,
+cools. That rests on warming mode only ever heating.
+
+- Stays around 170 W: warming cools too, and the direction rule is unnecessary, though harmless.
+- Falls to idle: warming only heats, and the rule is doing real work.
+
+### Run the app against the real plug
+
+This is the half-step the plug makes possible, and it is worth taking. `backend/hydrosnooze/adapters/shelly.py`
+has never run against hardware. Finding a bug in it now is much cheaper than finding it on the
+evening I am also debugging infrared.
+
+Copy the example settings and edit them:
+
+```sh
+cp backend/.env.example backend/.env
+```
+
+```
+HS_TRANSMITTER=fake
+HS_POWER_MONITOR=shelly
+HS_SHELLY_HOST=192.168.1.42
+```
+
+Then the three thresholds. **These are boundaries between states, not the readings themselves**, so
+each one goes roughly halfway between the two numbers it separates:
+
+```
+HS_OFF_THRESHOLD_W=5      # between the off and idle readings
+HS_IDLE_MAX_W=100         # between the idle and cooling readings
+HS_COOLING_MAX_W=235      # between the cooling and heating readings
+```
+
+Then:
+
+```sh
+./scripts/dev.sh
+```
+
+Simulated unit, real plug. The status strip, the power chart and the History tab are all live
+measurements now.
+
+**Done when** the app shows the plug's real draw and the four states are written down.
+
+---
+
+## Step 2: the Raspberry Pi
 
 One evening, and easier than it sounds.
 
@@ -52,19 +187,19 @@ Then from Terminal on the Mac:
 ssh liam@hydrosnooze.local
 ```
 
-Use whichever username was set. It will ask about authenticity the first time: type `yes`.
+Whichever username was set. It asks about authenticity the first time: type `yes`.
 
-**Done when** a prompt appears that says `liam@hydrosnooze`. Everything from now on that says "on the
-Pi" means typed into this window.
+**Done when** a prompt appears saying `liam@hydrosnooze`. Everything from here that says "on the Pi"
+means typed into this window.
 
-If `hydrosnooze.local` is not found, find the Pi's IP address in the router's admin page and use that
-instead.
+If `hydrosnooze.local` is not found, find the Pi's IP address in the router's admin page and use
+that instead.
 
 ---
 
-## Step 2: the infrared blaster
+## Step 3: the infrared blaster
 
-One evening.
+About an hour.
 
 Plug the XIAO Smart IR Mate into USB power, somewhere it can see the unit's infrared receiver.
 
@@ -87,9 +222,11 @@ thing to debug.
 `docs/esphome-hydrosnooze.yaml` in this repository is the configuration to fill in. It has the
 capture section commented out at the bottom.
 
+**Done when** the board appears in the dashboard and its logs stream.
+
 ---
 
-## Step 3: capture the eight codes
+## Step 4: capture the eight codes
 
 **This is the step everything else hangs on.** If the codes come out cleanly, the rest is
 straightforward.
@@ -116,6 +253,9 @@ That is far more reliable than raw timings and much shorter.
 
 **If they only come out as raw timings**, that works too, it is just uglier.
 
+The app never presses `schedule` or `timer`, because it stopped using the unit's own scheduler. They
+are still worth capturing: they are two of the eight, and skipping them saves nothing.
+
 Then fill them into the button section of the configuration and flash it properly. The names matter:
 the service looks for button entities called exactly `power`, `schedule`, `temp_up`, `temp_down`,
 `cool`, `warm`, `timer`, `mute`.
@@ -124,65 +264,29 @@ the service looks for button entities called exactly `power`, `schedule`, `temp_
 
 ---
 
-## Step 4: mute the unit, once
+## Step 5: mute the unit, once
 
 Two minutes, once presses can be fired on demand.
 
 The app drives every part of the night itself, which means roughly thirty presses land at each stage
-boundary, at two in the morning, next to a bed. The unit beeps on every press.
+boundary, at two in the morning, next to a bed. The unit beeps on every one.
 
 - Fire the `mute` code once and check the beeping stops
 
 **Once only.** The unit saves this setting and keeps it through a power cut, so mute is a toggle
 rather than a command. Sending it again turns the beep back on, and the press that does it beeps.
-That is why nothing in the app sends it automatically, and why there is a "Toggle the unit's beep"
-button under the Status card rather than a mute step in the nightly routine.
+That is why nothing in the app sends it automatically, and why there is a button under the Status
+card rather than a mute step in the nightly routine.
 
-If the `mute` code did not capture cleanly, go back to step 3 for that one button. It matters more
+There is a second reason to do it by hand, in daylight. Every command starts with two throwaway
+presses to wake the display, and on an already-awake display those two presses really do lower the
+target by a degree. Every other command rails to a mode's floor and counts back up afterwards, which
+absorbs them. Mute has nothing to count to, so the app marks the temperature unknown afterwards
+rather than showing a number the unit is no longer holding. Fine as a setup action. Not something to
+trigger at 2am.
+
+If the `mute` code did not capture cleanly, go back to step 4 for that one button. It matters more
 than it looks.
-
-There used to be a question here about the unit's own scheduler timing out from phase 2. The app no
-longer arms that scheduler at all, so the question no longer needs an answer.
-
-## Step 5: the Shelly
-
-About half an hour.
-
-Plug it in between the wall socket and the unit. Follow its instructions to join the Wi-Fi, and
-**write down the IP address** it ends up with. Give it a fixed address in the router if that is easy,
-so it does not move later.
-
-Then read the watts in four states and write each one down. On the Mac, in the project folder:
-
-```sh
-./scripts/plug.py 192.168.1.42
-```
-
-That reads the plug once a second and says which of the four states the service would call it. It
-needs nothing else: no Pi, no blaster, no Python setup. Put the unit into each state with the
-physical remote, wait for the settled column to stop moving, and write it down.
-
-| State | Expected, roughly | Yours |
-|---|---|---|
-| Unit off at the wall | under 5 W | |
-| On, sitting at temperature | 5 to 60 W | |
-| Actively cooling | around 170 W | |
-| Actively heating | around 300 W | |
-
-Those four numbers are how the app knows whether a power command actually worked. Until they are
-measured they are guesses from the manual.
-
-**While the plug is reading, settle one open question.** Cooling covers 15 to 35°C and warming covers
-25 to 55°C, so between 25 and 35 both modes can be set to the same number, and the app has to pick
-one. It assumes warming mode only heats, so a stage that drops into that band, 30°C down to 25°C for
-instance, is run in cooling. Get the bed warm, set warming to 25°C on the remote, and watch the draw.
-If it stays around 170 W then warming cools too and the assumption is wrong. If it falls to idle,
-the assumption holds.
-
-**While here: set the Shelly's own auto-off timer**, in its own app, to about ten hours. This is not
-optional any more, for two reasons. The app drives the night itself, so the unit never switches
-itself off; and the software temperature ceiling is set to the unit's own maximum, so nothing in the
-app stops a warming stage running at 55°C. If the Pi dies at 3am, this timer is the only thing left.
 
 ---
 
@@ -221,15 +325,15 @@ HS_TRANSMITTER=esphome
 HS_POWER_MONITOR=shelly
 ```
 
-And add what was collected in steps 2 to 5:
+And add the ESPHome details, plus the Shelly lines already worked out on the Mac in step 1:
 
 ```
 HS_ESPHOME_HOST=hydrosnooze-ir.local
 HS_ESPHOME_ENCRYPTION_KEY=the key from the ESPHome configuration
-HS_SHELLY_HOST=192.168.1.50
+HS_SHELLY_HOST=192.168.1.42
 HS_OFF_THRESHOLD_W=5
-HS_IDLE_MAX_W=60
-HS_COOLING_MAX_W=220
+HS_IDLE_MAX_W=100
+HS_COOLING_MAX_W=235
 ```
 
 Save with Ctrl-O then Enter, exit with Ctrl-X. Then:
@@ -242,13 +346,13 @@ journalctl -u hydrosnooze -f
 That second command shows what it is doing, live. Ctrl-C stops watching, it does not stop the
 service.
 
-**Two lines changed and it is now driving real hardware.** That was the point of building it the way
-it was built.
+**Two lines changed and it is driving real hardware.** That was the point of building it the way it
+was built.
 
 Then open `http://hydrosnooze.local:8000` in Safari on the phone and add it to the Home Screen.
 
-Note the simulator tab is gone. It only ever appears when the transmitter is fake, so there is no way
-to jump the clock on a unit that is genuinely running.
+The simulator tab is gone. It only ever appears when the transmitter is fake, so there is no way to
+jump the clock on a unit that is genuinely running.
 
 ---
 
@@ -266,16 +370,23 @@ In another Terminal window, watch what it is sending:
 journalctl -u hydrosnooze -f
 ```
 
-If the presses land, the codes are good and the hard part is behind you.
+If the presses land, the codes are good and the hard part is behind me.
 
-### Then write the schedule, standing in front of it
+### Then watch a stage boundary land
 
-This is the one that sends about ninety presses in a row and walks the unit through its setup wizard.
-The app warns before starting, because **nothing in software can check what actually got written.**
+Set a short stage in the app and stand in front of the unit when it changes. About thirty presses
+over ten seconds: two throwaway presses to wake the display, a rail down to the mode's floor, then a
+count up to the target.
 
-Watch the unit step through three phases. If it does not, the codes or the timing need another look.
+There is no schedule to write any more. The app stopped arming the unit's own scheduler, so nothing
+has to be walked through the setup wizard and nothing is unverifiable. This is the step that used to
+be ninety presses and a warning that software could not check the result.
 
-### Then one night, with the normal alarm still set
+Worth doing twice, with boundaries that cross 25°C in each direction, so the mode switch gets watched
+as well as the temperature. Going up should press `warm`; going down should press `warm` and then
+`cool`.
+
+### Then one night, with my normal alarm still set
 
 Let it run a full night. In the morning, open the History tab and check:
 
@@ -283,7 +394,8 @@ Let it run a full night. In the morning, open the History tab and check:
 - Did each stage change at the right time?
 - Did the app switch it off at the wake time? Nothing else will.
 
-The event log says what it tried and the power chart says what actually happened.
+The event log says what it tried and the power chart says what actually happened. When those two
+disagree, believe the chart: it is the only part of the screen that is measured.
 
 ### Then trust it
 
@@ -297,8 +409,10 @@ And keep the Shelly's auto-off timer set as a backstop.
 |---|---|
 | App will not load at all | `sudo systemctl status hydrosnooze` on the Pi |
 | App loads but is blank | The app was not copied across. Run `./scripts/deploy.sh` from the Mac |
-| Everything says `unknown` | The Shelly is unreachable. Check `HS_SHELLY_HOST` matches its real IP |
-| Presses sent, unit ignores them | The codes are wrong, or the blaster cannot see the unit. Back to step 3 |
+| Everything says `unknown` | The Shelly is unreachable. Check `HS_SHELLY_HOST` matches its real IP, and that `./scripts/plug.py <ip>` still answers |
+| Watts look right but the state is wrong | The three thresholds are not separating the four states. Re-read them with `./scripts/plug.py` and put each boundary halfway between |
+| Presses sent, unit ignores them | The codes are wrong, or the blaster cannot see the unit. Back to step 4 |
 | A stage did not change | Check the event log for a missed stage warning, then the power chart for whether the draw changed |
+| A stage set the right number but the bed never moved | Check which mode it used. If a stage between 25 and 35°C is warming when the bed needed to come down, the assumption from step 1 was wrong |
 | The unit was still on in the morning | Check the event log for the power off entry. Then check the Shelly's auto-off timer is set |
-| Anything else | `journalctl -u hydrosnooze -n 100`, and send me the output |
+| Anything else | `journalctl -u hydrosnooze -n 100` |
