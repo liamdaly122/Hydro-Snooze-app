@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .events import Event, Level
 from .models import (
+    MINUTES_IN_A_DAY,
     STAGE_ORDER,
     Mode,
     Schedule,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS schedule (
     enabled              INTEGER NOT NULL,
     days_of_week         TEXT    NOT NULL,
     wake_time            TEXT    NOT NULL,
+    bed_time             TEXT    NOT NULL,
     stages               TEXT    NOT NULL,
     cooling_speed        TEXT    NOT NULL,
     updated_at           TEXT
@@ -58,6 +60,7 @@ SCHEDULE_COLUMNS = (
     "enabled",
     "days_of_week",
     "wake_time",
+    "bed_time",
     "stages",
     "cooling_speed",
     "updated_at",
@@ -95,6 +98,10 @@ class Database:
         """
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
+            # Empty rather than a real time: a row written before bedtime was a
+            # setting has its own night length sitting in the stage durations,
+            # and _bed_time_from works it out rather than imposing 22:30.
+            ("bed_time", "TEXT NOT NULL DEFAULT ''"),
             ("stages", "TEXT NOT NULL DEFAULT '[]'"),
             ("cooling_speed", "TEXT NOT NULL DEFAULT 'quiet'"),
         ]
@@ -146,11 +153,12 @@ class Database:
         self._db.execute(
             """
             INSERT INTO schedule (id, name, enabled, days_of_week, wake_time,
-                                  stages, cooling_speed, updated_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                                  bed_time, stages, cooling_speed, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, enabled=excluded.enabled,
                 days_of_week=excluded.days_of_week, wake_time=excluded.wake_time,
+                bed_time=excluded.bed_time,
                 stages=excluded.stages, cooling_speed=excluded.cooling_speed,
                 updated_at=excluded.updated_at
             """,
@@ -159,6 +167,7 @@ class Database:
                 int(schedule.enabled),
                 json.dumps(schedule.days_of_week),
                 schedule.wake_time.strftime("%H:%M"),
+                schedule.bed_time.strftime("%H:%M"),
                 json.dumps(
                     [
                         {"stage": s.stage.value, "duration_minutes": s.duration_minutes, "temp_c": s.temp_c}
@@ -232,16 +241,35 @@ def _schedule_from(row: sqlite3.Row) -> Schedule:
     a row that still has them has never been written by this version of the app,
     because writing it is exactly what was failing.
     """
-    hour, minute = (int(p) for p in row["wake_time"].split(":"))
+    wake_time = _time_from(row["wake_time"])
+    stages = _stages_from(row)
     return Schedule(
         name=row["name"],
         enabled=bool(row["enabled"]),
         days_of_week=json.loads(row["days_of_week"]),
-        wake_time=time(hour, minute),
-        stages=_stages_from(row),
+        wake_time=wake_time,
+        bed_time=_bed_time_from(row, wake_time, stages),
+        stages=stages,
         cooling_speed=_cooling_speed_from(row),
         updated_at=_parse(row["updated_at"]),
     )
+
+
+def _bed_time_from(row: sqlite3.Row, wake_time: time, stages: list[SleepStage]) -> time:
+    """When the lights go out.
+
+    A row written before bedtime was a setting does not have the column, but it
+    does have the night: the stage durations are what bedtime used to be derived
+    from. Working backwards from the wake time keeps the night exactly as long as
+    it was, rather than imposing a default and quietly rescaling everything.
+    """
+    stored = row["bed_time"] if "bed_time" in set(row.keys()) else ""
+    if stored:
+        return _time_from(stored)
+    minutes = sum(s.duration_minutes for s in stages)
+    wake_minutes = wake_time.hour * 60 + wake_time.minute
+    bed = (wake_minutes - minutes) % MINUTES_IN_A_DAY
+    return time(bed // 60, bed % 60)
 
 
 def _stages_from(row: sqlite3.Row) -> list[SleepStage]:
@@ -280,6 +308,11 @@ def _cooling_speed_from(row: sqlite3.Row) -> Mode:
         if legacy.is_cooling:
             return legacy
     return Mode(row["cooling_speed"])
+
+
+def _time_from(raw: str) -> time:
+    hour, minute = (int(part) for part in raw.split(":"))
+    return time(hour, minute)
 
 
 def _iso(value: datetime | None) -> str | None:

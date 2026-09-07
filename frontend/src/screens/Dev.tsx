@@ -54,7 +54,7 @@ export function Dev() {
 
   return (
     <>
-      <Card label="Simulated clock" chevron={false}>
+      <Card label="Simulated clock">
         <div className="dev__clock">{snap ? snap.now.slice(11, 19) : '--:--:--'}</div>
         <div className="dev__date">{snap ? formatDate(snap.now) : ''}</div>
 
@@ -90,7 +90,7 @@ export function Dev() {
         </div>
       </Card>
 
-      <Card label="Simulated unit" chevron={false}>
+      <Card label="Simulated unit">
         {unit ? (
           <dl className="dev__facts">
             <Fact k="Power" v={unit.powered ? 'On' : 'Off'} />
@@ -112,7 +112,7 @@ export function Dev() {
         </div>
       </Card>
 
-      <Card label="Press log" chevron={false}>
+      <Card label="Press log">
         <pre className="dev__log" ref={logRef}>
           {snap?.press_log.length ? snap.press_log.join('\n') : 'Nothing sent yet.'}
         </pre>

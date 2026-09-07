@@ -22,7 +22,7 @@ import type {
   ServiceInfo,
   SleepStage,
 } from '../types'
-import { MAX_TEMPERATURE_C, MODE_RANGE, WARMING_FLOOR_C } from '../types'
+import { MAX_TEMPERATURE_C, MIN_STAGE_MINUTES, MODE_RANGE, WARMING_FLOOR_C } from '../types'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -48,6 +48,8 @@ export class MockApiClient implements ApiClient {
     enabled: true,
     days_of_week: [0, 1, 2, 3, 4],
     wake_time: '06:30',
+    bed_time: '22:30',
+    night_minutes: 480,
     stages: [
       { stage: 'deep', duration_minutes: 240, temp_c: 17, mode: 'quiet' },
       { stage: 'rem', duration_minutes: 210, temp_c: 20, mode: 'quiet' },
@@ -95,7 +97,10 @@ export class MockApiClient implements ApiClient {
   async putSchedule(patch: Partial<Schedule>): Promise<Schedule> {
     await sleep(120)
     const next = { ...this.schedule, ...patch, updated_at: nowIso() }
-    next.stages = withModes(next.stages, next.cooling_speed)
+    // Mirrors Schedule.__post_init__: the stages always fill the night exactly,
+    // whichever of the three things the patch changed.
+    next.night_minutes = minutesBetween(next.bed_time, next.wake_time)
+    next.stages = withModes(fitStages(next.stages, next.night_minutes), next.cooling_speed)
     next.preconditioning = preconditioningFor(next.stages[0]?.temp_c ?? 20)
     this.schedule = next
     this.emit({ schedule: { ...this.schedule } })
@@ -224,6 +229,43 @@ export class MockApiClient implements ApiClient {
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+
+/** Mirrors `minutes_between`: the gap, wrapping midnight. */
+function minutesBetween(bed: string, wake: string): number {
+  const mins = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number)
+    return h * 60 + m
+  }
+  return (((mins(wake) - mins(bed)) % 1440) + 1440) % 1440 || 1440
+}
+
+/** Mirrors `fit_stages`: scale to fill the night, keep the shape, add up exactly. */
+function fitStages(stages: SleepStage[], total: number): SleepStage[] {
+  if (stages.length === 0) return []
+  const target = Math.max(total, MIN_STAGE_MINUTES * stages.length)
+  const current = stages.reduce((n, s) => n + s.duration_minutes, 0)
+  if (current === target) return stages
+  const raw = stages.map((s) =>
+    current <= 0 ? target / stages.length : (s.duration_minutes * target) / current,
+  )
+  const minutes = raw.map((r) => Math.floor(r))
+  const order = raw
+    .map((r, i) => [r - minutes[i], i] as const)
+    .sort((a, b) => b[0] - a[0])
+    .map(([, i]) => i)
+  const short = target - minutes.reduce((n, m) => n + m, 0)
+  for (let n = 0; n < short; n += 1) minutes[order[n % stages.length]] += 1
+  for (let i = 0; i < minutes.length; i += 1) {
+    while (minutes[i] < MIN_STAGE_MINUTES) {
+      let donor = 0
+      for (let j = 1; j < minutes.length; j += 1) if (minutes[j] > minutes[donor]) donor = j
+      if (donor === i || minutes[donor] <= MIN_STAGE_MINUTES) break
+      minutes[donor] -= 1
+      minutes[i] += 1
+    }
+  }
+  return stages.map((s, i) => ({ ...s, duration_minutes: minutes[i] }))
 }
 
 /**

@@ -26,7 +26,7 @@ export function StatusStrip({
   const activity = state.inferred_activity === 'unknown' ? null : state.inferred_activity
 
   return (
-    <Card label="Status" chevron={false}>
+    <Card label="Status">
       <div className="status">
         <Cell label="Unit" value={POWER_LABEL[state.power]} unknown={state.power === 'unknown'} />
         <Cell

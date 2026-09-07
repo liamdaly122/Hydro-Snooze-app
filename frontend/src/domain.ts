@@ -56,8 +56,10 @@ export function planForWake(wakeOn: Date, schedule: Schedule): NightPlan {
   const wakeAt = new Date(wakeOn)
   wakeAt.setHours(h, m, 0, 0)
 
-  const total = schedule.stages.reduce((n, s) => n + s.duration_minutes, 0)
-  const bedtimeAt = new Date(wakeAt.getTime() - total * MINUTE)
+  // Anchored on the night, not on the stages. They add up to the same thing once
+  // the service has answered, but a draft mid-edit can be a few minutes out and
+  // bedtime should not flicker while it is.
+  const bedtimeAt = new Date(wakeAt.getTime() - schedule.night_minutes * MINUTE)
 
   const steps: StageStep[] = []
   let cursor = bedtimeAt

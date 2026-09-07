@@ -11,6 +11,7 @@ interface Props {
   state: DeviceState
   schedule: Schedule
   maxC: number
+  onOpenSchedule: () => void
 }
 
 /**
@@ -21,7 +22,7 @@ interface Props {
  * service drives every stage itself now, so a change is just a change: it saves,
  * and the next stage boundary uses it.
  */
-export function Home({ client, state, schedule, maxC }: Props) {
+export function Home({ client, state, schedule, maxC, onOpenSchedule }: Props) {
   const [draft, setDraft] = useState<Schedule>(schedule)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,14 +39,6 @@ export function Home({ client, state, schedule, maxC }: Props) {
     save({ stages: draft.stages.map((s) => (s.stage === stage ? { ...s, temp_c: tempC } : s)) })
   }
 
-  function setStageDuration(stage: Stage, minutes: number) {
-    save({
-      stages: draft.stages.map((s) =>
-        s.stage === stage ? { ...s, duration_minutes: Math.max(15, minutes) } : s,
-      ),
-    })
-  }
-
   return (
     <>
       <TemperatureCard
@@ -58,7 +51,7 @@ export function Home({ client, state, schedule, maxC }: Props) {
         }}
       />
 
-      <WakeCard draft={draft} onDraftChange={save} onStageDuration={setStageDuration} />
+      <WakeCard draft={draft} onDraftChange={save} onOpen={onOpenSchedule} />
 
       <ModeSelector
         mode={draft.cooling_speed}
@@ -85,10 +78,6 @@ export function Home({ client, state, schedule, maxC }: Props) {
         running: if it stops, the bed stays wherever it was and will not switch itself off.
       </p>
 
-      <p className="footnote">
-        The wake time sets temperature only. It is not an alarm and cannot wake you. Keep your
-        actual alarm in the Clock app.
-      </p>
     </>
   )
 }

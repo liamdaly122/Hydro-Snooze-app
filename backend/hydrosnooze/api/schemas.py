@@ -37,6 +37,10 @@ def schedule_json(schedule: Schedule) -> dict[str, Any]:
         "enabled": schedule.enabled,
         "days_of_week": schedule.days_of_week,
         "wake_time": schedule.wake_time.strftime("%H:%M"),
+        "bed_time": schedule.bed_time.strftime("%H:%M"),
+        # Derived, and sent so the app never has to work out which side of
+        # midnight the night starts on.
+        "night_minutes": schedule.night_minutes,
         "stages": [
             {
                 "stage": s.stage.value,

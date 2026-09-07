@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..models import Mode, SleepStage, Stage, modes_for, range_for
+from ..models import (
+    MIN_STAGE_MINUTES,
+    Mode,
+    SleepStage,
+    Stage,
+    minutes_between,
+    modes_for,
+    range_for,
+)
 from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import schedule_json, state_json
@@ -33,6 +42,7 @@ class SchedulePatch(BaseModel):
     enabled: bool | None = None
     days_of_week: list[int] | None = None
     wake_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    bed_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     stages: list[StagePatch] | None = None
     cooling_speed: Mode | None = None
 
@@ -110,11 +120,24 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
         for stage, mode in zip(data["stages"], modes_for(data["stages"], speed), strict=True):
             _guard_temperature(service, stage.temp_c, mode)
 
-    if "wake_time" in data:
-        hour, minute = (int(p) for p in data["wake_time"].split(":"))
-        if not (0 <= hour < 24 and 0 <= minute < 60):
-            raise HTTPException(422, "wake_time must be a real time of day")
-        data["wake_time"] = time(hour, minute)
+    for field in ("wake_time", "bed_time"):
+        if field in data:
+            hour, minute = (int(p) for p in data[field].split(":"))
+            if not (0 <= hour < 24 and 0 <= minute < 60):
+                raise HTTPException(422, f"{field} must be a real time of day")
+            data[field] = time(hour, minute)
+
+    # Bedtime and the wake time fix how long the night is, and every stage needs
+    # room to exist inside it. Checked before the schedule is built, because the
+    # schedule itself would silently squeeze them to fit.
+    would_be = replace(service.schedule, **data)
+    floor = MIN_STAGE_MINUTES * len(would_be.stages)
+    if minutes_between(would_be.bed_time, would_be.wake_time) < floor:
+        raise HTTPException(
+            422,
+            f"A night of {len(would_be.stages)} stages needs at least {floor} minutes "
+            f"between going to bed and waking up.",
+        )
 
     if "days_of_week" in data and any(d < 0 or d > 6 for d in data["days_of_week"]):
         raise HTTPException(422, "days_of_week must be 0 (Monday) to 6 (Sunday)")

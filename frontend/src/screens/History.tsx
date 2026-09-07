@@ -6,10 +6,10 @@ import type { DeviceEvent, PowerSample } from '../types'
 export function History({ power, events }: { power: PowerSample[]; events: DeviceEvent[] }) {
   return (
     <>
-      <Card label="Power, 24 hours" chevron={false}>
+      <Card label="Power, 24 hours">
         <PowerChart samples={power} />
       </Card>
-      <Card label="Events" chevron={false}>
+      <Card label="Events">
         <EventLog events={events} />
       </Card>
     </>

@@ -64,6 +64,13 @@ export type Stage = 'deep' | 'rem' | 'wake'
 
 export const STAGE_ORDER: Stage[] = ['deep', 'rem', 'wake']
 
+/**
+ * No stage is allowed to disappear, and this is also the step a boundary moves
+ * by, so a stage can always be nudged back off its own floor. Mirrors
+ * MIN_STAGE_MINUTES in backend/hydrosnooze/models.py.
+ */
+export const MIN_STAGE_MINUTES = 15
+
 export const STAGE_LABEL: Record<Stage, string> = {
   deep: 'Deep',
   rem: 'REM',
@@ -90,7 +97,11 @@ export interface Schedule {
   days_of_week: number[]
   /** "HH:MM", 24 hour. */
   wake_time: string
-  /** The night, in order. Bedtime falls out of how long these add up to. */
+  /** "HH:MM", 24 hour. Set, not derived: with the wake time it fixes the night. */
+  bed_time: string
+  /** Lights out to alarm, wrapping midnight. Derived by the service. */
+  night_minutes: number
+  /** The night, in order. Their durations always add up to `night_minutes`. */
   stages: SleepStage[]
   /** Which speed a cooling stage runs at. Warming stages ignore it. */
   cooling_speed: Mode

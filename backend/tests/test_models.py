@@ -6,11 +6,14 @@ downstream can save it. These are cheap to check and worth checking.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
 import pytest
 
 from hydrosnooze.models import (
+    MIN_STAGE_MINUTES,
+    MINUTES_IN_A_DAY,
     Activity,
     DeviceState,
     Mode,
@@ -20,6 +23,8 @@ from hydrosnooze.models import (
     SleepStage,
     Stage,
     default_stages,
+    fit_stages,
+    minutes_between,
     mode_for_target,
     modes_for,
     plan_for_wake,
@@ -216,3 +221,66 @@ def test_a_night_resolves_its_modes_in_order(temps, expected):
 def test_the_plan_carries_the_resolved_modes_not_the_per_stage_guess():
     plan = plan_for_wake(date(2026, 9, 8), time(6, 30), _night(30, 25, 26))
     assert [step.mode for step in plan.steps] == [Mode.WARMING, Mode.QUIET, Mode.WARMING]
+
+
+# --- Bedtime, and the stages that have to fit inside it -----------------------
+#
+# Bedtime used to fall out of the durations, which meant three fifteen minute
+# stages produced a forty five minute night. It is set now, with the wake time,
+# and the two of them decide how long the night is.
+
+
+def test_the_night_is_the_gap_between_the_two_times():
+    assert minutes_between(time(22, 30), time(6, 30)) == 480
+    assert minutes_between(time(23, 0), time(7, 0)) == 480
+    # Both sides of midnight, and both on the same side of it.
+    assert minutes_between(time(1, 0), time(6, 30)) == 330
+    assert minutes_between(time(6, 30), time(22, 30)) == 960
+
+
+def test_the_same_time_twice_is_a_whole_day_not_nothing():
+    assert minutes_between(time(6, 30), time(6, 30)) == MINUTES_IN_A_DAY
+
+
+def test_the_stages_always_add_up_to_the_night():
+    schedule = Schedule(bed_time=time(23, 0), wake_time=time(6, 30))
+    assert schedule.total_minutes == schedule.night_minutes == 450
+
+
+def test_moving_bedtime_takes_the_time_off_in_proportion():
+    """An hour later to bed is an hour off the night, shared out in the shape the
+    night already had, not taken off whichever stage happens to be last."""
+    before = Schedule(bed_time=time(22, 30), wake_time=time(6, 30))
+    after = replace(before, bed_time=time(23, 30))
+
+    assert [s.duration_minutes for s in before.stages] == [240, 210, 30]
+    assert sum(s.duration_minutes for s in after.stages) == 420
+    assert after.stages[0].duration_minutes > after.stages[1].duration_minutes
+    assert all(s.duration_minutes >= MIN_STAGE_MINUTES for s in after.stages)
+
+
+def test_the_parts_add_up_to_the_whole_exactly():
+    """Rounding each stage on its own loses a minute or gains one. Over a night
+    that is invisible, and it still means bedtime is not when it says it is."""
+    for minutes in range(45, 24 * 60, 7):
+        stages = fit_stages(default_stages(), minutes)
+        assert sum(s.duration_minutes for s in stages) == minutes, minutes
+
+
+def test_no_stage_is_ever_squeezed_out_of_existence():
+    stages = fit_stages(default_stages(), MIN_STAGE_MINUTES * 3)
+    assert [s.duration_minutes for s in stages] == [15, 15, 15]
+
+
+def test_a_short_night_keeps_its_temperatures():
+    stages = fit_stages(default_stages(), 60)
+    assert [s.temp_c for s in stages] == [17, 20, 26]
+    assert [s.stage for s in stages] == [Stage.DEEP, Stage.REM, Stage.WAKE]
+
+
+def test_bedtime_in_the_plan_is_the_bedtime_that_was_set():
+    schedule = Schedule(bed_time=time(23, 15), wake_time=time(6, 30))
+    plan = schedule.plan_for(date(2026, 9, 8))
+    assert plan.bedtime_at == datetime(2026, 9, 7, 23, 15)
+    assert plan.wake_at == datetime(2026, 9, 8, 6, 30)
+    assert plan.steps[-1].ends_at == plan.wake_at

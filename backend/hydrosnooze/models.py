@@ -347,6 +347,71 @@ class SleepStage:
     temp_c: int
 
 
+MINUTES_IN_A_DAY = 24 * 60
+
+#: No stage is allowed to disappear. Fifteen minutes is also the step the app
+#: moves a boundary by, so a stage can always be nudged back off its own floor.
+MIN_STAGE_MINUTES = 15
+
+
+def minutes_between(bed_time: time, wake_time: time) -> int:
+    """How long the night is.
+
+    Bedtime is nearly always the evening before the wake morning, so this wraps
+    midnight: 22:30 to 06:30 is eight hours, not minus sixteen. Setting both to
+    the same time means a full day rather than nothing, because a night of zero
+    length is not a thing anyone means.
+    """
+    bed = bed_time.hour * 60 + bed_time.minute
+    wake = wake_time.hour * 60 + wake_time.minute
+    return (wake - bed) % MINUTES_IN_A_DAY or MINUTES_IN_A_DAY
+
+
+def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]:
+    """Scale the stages to fill the night exactly, keeping their shape.
+
+    Bedtime and the wake time are what get set now, so the night has a length
+    before the stages do, and they divide it rather than decide it. Moving
+    bedtime an hour later takes that hour off the stages in the proportions they
+    already had.
+
+    The parts add up to the whole to the minute, by largest remainder rather than
+    rounding each in isolation, and nothing is allowed to fall below the floor.
+    """
+    if not stages:
+        return []
+
+    count = len(stages)
+    total = max(total_minutes, MIN_STAGE_MINUTES * count)
+    current = sum(s.duration_minutes for s in stages)
+    if current == total:
+        return list(stages)
+
+    raw = [total / count] * count if current <= 0 else [
+        s.duration_minutes * total / current for s in stages
+    ]
+    minutes = [int(r) for r in raw]
+
+    # Whatever truncating lost goes back to the stages that lost the most of it.
+    by_remainder = sorted(range(count), key=lambda i: raw[i] - minutes[i], reverse=True)
+    for n in range(total - sum(minutes)):
+        minutes[by_remainder[n % count]] += 1
+
+    # Then lift anything under the floor, taking from whichever stage is longest,
+    # because that is the one that can most afford it.
+    for i in range(count):
+        while minutes[i] < MIN_STAGE_MINUTES:
+            donor = max(range(count), key=lambda j: minutes[j])
+            if donor == i or minutes[donor] <= MIN_STAGE_MINUTES:
+                break
+            minutes[donor] -= 1
+            minutes[i] += 1
+
+    return [
+        replace(stage, duration_minutes=m) for stage, m in zip(stages, minutes, strict=True)
+    ]
+
+
 def default_stages() -> list[SleepStage]:
     """A sensible starting night: cold for deep sleep, easing up through REM.
 
@@ -410,9 +475,9 @@ def plan_for_wake(
 ) -> NightPlan:
     """Work backwards from the morning you want to wake up.
 
-    The stages run in order and finish at the wake time, so bedtime falls out of
-    how long they add up to. Wake at 06:30 after 4h deep, 3h30 REM and 30m wake
-    means lights out at 22:30, and pre-conditioning starts before that.
+    The stages run in order and finish at the wake time, so bedtime is wherever
+    they start. That still lands on the bedtime that was set, because a Schedule
+    keeps its stages adding up to exactly the night between the two times.
     """
     wake_at = datetime.combine(wake_on, wake_time)
     total = timedelta(minutes=sum(s.duration_minutes for s in stages))
@@ -464,13 +529,29 @@ class Schedule:
     enabled: bool = True
     days_of_week: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
     wake_time: time = time(6, 30)
+    #: When the lights go out. With the wake time this is what fixes how long the
+    #: night is; the stages divide that up rather than deciding it.
+    bed_time: time = time(22, 30)
     #: The night, in order. Deep first, because that is when deep sleep happens.
+    #: Their durations always add up to exactly the night, see __post_init__.
     stages: list[SleepStage] = field(default_factory=default_stages)
     #: Which cooling speed a cooling stage uses. Quiet by default: it is next to
     #: a bed. Warming stages ignore this, the unit has only one warming speed.
     cooling_speed: Mode = Mode.QUIET
     updated_at: datetime | None = None
     id: int = 1
+
+    def __post_init__(self) -> None:
+        # The one invariant. Bedtime and the wake time say how long the night is,
+        # and the stages fill it exactly, so there is no way to hold a schedule
+        # whose parts do not add up to its whole. Runs on replace() too, which is
+        # how every patch reaches this.
+        self.stages = fit_stages(self.stages, self.night_minutes)
+
+    @property
+    def night_minutes(self) -> int:
+        """Lights out to alarm, wrapping midnight."""
+        return minutes_between(self.bed_time, self.wake_time)
 
     @property
     def first_temp_c(self) -> int:

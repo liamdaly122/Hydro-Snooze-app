@@ -862,3 +862,70 @@ button:disabled {
   font-variant-numeric: tabular-nums;
   color: var(--text-mid);
 }
+
+/* --- A card that goes somewhere --------------------------------------------
+   The chevron is a target in its own right, padded out to something a thumb can
+   actually hit rather than the 16px the glyph occupies. */
+.card__open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -14px -12px -14px 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.card__open:active .card__chevron { opacity: 1; }
+
+.app__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -8px;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.app__back-icon { transform: rotate(180deg); }
+
+/* --- Setting a time --------------------------------------------------------
+   A native time input, because on iOS that is the wheel picker everyone already
+   knows, and nothing hand-rolled comes close to it on a phone. */
+.timerow--first { border-top: 0; }
+.timerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  border-top: 1px solid var(--divider);
+}
+.timerow__label {
+  color: var(--text-dim);
+  font-size: 15px;
+}
+.timerow__input {
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--control);
+  color: var(--text);
+  font: inherit;
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+.timerow__input::-webkit-calendar-picker-indicator { display: none; }
+
+/* The last stage has no boundary to move, so its value sits where the buttons
+   would have been rather than leaving two dead controls on the row. */
+.stagerow__value--fixed {
+  color: var(--text-dim);
+  padding-right: 4px;
+}

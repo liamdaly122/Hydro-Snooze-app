@@ -3,22 +3,37 @@ import { ChevronRight } from './Icons'
 
 /**
  * The one card shape the whole app uses: an uppercase letter-spaced label, a
- * chevron, a hairline rule, then content.
+ * hairline rule, then content.
+ *
+ * The chevron only appears when there is somewhere to go. It used to be on every
+ * card and do nothing, which is worse than not having one: a control that looks
+ * tappable and is not teaches you to stop tapping.
  */
 export function Card({
   label,
   children,
-  chevron = true,
+  onOpen,
+  openLabel,
 }: {
   label: string
   children: ReactNode
-  chevron?: boolean
+  onOpen?: () => void
+  openLabel?: string
 }) {
   return (
     <section className="card">
       <header className="card__head">
         <h2 className="card__label">{label}</h2>
-        {chevron && <ChevronRight className="card__chevron" />}
+        {onOpen && (
+          <button
+            type="button"
+            className="card__open"
+            aria-label={openLabel ?? `Open ${label}`}
+            onClick={onOpen}
+          >
+            <ChevronRight className="card__chevron" />
+          </button>
+        )}
       </header>
       {children}
     </section>

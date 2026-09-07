@@ -17,7 +17,7 @@ export function ModeSelector({
   note?: string | null
 }) {
   return (
-    <Card label="Cooling speed" chevron={false}>
+    <Card label="Cooling speed">
       <div className="segmented" role="group" aria-label="Cooling mode">
         {COOLING_MODES.map((m) => (
           <button
