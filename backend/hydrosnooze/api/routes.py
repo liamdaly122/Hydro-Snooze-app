@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import time, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..models import Mode, Precondition, SleepStage, Stage, modes_for, range_for
+from ..models import Mode, SleepStage, Stage, modes_for, range_for
 from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import schedule_json, state_json
@@ -36,9 +35,6 @@ class SchedulePatch(BaseModel):
     wake_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     stages: list[StagePatch] | None = None
     cooling_speed: Mode | None = None
-    precool_enabled: bool | None = None
-    precondition: Precondition | None = None
-    precool_lead_minutes: int | None = Field(default=None, ge=0, le=240)
 
 
 class TemperatureBody(BaseModel):
@@ -122,14 +118,6 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
 
     if "days_of_week" in data and any(d < 0 or d > 6 for d in data["days_of_week"]):
         raise HTTPException(422, "days_of_week must be 0 (Monday) to 6 (Sunday)")
-
-    # Pre-heating below 25C is not a setting the unit can honour, whichever of the
-    # two fields is the one being changed. Checked against the schedule as it would
-    # be after the patch, not just against what the patch happens to contain.
-    would_be = replace(service.schedule, **data)
-    problem = would_be.precondition_problem()
-    if problem is not None:
-        raise HTTPException(422, problem)
 
     return schedule_json(service.update_schedule(data))
 

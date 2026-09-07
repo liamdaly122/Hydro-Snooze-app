@@ -16,7 +16,7 @@ from datetime import time
 import pytest
 
 from hydrosnooze.db import Database
-from hydrosnooze.models import Mode, Precondition, Stage
+from hydrosnooze.models import Mode, Stage
 
 #: The schedule table exactly as it was before the app drove the night.
 LEGACY_SCHEMA = """
@@ -107,9 +107,6 @@ def test_the_rest_of_the_schedule_survives(upgraded: Database) -> None:
     assert schedule.enabled is True
     assert schedule.days_of_week == [0, 1, 2, 3, 4]
     assert schedule.wake_time == time(6, 30)
-    assert schedule.precool_enabled is True
-    assert schedule.precool_lead_minutes == 30
-    assert schedule.precondition is Precondition.COOL
 
 
 def test_the_old_night_mode_becomes_the_cooling_speed(upgraded: Database) -> None:

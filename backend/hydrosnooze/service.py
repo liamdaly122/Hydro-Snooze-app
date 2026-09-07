@@ -27,7 +27,6 @@ from .models import (
     Mode,
     NightPlan,
     Power,
-    Precondition,
     Schedule,
     Stage,
     StageStep,
@@ -202,24 +201,21 @@ class Service:
             await self._run_power_off(job.plan)
 
     async def _run_precool(self, plan: NightPlan) -> None:
-        # A cooler cannot warm a bed. When the first stage is above whatever the
-        # bed is resting at, only warming mode gets there, and only down to 25C.
-        problem = self.schedule.precondition_problem()
-        if problem is not None:
-            self.events.warning("precool", f"{problem} Pre-cooling instead.")
+        # Nothing is chosen here. The plan already worked out which way the bed has
+        # to move, whether the unit can move it, and how long that needs.
+        pre = plan.preconditioning
+        if pre.mode is None:
+            self.events.info("precool", pre.reason)
+            return
 
         target = self.schedule.first_temp_c
-        mode = (
-            self.schedule.precondition_mode
-            if problem is None
-            else Precondition.COOL.mode_for(self.schedule.cooling_speed)
-        )
-        verb = "Pre-heating" if mode is Mode.WARMING else "Pre-cooling"
+        verb = "Pre-heating" if pre.mode is Mode.WARMING else "Pre-cooling"
         self.events.info(
             "precool",
-            f"{verb} in {mode.value} to {target}C, for a {plan.bedtime_at:%H:%M} bedtime "
-            f"and a {plan.wake_at:%a %H:%M} wake",
+            f"{verb} in {pre.mode.value} to {target}C, starting {pre.lead_minutes} minutes "
+            f"before a {plan.bedtime_at:%H:%M} bedtime and a {plan.wake_at:%a %H:%M} wake",
         )
+        mode = pre.mode
         async with self._lock:
             try:
                 await self.commands.power_on()
@@ -293,7 +289,7 @@ class Service:
         if peak >= self.settings.idle_max_w:
             return
 
-        wanted = "warm" if self.schedule.precondition_mode is Mode.WARMING else "cool"
+        wanted = "warm" if plan.preconditioning.mode is Mode.WARMING else "cool"
         self.events.warning(
             "precool",
             f"The unit never drew more than {peak:.0f} W while pre-conditioning, so it was "

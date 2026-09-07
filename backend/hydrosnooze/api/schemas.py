@@ -30,6 +30,7 @@ def state_json(state: DeviceState) -> dict[str, Any]:
 
 
 def schedule_json(schedule: Schedule) -> dict[str, Any]:
+    pre = schedule.preconditioning
     return {
         "id": schedule.id,
         "name": schedule.name,
@@ -53,11 +54,12 @@ def schedule_json(schedule: Schedule) -> dict[str, Any]:
             )
         ],
         "cooling_speed": schedule.cooling_speed.value,
-        "precool_enabled": schedule.precool_enabled,
-        "precondition": schedule.precondition.value,
-        "precool_lead_minutes": schedule.precool_lead_minutes,
-        # Sent so the app can disable pre-heating with a reason rather than
-        # offering a setting that cannot work.
-        "preheat_is_possible": schedule.preheat_is_possible,
+        # Not a setting any more. The service decides how the bed gets ready and
+        # sends the decision, so the app reports it rather than asking for it.
+        "preconditioning": {
+            "mode": pre.mode.value if pre.mode else None,
+            "lead_minutes": pre.lead_minutes,
+            "reason": pre.reason,
+        },
         "updated_at": _iso(schedule.updated_at),
     }

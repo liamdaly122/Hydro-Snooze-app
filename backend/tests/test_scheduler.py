@@ -7,7 +7,7 @@ optional: without it the bed runs all day.
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 import pytest
 
@@ -35,15 +35,21 @@ def test_nothing_is_due_in_the_afternoon(schedule):
 
 
 def test_pre_conditioning_fires_before_bedtime(schedule):
-    job = Scheduler().due(schedule, datetime(2026, 9, 7, 22, 0))
+    # The head start is worked out from the gap the bed has to close, so ask the
+    # plan when it is rather than assuming the old flat thirty minutes.
+    precool_at = schedule.plan_for(date(2026, 9, 8)).precool_at
+    assert precool_at is not None
+    job = Scheduler().due(schedule, precool_at)
     assert job is not None and job.kind == "precool"
 
 
 def test_every_stage_fires_at_its_boundary(schedule):
     sched = Scheduler()
+    plan = schedule.plan_for(date(2026, 9, 8))
+    assert plan.precool_at is not None
     fired = []
     for when in [
-        datetime(2026, 9, 7, 22, 0),
+        plan.precool_at,
         datetime(2026, 9, 7, 22, 30),
         datetime(2026, 9, 8, 2, 30),
         datetime(2026, 9, 8, 6, 0),

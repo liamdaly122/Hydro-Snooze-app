@@ -10,7 +10,7 @@ import {
   nextPlan,
   tint,
 } from '../domain'
-import { STAGE_LABEL, WARMING_FLOOR_C, type Schedule, type Stage } from '../types'
+import { STAGE_LABEL, type Schedule, type Stage } from '../types'
 
 interface Props {
   draft: Schedule
@@ -23,9 +23,8 @@ const DURATION_STEP = 15
 export function WakeCard({ draft, onDraftChange, onStageDuration }: Props) {
   const plan = nextPlan(draft)
   const firstTemp = draft.stages[0]?.temp_c ?? 20
-  const warming = draft.precool_enabled && draft.precondition === 'warm'
-  const canWarm = firstTemp >= WARMING_FLOOR_C
-  const preconditionKey = !draft.precool_enabled ? 'off' : draft.precondition
+  const pre = draft.preconditioning
+  const warming = pre.mode === 'warming'
 
   function toggleDay(day: number) {
     const next = draft.days_of_week.includes(day)
@@ -117,43 +116,18 @@ export function WakeCard({ draft, onDraftChange, onStageDuration }: Props) {
       </div>
 
       {/*
-        A cooler cannot warm a bed. If the first stage is above whatever the bed
-        is resting at, pre-cooling does nothing, and only warming gets there.
-        Warming cannot go below 25 degrees, so below that this is not offered.
+        Not a control any more. A cooler cannot warm a bed and a heater cannot
+        cool one, so the direction from room temperature to the first stage picks
+        the mode, and the size of that gap picks how early to switch on. Choosing
+        it by hand only ever offered a way to get it wrong.
       */}
-      <p className="wake__sublabel">Get the bed ready by</p>
-      <div className="segmented" role="group" aria-label="Pre-conditioning">
-        {(
-          [
-            ['cool', 'Cooling', true],
-            ['warm', 'Warming', canWarm],
-            ['off', 'Nothing', true],
-          ] as const
-        ).map(([key, label, allowed]) => (
-          <button
-            key={key}
-            type="button"
-            className="segment"
-            aria-pressed={preconditionKey === key}
-            disabled={!allowed}
-            onClick={() =>
-              onDraftChange(
-                key === 'off'
-                  ? { precool_enabled: false }
-                  : { precool_enabled: true, precondition: key },
-              )
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {!canWarm && (
-        <p className="footnote" style={{ marginTop: 10 }}>
-          Warming only goes down to {WARMING_FLOOR_C}°C, so the unit cannot heat the bed to{' '}
-          {firstTemp}°C. Cooling below room temperature is the only option here.
-        </p>
-      )}
+      <p className="wake__sublabel">Getting the bed ready</p>
+      <p className="footnote" style={{ marginTop: 0 }}>
+        {pre.reason}
+        {pre.mode && plan?.precoolAt
+          ? ` Starting ${formatTime(plan.precoolAt)}, ${pre.lead_minutes} minutes before bed.`
+          : ''}
+      </p>
 
       <div className="days" role="group" aria-label="Days to wake">
         {DAY_INITIALS.map((initial, day) => (

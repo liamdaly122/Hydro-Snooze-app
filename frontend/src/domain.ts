@@ -73,8 +73,11 @@ export function planForWake(wakeOn: Date, schedule: Schedule): NightPlan {
     cursor = endsAt
   }
 
-  const precoolAt = schedule.precool_enabled
-    ? new Date(bedtimeAt.getTime() - schedule.precool_lead_minutes * MINUTE)
+  // Not a setting to read, a decision to reflect. A null mode means the bed is
+  // already where it needs to be, or that nothing the unit has could get it there.
+  const pre = schedule.preconditioning
+  const precoolAt = pre.mode
+    ? new Date(bedtimeAt.getTime() - pre.lead_minutes * MINUTE)
     : null
   return { precoolAt, bedtimeAt, wakeAt, steps }
 }

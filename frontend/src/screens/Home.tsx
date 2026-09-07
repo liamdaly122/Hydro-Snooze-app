@@ -4,7 +4,7 @@ import { WakeCard } from '../components/WakeCard'
 import { ModeSelector } from '../components/ModeSelector'
 import { StatusStrip } from '../components/StatusStrip'
 import type { ApiClient } from '../api/client'
-import { WARMING_FLOOR_C, type DeviceState, type Mode, type Schedule, type Stage } from '../types'
+import type { DeviceState, Mode, Schedule, Stage } from '../types'
 
 interface Props {
   client: ApiClient
@@ -33,24 +33,9 @@ export function Home({ client, state, schedule, maxC }: Props) {
   }
 
   function setStageTemp(stage: Stage, tempC: number) {
-    const stages = draft.stages.map((s) => (s.stage === stage ? { ...s, temp_c: tempC } : s))
-    const patch: Partial<Schedule> = { stages }
-
-    // Dropping the first stage below warming's floor makes pre-heating
-    // impossible, so the setting follows rather than leaving a combination the
-    // service will refuse.
-    if (
-      stage === draft.stages[0]?.stage &&
-      draft.precondition === 'warm' &&
-      tempC < WARMING_FLOOR_C
-    ) {
-      patch.precondition = 'cool'
-      setError(
-        `Pre-heating switched off: warming cannot reach ${tempC}°C, its lowest setting is ` +
-          `${WARMING_FLOOR_C}°C.`,
-      )
-    }
-    save(patch)
+    // Pre-conditioning used to have to be kept in step with this by hand. It is
+    // derived from the first stage now, so changing a temperature is just that.
+    save({ stages: draft.stages.map((s) => (s.stage === stage ? { ...s, temp_c: tempC } : s)) })
   }
 
   function setStageDuration(stage: Stage, minutes: number) {

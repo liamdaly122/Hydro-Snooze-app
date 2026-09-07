@@ -32,10 +32,11 @@ def test_the_night_is_as_long_as_its_stages():
     # No fixed 8h30m any more. The night is however long you make it, which is
     # the whole reason for dropping the unit's own scheduler.
     stages = [SleepStage(Stage.DEEP, 120, 17), SleepStage(Stage.WAKE, 60, 26)]
-    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), stages, precool_lead_minutes=30)
+    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), stages)
     assert plan.wake_at == datetime(2026, 9, 8, 6, 30)
     assert plan.bedtime_at == datetime(2026, 9, 8, 3, 30)
-    assert plan.precool_at == datetime(2026, 9, 8, 3, 0)
+    # 17C from a 20C room is three degrees of Turbo, so a short head start.
+    assert plan.precool_at == plan.bedtime_at - timedelta(minutes=plan.preconditioning.lead_minutes)
 
 
 def test_stages_run_in_order_and_finish_at_the_wake_time():
@@ -60,8 +61,11 @@ def test_a_night_can_cool_then_heat():
     assert plan.steps[1].mode is Mode.WARMING
 
 
-def test_pre_conditioning_can_be_turned_off():
-    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), default_stages(), precool_enabled=False)
+def test_pre_conditioning_is_skipped_when_the_bed_is_already_there():
+    """There is no off switch. There does not need to be: a first stage at room
+    temperature has nothing to close, so nothing runs."""
+    stages = [SleepStage(Stage.DEEP, 240, 20), SleepStage(Stage.WAKE, 30, 26)]
+    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), stages)
     assert plan.precool_at is None
     assert plan.starts_at == plan.bedtime_at
 

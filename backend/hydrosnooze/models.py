@@ -147,6 +147,26 @@ DEFAULT_LEAD_MINUTES: dict[Mode, int] = {
 #: to pull the bed down before bedtime.
 PRECOOL_MODE = Mode.TURBO
 
+#: What the bedroom sits at when nothing is running, and so what the bed sits at
+#: too. Pre-conditioning is the job of moving it from here to the first stage.
+#:
+#: ASSUMPTION: a UK bedroom overnight. Nothing in the house measures this, and it
+#: is the single number here most worth replacing with a real reading.
+ASSUMED_ROOM_C = 20
+
+#: Getting going costs time whatever the distance: the unit powers on, the water
+#: starts moving, and the pad catches up with the water. ASSUMPTION, like every
+#: other timing in this file.
+PRECONDITION_BASE_MINUTES = 15
+
+#: Closer than this to room temperature and there is nothing worth doing, because
+#: the bed is already there.
+PRECONDITION_DEADBAND_C = 1
+
+#: However far the bed has to travel, this is the earliest before bedtime the app
+#: will ever switch the unit on.
+PRECONDITION_MAX_MINUTES = 90
+
 #: The lowest temperature warming mode can express. Below this the unit cannot
 #: heat at all, which is what decides whether a stage cools or warms.
 WARMING_FLOOR_C = WARMING_RANGE[0]
@@ -227,6 +247,74 @@ def modes_for(stages: list[SleepStage], cooling_speed: Mode) -> list[Mode]:
     return modes
 
 
+@dataclass(frozen=True)
+class Preconditioning:
+    """How the bed gets ready before the night starts. Worked out, never chosen.
+
+    Three things decide it: which way the bed has to move from room temperature,
+    whether the unit can express the number it has to move to, and how far it has
+    to go. `mode` of None means there is nothing to do, and `reason` says why in
+    words the app can put on screen.
+    """
+
+    mode: Mode | None
+    lead_minutes: int
+    reason: str
+
+    @property
+    def runs(self) -> bool:
+        return self.mode is not None
+
+
+def preconditioning_for(
+    first_temp_c: int,
+    cooling_speed: Mode,
+    room_c: int = ASSUMED_ROOM_C,
+) -> Preconditioning:
+    """Pick the mode and the head start, from the gap the bed has to close.
+
+    This is `mode_for_target` again, with a different place to come from. A stage
+    comes from the stage before it; the first stage comes from the room. A cooler
+    cannot warm a bed and a heater cannot cool one, so the direction picks the
+    mode either way.
+
+    The awkward case is a first stage above the room but below 25C. The bed has to
+    warm, warming mode cannot express a number that low, and running the cooler at
+    a bed that needs heat would be worse than doing nothing. So it does nothing,
+    and says so.
+
+    The head start is a fixed cost plus the distance, at whatever rate that mode
+    manages across its own range. Every number in it is an assumption until the
+    plug has watched a few of these.
+    """
+    gap = first_temp_c - room_c
+
+    if abs(gap) <= PRECONDITION_DEADBAND_C:
+        return Preconditioning(
+            None, 0, f"The bed already sits at about {first_temp_c}C, so there is nothing to do."
+        )
+
+    if gap < 0:
+        mode = PRECOOL_MODE
+        reason = f"Cooling the bed from about {room_c}C down to {first_temp_c}C."
+    elif first_temp_c >= WARMING_FLOOR_C:
+        mode = Mode.WARMING
+        reason = f"Warming the bed from about {room_c}C up to {first_temp_c}C."
+    else:
+        return Preconditioning(
+            None,
+            0,
+            f"The bed has to warm from about {room_c}C to {first_temp_c}C, and warming mode only "
+            f"goes down to {WARMING_FLOOR_C}C, so the unit has no way to get it there. Body heat "
+            f"does that job once you are in it.",
+        )
+
+    low, high = range_for(mode)
+    per_degree = DEFAULT_LEAD_MINUTES[mode] / (high - low)
+    lead = PRECONDITION_BASE_MINUTES + abs(gap) * per_degree
+    return Preconditioning(mode, min(round(lead), PRECONDITION_MAX_MINUTES), reason)
+
+
 class Stage(str, Enum):
     """The parts of a night, named for what the body is doing.
 
@@ -273,23 +361,6 @@ def default_stages() -> list[SleepStage]:
     ]
 
 
-class Precondition(str, Enum):
-    """How to get the bed ready before the first stage starts.
-
-    A cooler cannot warm a bed. If the first stage is above whatever the bed is
-    resting at, no amount of cooling reaches it, and the app would otherwise
-    report a pre-cool that achieved nothing.
-    """
-
-    COOL = "cool"
-    WARM = "warm"
-
-    def mode_for(self, cooling_speed: Mode) -> Mode:
-        if self is Precondition.WARM:
-            return Mode.WARMING
-        return PRECOOL_MODE if cooling_speed.is_cooling else cooling_speed
-
-
 @dataclass(frozen=True)
 class StageStep:
     """One stage, with the real moment it starts and the mode it needs."""
@@ -314,6 +385,7 @@ class NightPlan:
     is exactly the sort of thing that ruins a night.
     """
 
+    preconditioning: Preconditioning
     precool_at: datetime | None
     bedtime_at: datetime
     wake_at: datetime
@@ -334,8 +406,7 @@ def plan_for_wake(
     stages: list[SleepStage],
     cooling_speed: Mode = Mode.QUIET,
     *,
-    precool_enabled: bool = True,
-    precool_lead_minutes: int = DEFAULT_LEAD_MINUTES[PRECOOL_MODE],
+    room_c: int = ASSUMED_ROOM_C,
 ) -> NightPlan:
     """Work backwards from the morning you want to wake up.
 
@@ -362,10 +433,11 @@ def plan_for_wake(
         )
         cursor = ends
 
-    precool_at = (
-        bedtime_at - timedelta(minutes=precool_lead_minutes) if precool_enabled else None
-    )
+    # Not a setting. Worked out from where the bed starts and where it has to be.
+    pre = preconditioning_for(stages[0].temp_c if stages else room_c, cooling_speed, room_c)
+    precool_at = bedtime_at - timedelta(minutes=pre.lead_minutes) if pre.runs else None
     return NightPlan(
+        preconditioning=pre,
         precool_at=precool_at,
         bedtime_at=bedtime_at,
         wake_at=wake_at,
@@ -397,12 +469,6 @@ class Schedule:
     #: Which cooling speed a cooling stage uses. Quiet by default: it is next to
     #: a bed. Warming stages ignore this, the unit has only one warming speed.
     cooling_speed: Mode = Mode.QUIET
-    precool_enabled: bool = True
-    #: Named `precool_*` because these were the database columns before pre-heating
-    #: existed. The user-facing text says "pre-heat" or "pre-cool" to match what is
-    #: actually happening.
-    precondition: Precondition = Precondition.COOL
-    precool_lead_minutes: int = DEFAULT_LEAD_MINUTES[PRECOOL_MODE]
     updated_at: datetime | None = None
     id: int = 1
 
@@ -419,34 +485,12 @@ class Schedule:
         return next((s for s in self.stages if s.stage is stage), None)
 
     @property
-    def precondition_mode(self) -> Mode:
-        """The mode the unit is put into before the first stage, not during it."""
-        return self.precondition.mode_for(self.cooling_speed)
-
-    @property
-    def preheat_is_possible(self) -> bool:
-        """Warming cannot express a target below 25C, so pre-heating below it
-        is not a setting the app can honour."""
-        return can_preheat_to(self.first_temp_c)
-
-    def precondition_problem(self) -> str | None:
-        """Why this pre-conditioning setting cannot work, or None if it can."""
-        if self.precondition is Precondition.WARM and not self.preheat_is_possible:
-            return (
-                f"Pre-heating cannot reach {self.first_temp_c}C. Warming mode only goes "
-                f"down to {WARMING_FLOOR_C}C, so the unit has no way to warm the bed to it."
-            )
-        return None
+    def preconditioning(self) -> Preconditioning:
+        """How the bed gets ready tonight. Decided from the schedule, not stored."""
+        return preconditioning_for(self.first_temp_c, self.cooling_speed)
 
     def plan_for(self, wake_on: date) -> NightPlan:
-        return plan_for_wake(
-            wake_on,
-            self.wake_time,
-            self.stages,
-            self.cooling_speed,
-            precool_enabled=self.precool_enabled,
-            precool_lead_minutes=self.precool_lead_minutes,
-        )
+        return plan_for_wake(wake_on, self.wake_time, self.stages, self.cooling_speed)
 
     def next_plan(self, now: datetime) -> NightPlan | None:
         """The next night that has not started yet, or None if the schedule is off.

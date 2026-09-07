@@ -16,7 +16,6 @@ from .events import Event, Level
 from .models import (
     STAGE_ORDER,
     Mode,
-    Precondition,
     Schedule,
     SleepStage,
     Stage,
@@ -32,9 +31,6 @@ CREATE TABLE IF NOT EXISTS schedule (
     wake_time            TEXT    NOT NULL,
     stages               TEXT    NOT NULL,
     cooling_speed        TEXT    NOT NULL,
-    precool_enabled      INTEGER NOT NULL,
-    precondition         TEXT    NOT NULL DEFAULT 'cool',
-    precool_lead_minutes INTEGER NOT NULL,
     updated_at           TEXT
 );
 
@@ -64,9 +60,6 @@ SCHEDULE_COLUMNS = (
     "wake_time",
     "stages",
     "cooling_speed",
-    "precool_enabled",
-    "precondition",
-    "precool_lead_minutes",
     "updated_at",
 )
 
@@ -102,7 +95,6 @@ class Database:
         """
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
-            ("precondition", "TEXT NOT NULL DEFAULT 'cool'"),
             ("stages", "TEXT NOT NULL DEFAULT '[]'"),
             ("cooling_speed", "TEXT NOT NULL DEFAULT 'quiet'"),
         ]
@@ -154,17 +146,12 @@ class Database:
         self._db.execute(
             """
             INSERT INTO schedule (id, name, enabled, days_of_week, wake_time,
-                                  stages, cooling_speed,
-                                  precool_enabled, precondition, precool_lead_minutes,
-                                  updated_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  stages, cooling_speed, updated_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, enabled=excluded.enabled,
                 days_of_week=excluded.days_of_week, wake_time=excluded.wake_time,
                 stages=excluded.stages, cooling_speed=excluded.cooling_speed,
-                precool_enabled=excluded.precool_enabled,
-                precondition=excluded.precondition,
-                precool_lead_minutes=excluded.precool_lead_minutes,
                 updated_at=excluded.updated_at
             """,
             (
@@ -179,9 +166,6 @@ class Database:
                     ]
                 ),
                 schedule.cooling_speed.value,
-                int(schedule.precool_enabled),
-                schedule.precondition.value,
-                schedule.precool_lead_minutes,
                 _iso(schedule.updated_at),
             ),
         )
@@ -256,9 +240,6 @@ def _schedule_from(row: sqlite3.Row) -> Schedule:
         wake_time=time(hour, minute),
         stages=_stages_from(row),
         cooling_speed=_cooling_speed_from(row),
-        precool_enabled=bool(row["precool_enabled"]),
-        precondition=Precondition(row["precondition"]),
-        precool_lead_minutes=row["precool_lead_minutes"],
         updated_at=_parse(row["updated_at"]),
     )
 

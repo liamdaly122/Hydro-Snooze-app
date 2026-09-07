@@ -16,7 +16,7 @@ import pytest
 
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
-from hydrosnooze.models import Mode, Precondition, Schedule, SleepStage, Stage
+from hydrosnooze.models import Mode, Schedule, SleepStage, Stage
 from hydrosnooze.service import Service
 
 
@@ -38,7 +38,6 @@ def _schedule(**kwargs) -> Schedule:
             SleepStage(Stage.REM, 210, 20),
             SleepStage(Stage.WAKE, 30, 26),
         ],
-        precondition=Precondition.COOL,
     )
     base.update(kwargs)
     return Schedule(**base)  # type: ignore[arg-type]
@@ -47,39 +46,69 @@ def _schedule(**kwargs) -> Schedule:
 def _warm_first(**kwargs) -> Schedule:
     return _schedule(
         stages=[SleepStage(Stage.DEEP, 240, 26), SleepStage(Stage.WAKE, 30, 28)],
-        precondition=Precondition.WARM,
         **kwargs,
     )
 
 
-# --- What warming can and cannot express --------------------------------------
+# --- Deciding how the bed gets ready ------------------------------------------
+#
+# Never a setting. The bed starts at room temperature, the first stage says where
+# it has to be, and the gap between them decides the mode and the head start.
 
 
-@pytest.mark.parametrize("temp", [15, 19, 24])
-def test_pre_heating_below_twenty_five_is_refused(temp):
-    schedule = _schedule(
-        stages=[SleepStage(Stage.DEEP, 240, temp)], precondition=Precondition.WARM
-    )
-    problem = schedule.precondition_problem()
-    assert problem is not None
-    assert "25C" in problem
+@pytest.mark.parametrize("temp", [15, 17, 18])
+def test_a_cold_first_stage_pre_cools_in_turbo(temp):
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    assert pre.mode is Mode.TURBO
+    assert "Cooling the bed" in pre.reason
 
 
 @pytest.mark.parametrize("temp", [25, 28, 30])
-def test_pre_heating_inside_the_warming_range_is_allowed(temp):
-    schedule = _schedule(
-        stages=[SleepStage(Stage.DEEP, 240, temp)], precondition=Precondition.WARM
-    )
-    assert schedule.precondition_problem() is None
+def test_a_warm_first_stage_pre_heats(temp):
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    assert pre.mode is Mode.WARMING
+    assert "Warming the bed" in pre.reason
 
 
-def test_pre_cooling_is_never_refused():
-    assert _schedule().precondition_problem() is None
+@pytest.mark.parametrize("temp", [22, 23, 24])
+def test_warmer_than_the_room_but_below_warming_floor_does_nothing(temp):
+    """The one gap nothing can close. The bed has to warm, warming mode cannot
+    express a number that low, and running the cooler at it would be worse."""
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    assert pre.mode is None
+    assert not pre.runs
+    assert "25C" in pre.reason
 
 
-def test_the_default_is_unchanged_behaviour():
-    assert Schedule().precondition is Precondition.COOL
-    assert Schedule().precondition_mode is Mode.TURBO
+@pytest.mark.parametrize("temp", [19, 20, 21])
+def test_a_first_stage_at_room_temperature_does_nothing(temp):
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    assert pre.mode is None
+    assert "already sits" in pre.reason
+
+
+def test_the_head_start_grows_with_the_distance():
+    """Not a fixed thirty minutes any more. Three degrees is a shorter job than
+    ten, and starting an hour early for three degrees just wastes power."""
+    near = _schedule(stages=[SleepStage(Stage.DEEP, 240, 18)]).preconditioning
+    far = _schedule(stages=[SleepStage(Stage.DEEP, 240, 15)]).preconditioning
+    assert far.lead_minutes > near.lead_minutes
+    assert 10 <= near.lead_minutes <= 90
+    assert 10 <= far.lead_minutes <= 90
+
+
+def test_nothing_to_do_means_no_pre_conditioning_in_the_plan():
+    schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 20)])
+    plan = schedule.plan_for(datetime(2026, 9, 8).date())
+    assert plan.precool_at is None
+    assert plan.starts_at == plan.bedtime_at
+
+
+def test_the_plan_starts_exactly_its_head_start_before_bedtime():
+    schedule = _schedule()
+    plan = schedule.plan_for(datetime(2026, 9, 8).date())
+    lead = timedelta(minutes=schedule.preconditioning.lead_minutes)
+    assert plan.precool_at == plan.bedtime_at - lead
 
 
 # --- A whole night ------------------------------------------------------------
@@ -173,15 +202,18 @@ async def test_pre_heating_leaves_the_bed_warm_before_a_warm_first_stage(service
 
 
 @pytest.mark.asyncio
-async def test_an_impossible_pre_heat_falls_back_to_cooling_and_says_so(service):
-    service.schedule = _schedule(precondition=Precondition.WARM)  # first stage 17C
+async def test_a_gap_nothing_can_close_sends_no_presses_and_says_why(service):
+    """First stage 23C, room 20C. The bed has to warm and nothing can warm it to
+    23C, so the unit stays off rather than running a cooler at a bed needing heat."""
+    service.schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 23)])
     plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
-    service.clock.jump_to(plan.precool_at)
+    assert plan.precool_at is None
+
+    before = len(list(service.transmitter.lines))
     await service._run_precool(plan)
 
-    assert service.unit.mode is Mode.TURBO
-    warnings = [e for e in service.events.recent(50) if e.level == "warning"]
-    assert any("25C" in e.message for e in warnings)
+    assert len(list(service.transmitter.lines)) == before, "no presses at all"
+    assert any("25C" in e.message for e in service.events.recent(50))
 
 
 # --- Saying so when it achieved nothing ---------------------------------------

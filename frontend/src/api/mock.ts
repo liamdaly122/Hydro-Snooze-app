@@ -17,6 +17,7 @@ import type {
   DeviceState,
   Mode,
   PowerSample,
+  Preconditioning,
   Schedule,
   ServiceInfo,
   SleepStage,
@@ -54,10 +55,7 @@ export class MockApiClient implements ApiClient {
       { stage: 'wake', duration_minutes: 30, temp_c: 26, mode: 'warming' },
     ],
     cooling_speed: 'quiet',
-    precool_enabled: true,
-    precondition: 'cool',
-    preheat_is_possible: false,
-    precool_lead_minutes: 30,
+    preconditioning: { mode: 'turbo', lead_minutes: 20, reason: 'Cooling the bed from about 20C down to 17C.' },
     updated_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
   }
 
@@ -97,17 +95,8 @@ export class MockApiClient implements ApiClient {
   async putSchedule(patch: Partial<Schedule>): Promise<Schedule> {
     await sleep(120)
     const next = { ...this.schedule, ...patch, updated_at: nowIso() }
-    // Mirrors the service: warming cannot express a target below its floor, so
-    // the combination is refused rather than quietly downgraded.
-    const first = next.stages[0]?.temp_c ?? 20
     next.stages = withModes(next.stages, next.cooling_speed)
-    next.preheat_is_possible = first >= WARMING_FLOOR_C
-    if (next.precondition === 'warm' && !next.preheat_is_possible) {
-      throw new ApiError(
-        `Pre-heating cannot reach ${first}C. Warming mode only goes down to ` +
-          `${WARMING_FLOOR_C}C, so the unit has no way to warm the bed to it.`,
-      )
-    }
+    next.preconditioning = preconditioningFor(next.stages[0]?.temp_c ?? 20)
     this.schedule = next
     this.emit({ schedule: { ...this.schedule } })
     return { ...this.schedule }
@@ -235,6 +224,44 @@ export class MockApiClient implements ApiClient {
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+
+/**
+ * Mirrors `preconditioning_for` in backend/hydrosnooze/models.py.
+ *
+ * The bed starts at room temperature and the first stage says where it has to
+ * be. The direction picks the mode, the distance picks the head start, and a
+ * gap nothing can close means nothing runs.
+ */
+function preconditioningFor(firstTempC: number): Preconditioning {
+  const room = 20
+  const gap = firstTempC - room
+  if (Math.abs(gap) <= 1) {
+    return { mode: null, lead_minutes: 0, reason: `The bed already sits at about ${firstTempC}C, so there is nothing to do.` }
+  }
+  let mode: Mode
+  let reason: string
+  if (gap < 0) {
+    mode = 'turbo'
+    reason = `Cooling the bed from about ${room}C down to ${firstTempC}C.`
+  } else if (firstTempC >= WARMING_FLOOR_C) {
+    mode = 'warming'
+    reason = `Warming the bed from about ${room}C up to ${firstTempC}C.`
+  } else {
+    return {
+      mode: null,
+      lead_minutes: 0,
+      reason:
+        `The bed has to warm from about ${room}C to ${firstTempC}C, and warming mode only goes ` +
+        `down to ${WARMING_FLOOR_C}C, so the unit has no way to get it there. Body heat does ` +
+        `that job once you are in it.`,
+    }
+  }
+  // Both turbo and warming are assumed to cross their whole range in 30 minutes,
+  // so the rate is that over the span, on top of a fixed 15 to get going.
+  const [low, high] = MODE_RANGE[mode]
+  const lead = 15 + (Math.abs(gap) * 30) / (high - low)
+  return { mode, lead_minutes: Math.min(Math.round(lead), 90), reason }
 }
 
 /**
