@@ -50,10 +50,15 @@ remote_receiver:
     number: GPIO4
     inverted: true
   # Air conditioner remotes send long frames. A generous idle keeps one press
-  # from being chopped into several, and the bigger buffer keeps the tail of a
-  # long code from being thrown away.
+  # from being chopped into several, and a bigger buffer keeps the tail of a long
+  # code from being thrown away.
+  #
+  # rmt_symbols, not buffer_size: on the esp-idf framework buffer_size does
+  # nothing, and the default of 96 symbols is where a long frame gets truncated.
+  # 192 is the ESP32-C3's whole RMT block, which this config can have because
+  # nothing here is transmitting.
   idle: 25ms
-  buffer_size: 2kB
+  rmt_symbols: 192
   tolerance: 55%
   # Decode as every protocol it knows, and print the raw timings either way.
   dump: all
