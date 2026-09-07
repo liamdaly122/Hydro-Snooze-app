@@ -1,0 +1,47 @@
+# Step one of two: listen, and write down what the remote says.
+#
+# Flash this as it is. Nothing needs filling in. It turns the IR Mate into a
+# receiver that prints every code it hears, and does nothing else.
+#
+#   esphome run docs/esphome-capture.yaml
+#
+# Then point the HydroSnooze remote at it from about 10cm and press each of the
+# eight buttons once, slowly, watching the log. Write down what each one decodes
+# as. When all eight are recorded, move to esphome-hydrosnooze.yaml.
+#
+# Pins are from Seeed's own configuration for this board, not guessed:
+# https://github.com/Seeed-Studio/xiao-esphome-projects/blob/main/projects/xiao_smart_ir_mate/xiao_smart_ir_mate.yaml
+
+esphome:
+  name: hydrosnooze-ir
+  friendly_name: HydroSnooze IR
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# Nothing else needs to reach it while it is only listening, so no api block:
+# the log over USB is the whole point of this file.
+ota:
+  - platform: esphome
+
+remote_receiver:
+  pin:
+    number: GPIO4
+    inverted: true
+  # Air conditioner remotes send long frames. A generous idle keeps one press
+  # from being chopped into several, and the bigger buffer keeps the tail of a
+  # long code from being thrown away.
+  idle: 25ms
+  buffer_size: 2kB
+  tolerance: 55%
+  # Decode as every protocol it knows, and print the raw timings either way.
+  dump: all

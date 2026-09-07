@@ -22,6 +22,10 @@ frontend/dist/
 .env.*
 .env~
 !.env.example
+
+# ESPHome keeps the Wi-Fi password and the API key here.
+secrets.yaml
+.esphome/
 data/
 
 # OS

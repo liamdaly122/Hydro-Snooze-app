@@ -244,30 +244,54 @@ that instead.
 
 ## Step 3: the infrared blaster
 
-About an hour.
+About an hour, **on the Mac**. No Pi needed for any of this.
 
-Plug the XIAO Smart IR Mate into USB power, somewhere it can see the unit's infrared receiver.
+The first flash has to go over USB whatever happens, so the machine with the USB port is the natural
+host. Everything after that is over Wi-Fi. The Pi only becomes necessary at step 6, when something
+has to stay running all night.
 
-Install ESPHome on the Pi:
+Plug the XIAO Smart IR Mate into the Mac with a USB-C cable, somewhere it can see the unit's
+infrared receiver. It uses the ESP32-C3's native USB, so macOS needs no driver.
+
+Install ESPHome on the Mac, in its own virtual environment so it does not tangle with anything else:
 
 ```sh
-sudo apt update
-sudo apt install -y python3-venv
 python3 -m venv ~/esphome
 ~/esphome/bin/pip install esphome
-~/esphome/bin/esphome dashboard ~/esphome-configs
 ```
 
-Open `http://hydrosnooze.local:6052` in a browser on the Mac. That is the ESPHome dashboard.
+Then, from the project folder, put the Wi-Fi details somewhere ESPHome can find them:
 
-**Get the real GPIO pin numbers from Seeed's published configuration for this exact board on GitHub.
-Do not guess them.** A wrong pin does nothing at all and gives no error, which is the worst possible
-thing to debug.
+```sh
+cp docs/secrets.yaml.example docs/secrets.yaml
+nano docs/secrets.yaml
+```
 
-`docs/esphome-hydrosnooze.yaml` in this repository is the configuration to fill in. It has the
-capture section commented out at the bottom.
+Fill in the network name and password, and generate the API key it asks for with
+`openssl rand -base64 32`. That file is gitignored and must stay that way.
 
-**Done when** the board appears in the dashboard and its logs stream.
+**Put it on the same network the Shelly ended up on.** Same room, same weak spot, and the blaster is
+the device where a dropped connection costs a night rather than an `unknown` on a screen.
+
+### The pins, which are published rather than guessed
+
+Seeed's own configuration for this exact board has them, so there is nothing to work out:
+
+| | Pin |
+|---|---|
+| Infrared transmitter | GPIO3 |
+| Infrared receiver | GPIO4 |
+| Touch pad | GPIO5 |
+| Vibration motor | GPIO6 |
+| RGB LED | GPIO7 |
+
+Source: [Seeed's xiao_smart_ir_mate.yaml](https://github.com/Seeed-Studio/xiao-esphome-projects/blob/main/projects/xiao_smart_ir_mate/xiao_smart_ir_mate.yaml).
+They are already filled into both configurations in `docs/`.
+
+The board arrives pre-flashed with Seeed's own configuration. Flashing over it is expected, and it
+means the touch button and the vibration motor stop doing anything. Neither is used here.
+
+**Done when** ESPHome is installed and `docs/secrets.yaml` has real values in it.
 
 ---
 
@@ -276,11 +300,21 @@ capture section commented out at the bottom.
 **This is the step everything else hangs on.** If the codes come out cleanly, the rest is
 straightforward.
 
-Flash the capture configuration first, on its own: the `remote_receiver` block at the bottom of
-`docs/esphome-hydrosnooze.yaml`, with everything else commented out.
+`docs/esphome-capture.yaml` is ready to flash as it is. It turns the board into a receiver that
+prints every code it hears and does nothing else:
 
-Then open the ESPHome logs, point the remote at the blaster from about 10cm, and press each of the
-eight buttons once, slowly, watching what appears:
+```sh
+~/esphome/bin/esphome run docs/esphome-capture.yaml
+```
+
+Pick the USB port when it asks. The first build takes a few minutes; after that it stays connected
+and streams the log.
+
+If it cannot find the board, hold the small button on the IR Mate while plugging the cable in. That
+forces the ESP32-C3 into its download mode.
+
+Then point the remote at the blaster from about 10cm and press each of the eight buttons once,
+slowly, watching what appears:
 
 | Press this | Write it down as |
 |---|---|
@@ -301,11 +335,19 @@ That is far more reliable than raw timings and much shorter.
 The app never presses `schedule` or `timer`, because it stopped using the unit's own scheduler. They
 are still worth capturing: they are two of the eight, and skipping them saves nothing.
 
-Then fill them into the button section of the configuration and flash it properly. The names matter:
-the service looks for button entities called exactly `power`, `schedule`, `temp_up`, `temp_down`,
-`cool`, `warm`, `timer`, `mute`.
+Then fill them into `docs/esphome-hydrosnooze.yaml` and flash that instead:
 
-**Done when** pressing a button in the ESPHome dashboard makes the unit respond.
+```sh
+~/esphome/bin/esphome run docs/esphome-hydrosnooze.yaml
+```
+
+The names matter: the service looks for button entities called exactly `power`, `schedule`,
+`temp_up`, `temp_down`, `cool`, `warm`, `timer`, `mute`.
+
+From here the board is on the Wi-Fi and every later flash goes over the air, so the USB cable can
+come out.
+
+**Done when** pressing a button from ESPHome makes the unit respond.
 
 ---
 

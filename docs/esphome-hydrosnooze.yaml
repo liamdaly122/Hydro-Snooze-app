@@ -1,15 +1,17 @@
 # ESPHome configuration for the XIAO Smart IR Mate.
 #
-# A template for step 6 of the roadmap, not a working file. Two things have to be
-# filled in before it does anything:
+# Step two of two. One thing left to fill in: the eight captured codes.
 #
-#   1. The real GPIO pins. Get them from Seeed's published configuration on
-#      GitHub for this exact board. Do not guess: the wrong pin silently does
-#      nothing, which is the worst possible failure to debug.
+# Flash docs/esphome-capture.yaml first, press each remote button at it, and
+# write down what the log says. Then put those values in below.
 #
-#   2. The eight captured codes. Flash the capture configuration at the bottom
-#      first, point the remote at the blaster from about 10cm, press each button
-#      once, and read the codes out of the log.
+# The pins are real, taken from Seeed's own configuration for this board rather
+# than guessed. GPIO3 transmits, GPIO4 receives:
+# https://github.com/Seeed-Studio/xiao-esphome-projects/blob/main/projects/xiao_smart_ir_mate/xiao_smart_ir_mate.yaml
+#
+# The board ships pre-flashed with Seeed's configuration. Flashing this replaces
+# it, which also means the touch button and the vibration motor stop doing
+# anything. Neither is used here.
 #
 # The service looks for one button entity per remote button, with these exact
 # names: power, schedule, temp_up, temp_down, cool, warm, timer, mute.
@@ -35,8 +37,7 @@ wifi:
   password: !secret wifi_password
 
 remote_transmitter:
-  # TODO: the real pin, from Seeed's published configuration.
-  pin: GPIO_TODO
+  pin: GPIO3
   carrier_duty_percent: 50%
 
 # --- The eight buttons --------------------------------------------------------
@@ -89,18 +90,27 @@ button:
     on_press:
       - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
 
-# --- Capture mode -------------------------------------------------------------
+# --- If the codes did not decode as a named protocol ---------------------------
 #
-# Flash this part FIRST, on its own, with everything above commented out. Watch
-# the log while pressing each remote button, and write down what it decodes as.
+# Raw timings work too, they are just uglier. Replace the transmit_nec action
+# with the list the capture log printed:
 #
-# remote_receiver:
-#   pin:
-#     number: GPIO_TODO
-#     inverted: true
-#     mode:
-#       input: true
-#       pullup: true
-#   dump: all
-#   tolerance: 55%
-#   idle: 25ms
+#   - platform: template
+#     name: power
+#     on_press:
+#       - remote_transmitter.transmit_raw:
+#           carrier_frequency: 38kHz
+#           code: [4470, -4370, 600, -1580, 600, -480, ...]
+#
+# --- Keeping the light working -------------------------------------------------
+#
+# Seeed wires the RGB LED to GPIO7. Not needed, but it is the only way to see
+# from across the room that the board is up and on the Wi-Fi.
+#
+# light:
+#   - platform: esp32_rmt_led_strip
+#     name: status
+#     pin: GPIO7
+#     num_leds: 1
+#     chipset: ws2812
+#     rgb_order: GRB
