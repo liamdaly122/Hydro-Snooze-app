@@ -76,7 +76,7 @@ elif command -v hostname >/dev/null 2>&1; then
 fi
 
 echo
-echo "  HydroSnooze is starting against a simulated unit."
+echo "  HydroSnooze is starting. The line below says what it is driving."
 echo
 echo "  On this machine:  http://localhost:8000"
 [ -n "$LAN" ] && echo "  On your phone:    http://$LAN:8000   (same Wi-Fi)"

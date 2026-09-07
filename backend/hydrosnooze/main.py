@@ -27,6 +27,11 @@ logging.basicConfig(
     level=os.environ.get("HS_LOG_LEVEL", "INFO"),
     format="%(asctime)s  %(levelname)-7s %(name)s  %(message)s",
 )
+# httpx logs a line per request at INFO, which is one every thirty seconds for
+# the plug alone, forever. The events this service records are the signal; that
+# is noise, and on the Pi it would bury `journalctl -u hydrosnooze -f` at 3am.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 log = logging.getLogger("hydrosnooze")
 
 
