@@ -66,6 +66,20 @@ class Service:
     async def start(self) -> None:
         self._unsubscribe_events = self.events.subscribe(self._on_event)
         self.events.info("service", f"Started with a {self.settings.transmitter} transmitter")
+
+        # A fake transmitter with a real plug is a useful half-step, but the two
+        # halves are then watching different objects: the presses drive the
+        # simulation and the plug measures the unit in the bedroom. Every check
+        # that asks the plug about the unit is meaningless, which looks exactly
+        # like a broken night rather than a mismatched setup.
+        if self.settings.transmitter == "fake" and self.settings.power_monitor != "fake":
+            self.events.warning(
+                "service",
+                "The presses go to the simulated unit but the plug is measuring the real one, "
+                "so a simulated night will not behave: the power checks are about a different "
+                "unit from the one being driven. Set HS_POWER_MONITOR=fake to simulate a whole "
+                "night, or HS_TRANSMITTER=esphome once the blaster is captured.",
+            )
         await self._sample_power()
         self._tasks = [
             asyncio.create_task(self._tick_loop(), name="scheduler"),
@@ -235,7 +249,18 @@ class Service:
                 # The unit may have switched itself off, or never been on if the
                 # pre-conditioning step was skipped.
                 watts = await self.power.read_watts()
-                if watts is not None and watts < self.settings.off_threshold_w:
+                if watts is None:
+                    # Deliberately not pressing power. It is a toggle: if the unit
+                    # is actually on, that press turns the bed off for the rest of
+                    # the night, which is far worse than a stage that does not
+                    # land. So set the temperature blind and say so.
+                    self.events.warning(
+                        "stage",
+                        "Could not reach the plug, so whether the unit is on is unknown. Setting "
+                        f"{step.temp_c}C anyway. Pressing power without knowing would risk "
+                        "switching off a running unit, so it is left alone.",
+                    )
+                elif watts < self.settings.off_threshold_w:
                     self.events.warning("stage", "Unit was off at a stage boundary, powering on")
                     await self.commands.power_on()
                     self._set_state(power=Power.ON)

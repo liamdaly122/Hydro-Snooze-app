@@ -10,6 +10,8 @@ is the night itself, driven stage by stage.
 
 from __future__ import annotations
 
+import asyncio
+
 from datetime import datetime, time, timedelta
 
 import pytest
@@ -486,3 +488,85 @@ async def test_any_schedule_edit_mid_night_leaves_the_past_alone(service):
 
     missed = service.scheduler.missed(service.schedule, service.clock.now())
     assert missed == []
+
+
+# --- Not being able to see the plug at a stage boundary -------------------------
+
+
+class Unreachable:
+    """A plug that never answers, which is what a dropped read looks like."""
+
+    async def read_watts(self):
+        return None
+
+    async def close(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_plug_at_a_boundary_does_not_press_power(service):
+    """Power is a toggle. Pressing it without knowing risks switching off a unit
+    that is running, which costs the rest of the night. A stage that does not
+    land costs one stretch of it. So it sets the temperature and leaves power be."""
+    service.power = Unreachable()
+    service.commands.power = service.power
+    service.schedule = _schedule()
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    step = plan.steps[0]
+
+    service.clock.jump_to(step.starts_at)
+    await service._run_stage(plan, step)
+
+    sent = " ".join(service.transmitter.lines)
+    assert "power_on()" not in sent
+    assert "-> power" not in sent, "no power press at all"
+
+
+@pytest.mark.asyncio
+async def test_it_says_it_could_not_confirm_rather_than_going_quiet(service):
+    """The bug this fixes. It already did the right thing and said nothing, so a
+    night driven blind looked identical to a night that went perfectly."""
+    service.power = Unreachable()
+    service.commands.power = service.power
+    service.schedule = _schedule()
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    step = plan.steps[0]
+
+    service.clock.jump_to(step.starts_at)
+    await service._run_stage(plan, step)
+
+    warnings = [e.message for e in service.events.recent(30) if e.level == "warning"]
+    assert any("Could not reach the plug" in m for m in warnings)
+    assert any("switching off a running unit" in m for m in warnings)
+
+
+@pytest.mark.asyncio
+async def test_a_plug_that_says_off_still_powers_on(service):
+    """The case that works, unchanged: a confirmed reading below the off line."""
+    service.schedule = _schedule()
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    step = plan.steps[0]
+
+    service.clock.jump_to(step.starts_at)
+    await service._run_stage(plan, step)
+
+    assert "power_on()" in " ".join(service.transmitter.lines)
+    assert service.unit.powered
+
+
+def test_a_fake_transmitter_with_a_real_plug_is_called_out(tmp_path):
+    """The half-real setup watches two different objects: the presses drive the
+    simulation, the plug measures the bedroom. Every power check is then about
+    the wrong unit, and a simulated night looks broken rather than mismatched."""
+    settings = Settings(
+        db_path=str(tmp_path / "half.db"), power_monitor="shelly", transmitter="fake"
+    )
+    clock = VirtualClock(datetime(2026, 9, 7, 21, 0))
+    svc = Service(settings, clock=clock, echo=False)
+    try:
+        asyncio.run(svc.start())
+        messages = [e.message for e in svc.events.recent(20)]
+        assert any("measuring the real one" in m for m in messages)
+        assert any("HS_POWER_MONITOR=fake" in m for m in messages)
+    finally:
+        asyncio.run(svc.stop())
