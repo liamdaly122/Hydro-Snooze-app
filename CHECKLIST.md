@@ -91,12 +91,23 @@ Detail in [SETUP.md](SETUP.md#step-5-the-shelly).
 - [ ] Plug it in between the wall and the unit, join it to the Wi-Fi
 - [ ] Write down its IP address, and give it a fixed one in the router if that is easy
 
+Nothing else is needed for this one. `./scripts/plug.py <its IP>` on the Mac reads it live and says
+which state the service would call it, so it can all be done the day the plug arrives, with the
+physical remote putting the unit into each state.
+
 Measure and write down the watts in four states:
 
 - [ ] Unit off at the wall (expect under 5 W)
 - [ ] On, sitting at temperature (expect 5 to 60 W)
 - [ ] Actively cooling (expect around 170 W)
 - [ ] Actively heating (expect around 300 W)
+
+One more while it is reading, because only the plug can answer it:
+
+- [ ] With the bed warm, set warming to 25°C on the remote and watch the draw. Between 25 and 35°C
+      both modes reach the number and the app has to pick one. It assumes warming only heats, so a
+      stage dropping from 30°C to 25°C is run in cooling. Around 170 W means warming cools too and
+      that assumption is wrong. Falling to idle means it holds
 - [ ] Set the Shelly's own auto-off timer to about ten hours. **Not optional.** The unit no longer
       switches itself off, and the temperature ceiling is set to the unit's own maximum, so if the Pi
       dies mid-night this is the only thing that stops a hot bed staying hot

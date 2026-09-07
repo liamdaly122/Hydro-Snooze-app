@@ -152,7 +152,15 @@ Plug it in between the wall socket and the unit. Follow its instructions to join
 **write down the IP address** it ends up with. Give it a fixed address in the router if that is easy,
 so it does not move later.
 
-Then read the watts in four states and write each one down:
+Then read the watts in four states and write each one down. On the Mac, in the project folder:
+
+```sh
+./scripts/plug.py 192.168.1.42
+```
+
+That reads the plug once a second and says which of the four states the service would call it. It
+needs nothing else: no Pi, no blaster, no Python setup. Put the unit into each state with the
+physical remote, wait for the settled column to stop moving, and write it down.
 
 | State | Expected, roughly | Yours |
 |---|---|---|
@@ -163,6 +171,13 @@ Then read the watts in four states and write each one down:
 
 Those four numbers are how the app knows whether a power command actually worked. Until they are
 measured they are guesses from the manual.
+
+**While the plug is reading, settle one open question.** Cooling covers 15 to 35°C and warming covers
+25 to 55°C, so between 25 and 35 both modes can be set to the same number, and the app has to pick
+one. It assumes warming mode only heats, so a stage that drops into that band, 30°C down to 25°C for
+instance, is run in cooling. Get the bed warm, set warming to 25°C on the remote, and watch the draw.
+If it stays around 170 W then warming cools too and the assumption is wrong. If it falls to idle,
+the assumption holds.
 
 **While here: set the Shelly's own auto-off timer**, in its own app, to about ten hours. This is not
 optional any more, for two reasons. The app drives the night itself, so the unit never switches
