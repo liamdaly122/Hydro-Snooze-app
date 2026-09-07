@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..models import DeviceState, Schedule
+from ..models import DeviceState, Schedule, modes_for
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -41,11 +41,16 @@ def schedule_json(schedule: Schedule) -> dict[str, Any]:
                 "stage": s.stage.value,
                 "duration_minutes": s.duration_minutes,
                 "temp_c": s.temp_c,
-                # Derived, not stored: below 25C has to cool because warming
-                # cannot express it, and at or above 25C it warms.
-                "mode": s.mode(schedule.cooling_speed).value,
+                # Derived, not stored, and derived from the whole night rather
+                # than this stage: between 25C and 35C both modes reach the
+                # number and the direction of travel is what decides.
+                "mode": mode.value,
             }
-            for s in schedule.stages
+            for s, mode in zip(
+                schedule.stages,
+                modes_for(schedule.stages, schedule.cooling_speed),
+                strict=True,
+            )
         ],
         "cooling_speed": schedule.cooling_speed.value,
         "precool_enabled": schedule.precool_enabled,

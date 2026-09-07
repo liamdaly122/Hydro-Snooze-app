@@ -8,7 +8,7 @@ from datetime import time, timedelta
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..models import Mode, Precondition, SleepStage, Stage, mode_for_target, range_for
+from ..models import Mode, Precondition, SleepStage, Stage, modes_for, range_for
 from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import schedule_json, state_json
@@ -104,13 +104,15 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
             if stage in seen:
                 raise HTTPException(422, f"{stage.value} appears twice")
             seen.add(stage)
-            # Every stage decides for itself whether it cools or warms, worked out
-            # from its temperature, so it is checked against that mode's range.
-            _guard_temperature(service, raw["temp_c"], mode_for_target(raw["temp_c"], speed))
         data["stages"] = [
             SleepStage(Stage(r["stage"]), r["duration_minutes"], r["temp_c"])
             for r in data["stages"]
         ]
+        # Which mode a stage lands in depends on the stage before it, so the night
+        # is resolved as a sequence and each temperature checked against the range
+        # of the mode it actually ends up in.
+        for stage, mode in zip(data["stages"], modes_for(data["stages"], speed), strict=True):
+            _guard_temperature(service, stage.temp_c, mode)
 
     if "wake_time" in data:
         hour, minute = (int(p) for p in data["wake_time"].split(":"))
@@ -149,8 +151,9 @@ async def post_power_off(request: Request) -> dict[str, object]:
 @router.post("/temperature")
 async def post_temperature(request: Request, body: TemperatureBody) -> dict[str, object]:
     service = _service(request)
-    mode = mode_for_target(body.target_c, service.schedule.cooling_speed)
-    _guard_temperature(service, body.target_c, mode)
+    # Asked of the service, so the guard checks the range of the mode the command
+    # will really use rather than one worked out a second way.
+    _guard_temperature(service, body.target_c, service.mode_for_now(body.target_c))
 
     if not service.state.can_set_temperature:
         raise HTTPException(409, "The unit ignores every button but power while it is off.")

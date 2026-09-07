@@ -69,7 +69,11 @@ export interface SleepStage {
   stage: Stage
   duration_minutes: number
   temp_c: number
-  /** Derived by the service from the temperature, not chosen. */
+  /**
+   * Derived by the service, not chosen, and derived from the whole night rather
+   * than this stage. Between 25 and 35 both modes reach the number, so which one
+   * a stage lands in depends on the temperature before it.
+   */
   mode: Mode
 }
 

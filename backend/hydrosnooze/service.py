@@ -324,10 +324,25 @@ class Service:
             except CommandFailed as exc:
                 self._fail("power", exc, power=Power.UNKNOWN)
 
+    def mode_for_now(self, target_c: int) -> Mode:
+        """Which mode a temperature set by hand should land in.
+
+        Between 25C and 35C both modes reach the number and the direction of
+        travel decides, so it needs somewhere to come from. The last target we
+        set is the best evidence of where the bed is: it is not a reading, but it
+        is the number we last asked the unit to hold.
+        """
+        return mode_for_target(
+            target_c,
+            self.schedule.cooling_speed,
+            coming_from_c=self.state.assumed_target_c,
+            coming_from_mode=self.state.assumed_mode,
+        )
+
     async def set_temperature(self, target_c: int) -> None:
-        # Below 25C has to cool, at or above 25C it warms. The unit switches
-        # freely now that its own scheduler is never armed.
-        mode = mode_for_target(target_c, self.schedule.cooling_speed)
+        # The unit switches between cooling and warming freely now that its own
+        # scheduler is never armed.
+        mode = self.mode_for_now(target_c)
         async with self._lock:
             try:
                 if self.state.assumed_mode is not mode:

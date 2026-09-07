@@ -19,6 +19,7 @@ import type {
   PowerSample,
   Schedule,
   ServiceInfo,
+  SleepStage,
 } from '../types'
 import { MAX_TEMPERATURE_C, MODE_RANGE, WARMING_FLOOR_C } from '../types'
 
@@ -99,11 +100,7 @@ export class MockApiClient implements ApiClient {
     // Mirrors the service: warming cannot express a target below its floor, so
     // the combination is refused rather than quietly downgraded.
     const first = next.stages[0]?.temp_c ?? 20
-    // Derived the same way the service derives it: below 25 has to cool.
-    next.stages = next.stages.map((st) => ({
-      ...st,
-      mode: st.temp_c >= WARMING_FLOOR_C ? 'warming' : next.cooling_speed,
-    }))
+    next.stages = withModes(next.stages, next.cooling_speed)
     next.preheat_is_possible = first >= WARMING_FLOOR_C
     if (next.precondition === 'warm' && !next.preheat_is_possible) {
       throw new ApiError(
@@ -238,4 +235,30 @@ export class MockApiClient implements ApiClient {
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+
+/**
+ * Mirrors `modes_for` in backend/hydrosnooze/models.py.
+ *
+ * Cooling reaches 15 to 35 and warming reaches 25 to 55, so between 25 and 35
+ * both modes hold the number and only the direction of travel says which one can
+ * actually move the bed there. That makes a stage's mode depend on the stage
+ * before it, so the night is resolved in order.
+ */
+function withModes(stages: SleepStage[], coolingSpeed: Mode): SleepStage[] {
+  const ceiling = MODE_RANGE.quiet[1]
+  const out: SleepStage[] = []
+  for (const [index, stage] of stages.entries()) {
+    const previous = index > 0 ? stages[index - 1] : undefined
+    const wasCooling = index > 0 ? out[index - 1].mode !== 'warming' : false
+    let mode: Mode
+    if (stage.temp_c < WARMING_FLOOR_C) mode = coolingSpeed
+    else if (stage.temp_c > ceiling) mode = 'warming'
+    else if (previous === undefined) mode = 'warming'
+    else if (previous.temp_c > stage.temp_c) mode = coolingSpeed
+    else if (previous.temp_c < stage.temp_c) mode = 'warming'
+    else mode = wasCooling ? coolingSpeed : 'warming'
+    out.push({ ...stage, mode })
+  }
+  return out
 }

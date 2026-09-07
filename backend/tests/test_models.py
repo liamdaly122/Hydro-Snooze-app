@@ -21,6 +21,7 @@ from hydrosnooze.models import (
     Stage,
     default_stages,
     mode_for_target,
+    modes_for,
     plan_for_wake,
     rail_count,
     range_for,
@@ -69,8 +70,10 @@ def test_pre_conditioning_can_be_turned_off():
     ("temp", "expected"),
     [(15, Mode.QUIET), (24, Mode.QUIET), (25, Mode.WARMING), (30, Mode.WARMING)],
 )
-def test_a_stage_works_out_for_itself_whether_to_cool_or_heat(temp, expected):
+def test_a_temperature_on_its_own_cools_below_25_and_warms_at_or_above(temp, expected):
     # Below 25 it has to cool, because warming cannot express a number that low.
+    # With nothing to come from there is no direction of travel to go on, so the
+    # rest is the old rule: 25 and above warms.
     assert mode_for_target(temp, Mode.QUIET) is expected
 
 
@@ -125,3 +128,87 @@ def test_temperature_is_adjustable_whenever_the_unit_is_on():
 )
 def test_power_thresholds_classify_the_plug_reading(watts, expected):
     assert PowerThresholds().classify(watts) == expected
+
+
+# --- The overlap ---------------------------------------------------------------
+#
+# Cooling reaches 15 to 35 and warming reaches 25 to 55, so between 25 and 35 both
+# modes can be set to the number. Only one of them can move the bed there, and
+# which one depends on where the bed is coming from.
+
+
+@pytest.mark.parametrize("target", [25, 30, 35])
+def test_coming_down_into_the_overlap_cools(target):
+    """The bug this fixes: 30C to 25C in warming mode sets the right number and
+    then sits idle while the bed coasts down on its own."""
+    assert mode_for_target(target, Mode.QUIET, coming_from_c=target + 5) is Mode.QUIET
+
+
+@pytest.mark.parametrize("target", [25, 30, 35])
+def test_going_up_into_the_overlap_warms(target):
+    assert mode_for_target(target, Mode.QUIET, coming_from_c=target - 5) is Mode.WARMING
+
+
+def test_the_cooling_speed_is_used_for_a_descent_into_the_overlap():
+    assert mode_for_target(30, Mode.TURBO, coming_from_c=34) is Mode.TURBO
+
+
+@pytest.mark.parametrize(
+    ("target", "coming_from", "expected"),
+    [
+        # Below warming's floor, cooling is the only mode that expresses it.
+        (24, 30, Mode.QUIET),
+        (24, 20, Mode.QUIET),
+        # Above cooling's ceiling, warming is the only one that expresses it.
+        (40, 55, Mode.WARMING),
+        (40, 30, Mode.WARMING),
+    ],
+)
+def test_outside_the_overlap_the_direction_cannot_change_anything(target, coming_from, expected):
+    assert mode_for_target(target, Mode.QUIET, coming_from_c=coming_from) is expected
+
+
+def test_standing_still_in_the_overlap_keeps_the_mode_it_was_in():
+    """Two stages at the same temperature need no mode change, and switching to
+    warming mid-descent would stop the bed before it arrived."""
+    assert (
+        mode_for_target(30, Mode.QUIET, coming_from_c=30, coming_from_mode=Mode.QUIET)
+        is Mode.QUIET
+    )
+    assert (
+        mode_for_target(30, Mode.QUIET, coming_from_c=30, coming_from_mode=Mode.WARMING)
+        is Mode.WARMING
+    )
+
+
+def _night(*temps: int) -> list[SleepStage]:
+    return [
+        SleepStage(stage, 60, temp)
+        for stage, temp in zip((Stage.DEEP, Stage.REM, Stage.WAKE), temps, strict=True)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("temps", "expected"),
+    [
+        # The night Liam asked about: warm to 30, then genuinely cool to 25.
+        ((30, 25, 26), [Mode.WARMING, Mode.QUIET, Mode.WARMING]),
+        # Nothing changes for a night that never enters the overlap.
+        ((17, 20, 24), [Mode.QUIET, Mode.QUIET, Mode.QUIET]),
+        # Or for the default night, which only climbs.
+        ((17, 20, 26), [Mode.QUIET, Mode.QUIET, Mode.WARMING]),
+        # A descent out of warming-only territory picks cooling as soon as it can.
+        ((40, 30, 24), [Mode.WARMING, Mode.QUIET, Mode.QUIET]),
+        # A hold after a descent stays cooling rather than flipping back.
+        ((32, 30, 30), [Mode.WARMING, Mode.QUIET, Mode.QUIET]),
+        # And a hold after a climb stays warming.
+        ((24, 30, 30), [Mode.QUIET, Mode.WARMING, Mode.WARMING]),
+    ],
+)
+def test_a_night_resolves_its_modes_in_order(temps, expected):
+    assert modes_for(_night(*temps), Mode.QUIET) == expected
+
+
+def test_the_plan_carries_the_resolved_modes_not_the_per_stage_guess():
+    plan = plan_for_wake(date(2026, 9, 8), time(6, 30), _night(30, 25, 26))
+    assert [step.mode for step in plan.steps] == [Mode.WARMING, Mode.QUIET, Mode.WARMING]

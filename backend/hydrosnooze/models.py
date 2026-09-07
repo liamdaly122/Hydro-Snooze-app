@@ -157,17 +157,74 @@ def can_preheat_to(target_c: int) -> bool:
     return low <= target_c <= high
 
 
-def mode_for_target(target_c: int, cooling_speed: Mode) -> Mode:
-    """Whether a stage cools or warms, worked out from its temperature.
+def mode_for_target(
+    target_c: int,
+    cooling_speed: Mode,
+    *,
+    coming_from_c: int | None = None,
+    coming_from_mode: Mode | None = None,
+) -> Mode:
+    """Whether a stage cools or warms.
 
-    Below 25C it has to be cooling, because warming mode cannot express a number
-    that low. At 25C and above it warms, on the reasoning that nobody asks for a
-    bed at 27C unless they want it actively warmed to 27C; leaving it in cooling
-    would mean the unit sits idle whenever the bed is already cooler than that.
+    Two thirds of this is forced. Below 25C it has to cool, because warming mode
+    cannot express a number that low. Above 35C it has to warm, because cooling
+    cannot. Between the two, 25 to 35, the ranges overlap and both modes can be
+    set to the number, so the number alone does not decide anything.
+
+    What decides it there is the direction the bed has to move, because only one
+    mode can actually move it. Asking for 25C on the way down from 30C in warming
+    mode sets the right target and then leaves the unit idle while the bed coasts
+    down on its own. That is the same mistake pre-conditioning already guards
+    against, made four hours later in the night.
+
+    So: going up warms, going down cools, and standing still changes nothing.
+
+    ASSUMPTION, worth a Shelly reading before it is treated as fact: that warming
+    mode does not actively cool. Set warming to 25C with the bed at 30C and watch
+    the plug. Around 170 W and it is cooling after all, and none of this matters.
+
+    With nothing to come from, the target alone decides and 25C and above warms:
+    nobody asks for a bed at 27C unless they want it warmed to 27C.
     """
-    if target_c >= WARMING_FLOOR_C:
+    speed = cooling_speed if cooling_speed.is_cooling else Mode.QUIET
+
+    if target_c < WARMING_FLOOR_C:
+        return speed
+    if target_c > COOLING_RANGE[1]:
         return Mode.WARMING
-    return cooling_speed if cooling_speed.is_cooling else Mode.QUIET
+
+    if coming_from_c is None:
+        return Mode.WARMING
+    if coming_from_c > target_c:
+        return speed
+    if coming_from_c < target_c:
+        return Mode.WARMING
+    # Same temperature, so nothing has to move and the mode stays as it was. The
+    # speed comes from the schedule rather than the old mode, in case it changed.
+    if coming_from_mode is not None and coming_from_mode.is_cooling:
+        return speed
+    return Mode.WARMING
+
+
+def modes_for(stages: list[SleepStage], cooling_speed: Mode) -> list[Mode]:
+    """Every stage's mode, in the order they run.
+
+    A night has to be resolved as a sequence, not a stage at a time: inside the
+    overlap a stage's mode depends on the temperature before it. This is the only
+    way to ask, and the reason SleepStage has no mode of its own.
+    """
+    modes: list[Mode] = []
+    for index, stage in enumerate(stages):
+        previous = stages[index - 1] if index else None
+        modes.append(
+            mode_for_target(
+                stage.temp_c,
+                cooling_speed,
+                coming_from_c=previous.temp_c if previous else None,
+                coming_from_mode=modes[-1] if modes else None,
+            )
+        )
+    return modes
 
 
 class Stage(str, Enum):
@@ -200,12 +257,6 @@ class SleepStage:
     stage: Stage
     duration_minutes: int
     temp_c: int
-
-    def mode(self, cooling_speed: Mode) -> Mode:
-        return mode_for_target(self.temp_c, cooling_speed)
-
-    def is_warming(self) -> bool:
-        return self.temp_c >= WARMING_FLOOR_C
 
 
 def default_stages() -> list[SleepStage]:
@@ -298,7 +349,7 @@ def plan_for_wake(
 
     steps: list[StageStep] = []
     cursor = bedtime_at
-    for stage in stages:
+    for stage, mode in zip(stages, modes_for(stages, cooling_speed), strict=True):
         ends = cursor + timedelta(minutes=stage.duration_minutes)
         steps.append(
             StageStep(
@@ -306,7 +357,7 @@ def plan_for_wake(
                 starts_at=cursor,
                 ends_at=ends,
                 temp_c=stage.temp_c,
-                mode=stage.mode(cooling_speed),
+                mode=mode,
             )
         )
         cursor = ends

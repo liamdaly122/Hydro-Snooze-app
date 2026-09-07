@@ -233,3 +233,68 @@ async def test_muting_gives_up_the_target_rather_than_lying_about_it(service):
     assert service.unit.muted
     assert service.unit.target < 20, "the wake presses land on a woken display"
     assert service.state.assumed_target_c is None
+
+
+# --- The overlap, driven through the unit --------------------------------------
+#
+# Cooling reaches 15 to 35 and warming reaches 25 to 55, so between 25 and 35 both
+# modes can hold the number. Only one of them moves the bed there.
+
+
+@pytest.mark.asyncio
+async def test_a_stage_that_drops_into_the_overlap_switches_the_unit_to_cooling(service):
+    """Deep at 30C then REM at 25C. Warming would set 25 and then do nothing at
+    all while the bed coasted down on its own for the next three hours."""
+    service.schedule = _schedule(
+        stages=[
+            SleepStage(Stage.DEEP, 240, 30),
+            SleepStage(Stage.REM, 210, 25),
+            SleepStage(Stage.WAKE, 30, 26),
+        ]
+    )
+    plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
+    deep, rem, wake = plan.steps
+
+    service.clock.jump_to(deep.starts_at)
+    await service._run_stage(plan, deep)
+    assert service.unit.mode is Mode.WARMING
+    assert service.unit.target == 30
+
+    service.clock.jump_to(rem.starts_at)
+    await service._run_stage(plan, rem)
+    assert service.unit.mode.is_cooling, "the bed has to come down, so the unit has to cool"
+    assert service.unit.target == 25
+
+    # And back up again for the last half hour, which only warming can do.
+    service.clock.jump_to(wake.starts_at)
+    await service._run_stage(plan, wake)
+    assert service.unit.mode is Mode.WARMING
+    assert service.unit.target == 26
+
+
+@pytest.mark.asyncio
+async def test_setting_a_lower_temperature_by_hand_cools_too(service):
+    """The Now control has no stage before it, so it goes on the last target we
+    set. Not a reading, but it is the number we last asked the unit to hold."""
+    service.unit.powered = True
+    service.unit.powered_at = service.clock.now()
+
+    await service.set_temperature(30)
+    assert service.unit.mode is Mode.WARMING
+
+    await service.set_temperature(25)
+    assert service.unit.mode.is_cooling
+    assert service.unit.target == 25
+
+
+@pytest.mark.asyncio
+async def test_setting_a_higher_temperature_by_hand_still_warms(service):
+    service.unit.powered = True
+    service.unit.powered_at = service.clock.now()
+
+    await service.set_temperature(20)
+    assert service.unit.mode.is_cooling
+
+    await service.set_temperature(28)
+    assert service.unit.mode is Mode.WARMING
+    assert service.unit.target == 28
