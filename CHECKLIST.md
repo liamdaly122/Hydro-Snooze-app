@@ -177,7 +177,8 @@ blaster sent anything, so this is belief, not measurement, and it is the last be
 
 **Test it before trusting anything else**, with the unit's own display in view:
 
-- [ ] Press `temp_up` once from ESPHome and read the display
+- [ ] Open `http://hydrosnooze-ir.local` on the phone. Eight buttons, served by the board itself
+- [ ] Stand in front of the unit, tap `temp_up` once, and read the display
 - [ ] It goes up by exactly **one** degree. Good, nothing to change
 - [ ] It goes up by more than one, so the unit counts frames. Set `ir_frames: "1"` at the top of
       `docs/esphome-hydrosnooze.yaml`, reflash, try again, work up until one press is one degree
@@ -188,6 +189,9 @@ every temperature the app sets would land a few degrees off and nothing would sa
 
 - [ ] `power` turns the unit on and off
 - [ ] `cool` and `warm` change the mode
+
+The web page is a setup and debugging tool only. The app talks to the board over the API, so nothing
+in the running system depends on it.
 
 ---
 

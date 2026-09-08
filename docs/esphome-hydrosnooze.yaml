@@ -53,6 +53,24 @@ wifi:
 remote_transmitter:
   pin: GPIO3
   carrier_duty_percent: 50%
+  # Explicit because the default flipped in ESPHome 2025.11, and a warning about
+  # a changed default is worth answering rather than silencing. Non-blocking
+  # hands the burst to the RMT peripheral and returns, instead of stalling the
+  # main loop for the ~220ms a press takes. Presses fired back to back still come
+  # out whole and in order: a new transmit waits for the previous one to finish.
+  non_blocking: true
+
+# Eight buttons on a page at http://hydrosnooze-ir.local, so a press can be fired
+# from a phone while standing where the unit's display is visible. That matters
+# more than it sounds: the whole point of the first press is watching the number
+# change, and that cannot be done from the Mac.
+#
+# The service talks over the API, not this, so this is a setup and debugging tool
+# and nothing depends on it. It is open to anything on the network, which for a
+# device whose worst case is changing the bed temperature is a fair trade.
+web_server:
+  version: 3
+  port: 80
 
 # --- The eight buttons --------------------------------------------------------
 #

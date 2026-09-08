@@ -451,8 +451,12 @@ ignoring repeats inside a burst rather than counting them. The config copies wha
 That is a well-founded assumption, but it is still an assumption, and it is the last one left in the
 whole project.
 
-So the first press has a job. **Stand where the unit's display is visible, press `temp_up` once, and
-read the number.**
+So the first press has a job. Open **http://hydrosnooze-ir.local** on your phone, which is a page of
+the eight buttons served by the board itself. **Stand where the unit's display is visible, tap
+`temp_up` once, and read the number.**
+
+Doing it from the phone rather than the Mac is the point. The number on the unit is the measurement,
+so you have to be standing in front of it.
 
 | What the display does | What it means | What to do |
 |---|---|---|
