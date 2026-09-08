@@ -65,6 +65,33 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   fi
 fi
 
+# --- The clock ----------------------------------------------------------------
+#
+# Worth checking here rather than discovering at 2am. The scheduler works in
+# naive local time, so a Pi left on UTC runs the whole night an hour early
+# through British Summer Time, and nothing in the app can tell. A Pi also has no
+# battery-backed clock: it only knows the time because it asked the network.
+
+if command -v timedatectl >/dev/null 2>&1; then
+  TZ_NAME=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+  SYNCED=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)
+  say "Clock: $(date '+%a %d %b %H:%M %Z'), timezone ${TZ_NAME:-unknown}"
+
+  case "$TZ_NAME" in
+    UTC | Etc/UTC | "")
+      echo "   WARNING: the timezone is UTC, which is almost certainly not what you want."
+      echo "   Through British Summer Time the whole night would run an hour early."
+      echo "   Fix it:  sudo timedatectl set-timezone Europe/London"
+      ;;
+  esac
+
+  if [ "$SYNCED" != "yes" ]; then
+    echo "   WARNING: the clock has not synchronised with the network yet."
+    echo "   A Pi has no battery-backed clock, so until this says yes the time is a guess."
+    echo "   Check it:  timedatectl"
+  fi
+fi
+
 # --- Layout -------------------------------------------------------------------
 
 say "Setting up $PREFIX"
@@ -106,11 +133,17 @@ else
   say "Creating $PREFIX/.env from the example"
   # systemd's EnvironmentFile cannot cope with comments containing '=' or with
   # quoting, so write a plain one rather than copying .env.example verbatim.
-  cat > "$PREFIX/.env" <<'ENVEOF'
-HS_TRANSMITTER=fake
-HS_POWER_MONITOR=fake
-HS_DB_PATH=/opt/hydrosnooze/data/hydrosnooze.db
-ENVEOF
+  #
+  # The database path follows PREFIX rather than being written out. It used to be
+  # the literal /opt/hydrosnooze inside a quoted heredoc, which could not expand
+  # even if it had been a variable, so any install somewhere else wrote its
+  # database into the default location.
+  {
+    echo "HS_TRANSMITTER=fake"
+    echo "HS_POWER_MONITOR=fake"
+    echo "HS_DB_PATH=$PREFIX/data/hydrosnooze.db"
+  } > "$PREFIX/.env"
+
   echo "   Still simulated. See SETUP.md step 6 for the two lines to change."
 fi
 

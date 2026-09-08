@@ -647,7 +647,36 @@ bed.
 
 ## Step 7: move it to the Pi
 
-On the Pi:
+### Before the first boot
+
+Raspberry Pi OS **Lite** 64-bit, written with Raspberry Pi Imager. Click the **settings gear before
+writing**: hostname `hydrosnooze`, SSH on, username and password, Wi-Fi on `VM1876778_EXT`, and
+**locale and timezone**.
+
+The timezone is the one that matters and it is easy to skip. The scheduler works in plain local time,
+so a Pi left on UTC runs the whole night an hour early through British Summer Time, and nothing in
+the app can tell: it would look like the schedule is simply wrong. A Pi also has no battery-backed
+clock, so it only knows the time because it asked the network on boot.
+
+Two things guard this now. `install.sh` checks both and warns, and the service prints what it thinks
+the time is in its first two log lines:
+
+```
+INFO  hydrosnooze  HydroSnooze up. transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194
+INFO  hydrosnooze  Local time is Tue 08 Sep 22:14 (BST, UTC+01:00). Stage times are read in this timezone.
+```
+
+If that says UTC in summer, fix it before anything else:
+
+```sh
+sudo timedatectl set-timezone Europe/London
+```
+
+**Where the Pi goes does not matter.** It reaches the blaster and the plug over Wi-Fi, so it needs no
+line of sight to anything and does not have to be in the bedroom. Only the blaster needs to see the
+unit.
+
+### Then, on the Pi:
 
 ```sh
 git clone https://github.com/liamdaly122/Hydro-Snooze-app.git

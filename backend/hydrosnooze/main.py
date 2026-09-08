@@ -12,6 +12,7 @@ import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -63,6 +64,21 @@ async def lifespan(app: FastAPI):
     if power != "fake":
         power += f" at {settings.shelly_host}"
     log.info("HydroSnooze up. transmitter=%s, power=%s", transmitter, power)
+
+    # The scheduler works in naive local time, so a machine on the wrong timezone
+    # runs the whole night at the wrong hour and nothing in the app can tell.
+    # A Pi also has no battery-backed clock and only knows the time because it
+    # asked the network. Both failures are silent and both surface at 2am, so the
+    # first thing in the log is what this thinks the time is.
+    now = datetime.now().astimezone()
+    offset = now.strftime("%z")
+    log.info(
+        "Local time is %s (%s, UTC%s:%s). Stage times are read in this timezone.",
+        now.strftime("%a %d %b %H:%M"),
+        now.tzname(),
+        offset[:3],
+        offset[3:],
+    )
     try:
         yield
     finally:

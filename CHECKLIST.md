@@ -24,17 +24,19 @@ that is patience.
 
 ---
 
-## Order the last part now
+## Parts
 
-Do this before anything else, because it is the only thing with a delivery time attached.
+- [x] Shelly Plug S Gen3
+- [x] XIAO Smart IR Mate
+- [x] **Raspberry Pi 4, 4GB.** More than this needs, which means it will never be the thing that is
+      too slow, and it is a comfortable machine to SSH into
+- [ ] A decent A2 microSD card, 32GB (£10 to £20)
+- [ ] The official Pi 4 power supply. Under-powering a Pi produces symptoms that look exactly like
+      software bugs
+- [ ] A passive case. No fan: it does not need one and it may end up in a bedroom
 
-- [ ] Raspberry Pi Zero 2 W, or a Pi 4 with 2GB (£35 to £70)
-- [ ] A decent A2 microSD card, or a small USB SSD (£10 to £20)
-
-Already ordered: the XIAO Smart IR Mate and the Shelly Plug S Gen3.
-
-Do not cheap out on the card. This runs day and night writing logs, and a cheap card quietly failing
-is the most likely way the whole thing stops working.
+Do not cheap out on the card. This runs day and night writing logs and power samples, and a cheap
+card quietly failing is the most likely way the whole thing stops working.
 
 ---
 
@@ -127,12 +129,27 @@ Detail in [SETUP.md](SETUP.md#step-2-the-raspberry-pi).
 - [ ] Download Raspberry Pi Imager onto the Mac
 - [ ] Choose Raspberry Pi OS Lite (64-bit)
 - [ ] **Click the settings gear before writing.** Hostname `hydrosnooze`, SSH on, username and
-      password, Wi-Fi name and password, country set
+      password, Wi-Fi name and password, **locale and timezone**
+- [ ] Put it on `VM1876778_EXT`, the extender network, same as the plug and the blaster
 - [ ] Write the card, put it in, power on, wait two minutes
 - [ ] `ssh liam@hydrosnooze.local` from the Mac gives a prompt
+- [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`
 
 That gear step is what makes this painless. Skip it and the Pi never joins the network, and there is
 no screen attached to tell me why.
+
+**The timezone is not a detail.** The scheduler works in plain local time, so a Pi left on UTC runs
+the whole night an hour early through British Summer Time, and nothing in the app can tell. A Pi also
+has no battery-backed clock: it only knows the time because it asked the network. `install.sh`
+checks both and warns, and the service prints the time it thinks it is in its first two log lines,
+but the fix is one command:
+
+```sh
+sudo timedatectl set-timezone Europe/London
+```
+
+The Pi does not need to be near anything. It talks to the blaster and the plug over Wi-Fi, so it can
+live wherever there is a spare socket and decent signal. Only the blaster needs to see the unit.
 
 ---
 

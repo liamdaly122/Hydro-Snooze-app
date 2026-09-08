@@ -38,6 +38,9 @@ rsync -avz --delete \
   "$ROOT/backend/" "$TARGET:$REMOTE_DIR/backend/"
 
 echo "Restarting the service"
-ssh "$TARGET" 'sudo systemctl restart hydrosnooze && sleep 2 && systemctl is-active hydrosnooze'
+# -t so sudo has a terminal to prompt on. Raspberry Pi OS gives the user it
+# creates passwordless sudo, so it usually will not ask, but without a terminal
+# the failure is "no tty present" rather than a password prompt.
+ssh -t "$TARGET" 'sudo systemctl restart hydrosnooze && sleep 2 && systemctl is-active hydrosnooze'
 
 echo "Done. Open http://${TARGET#*@}:8000 on the phone."
