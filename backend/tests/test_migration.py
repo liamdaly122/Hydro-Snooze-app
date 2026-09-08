@@ -149,3 +149,39 @@ def test_a_current_database_is_left_alone(tmp_path) -> None:
         assert second.load_schedule() == schedule
     finally:
         second.close()
+
+
+# --- Keeping the database from growing forever ---------------------------------
+
+
+def test_pruning_events_keeps_the_newest():
+    """prune_events was written and then never called, so events were the one
+    table growing without limit, on the SD card that is the likeliest thing in
+    the whole setup to fail."""
+    from datetime import datetime
+
+    from hydrosnooze.db import Database
+    from hydrosnooze.events import Event
+
+    db = Database(":memory:")
+    for i in range(60):
+        db.add_event(Event(id=0, at=datetime(2026, 9, 8, 21, 0), level="info", kind="t", message=f"e{i}"))
+
+    db.prune_events(keep=25)
+    kept = db.recent_events(500)
+
+    assert len(kept) == 25
+    assert kept[0].message == "e59", "it threw away the newest instead of the oldest"
+    assert kept[-1].message == "e35"
+
+
+def test_pruning_a_small_log_does_nothing():
+    from datetime import datetime
+
+    from hydrosnooze.db import Database
+    from hydrosnooze.events import Event
+
+    db = Database(":memory:")
+    db.add_event(Event(id=0, at=datetime(2026, 9, 8, 21, 0), level="info", kind="t", message="only"))
+    db.prune_events(keep=100)
+    assert len(db.recent_events(10)) == 1

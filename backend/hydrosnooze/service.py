@@ -49,6 +49,10 @@ log = logging.getLogger(__name__)
 #: before the thing that would tell us it is back has run.
 RETRY_AFTER = timedelta(seconds=30)
 
+#: Events to keep. About thirty a night, so this is a couple of months of
+#: history, which is far more than anyone reads and still nothing on a card.
+EVENTS_KEPT = 2000
+
 #: Below this, an idle reading is the unit not having started rather than having
 #: arrived. Power on, mode change and rail-and-count take about thirty seconds of
 #: infrared before the compressor is doing anything at all.
@@ -358,8 +362,13 @@ class Service:
         )
         if watts is not None:
             self.db.add_power_sample(now, watts)
+            # Once an hour, on the hour. Both tables grow every night forever
+            # otherwise, on an SD card that is already the likeliest thing in the
+            # whole setup to fail. prune_events was written for this and then
+            # never called, so events were the one thing growing unbounded.
             if now.minute == 0 and now.second < self.settings.power_sample_seconds:
                 self.db.prune_power(now - timedelta(days=7))
+                self.db.prune_events(keep=EVENTS_KEPT)
 
     # --- Nightly jobs ---------------------------------------------------------
 
