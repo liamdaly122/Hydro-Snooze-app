@@ -217,7 +217,9 @@ days, so there is nothing left to wait for.
 
 - [ ] `./scripts/use-hardware.py`, which points `backend/.env` at both devices and copies the ESPHome
       key across without it needing to be retyped
-- [ ] `./scripts/dev.sh`
+- [ ] `./scripts/dev.sh`. On real hardware it starts three things in one window and tags every
+      line: `app` what it decided, `ir` that the infrared left the board, `plug` what the unit
+      actually drew. One Ctrl-C stops all three
 - [ ] The simulator tab has gone from the app. That is proof it is driving real infrared
 - [ ] Power on from the phone, and the plug reading climbs off standby
 - [ ] Set a temperature, and the unit's display lands on that number

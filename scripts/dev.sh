@@ -79,15 +79,35 @@ elif command -v hostname >/dev/null 2>&1; then
   LAN=$(hostname -I 2>/dev/null | awk '{print $1}')
 fi
 
+# What it is driving decides how much there is worth watching. Against the
+# simulator there is one stream and the press log is the whole story. On real
+# hardware there are three, and the interesting moments are the ones where they
+# disagree, so they are worth having side by side rather than in three tabs.
+#
+# An environment variable wins over the file, which is the order the service
+# itself reads them in.
+MODE=$(sed -n 's/^[[:space:]]*HS_TRANSMITTER[[:space:]]*=[[:space:]]*\([a-z]*\).*/\1/p' \
+  backend/.env 2>/dev/null | tail -1)
+MODE="${HS_TRANSMITTER:-${MODE:-fake}}"
+
 echo
-echo "  HydroSnooze is starting. The line below says what it is driving."
+echo "  HydroSnooze is starting."
 echo
 echo "  On this machine:  http://localhost:8000"
 [ -n "$LAN" ] && echo "  On your phone:    http://$LAN:8000   (same Wi-Fi)"
 echo
-echo "  Every button press it would have sent is printed below."
+if [ "$MODE" = "esphome" ]; then
+  echo "  Driving the REAL unit. Presses land on the hardware."
+else
+  echo "  Driving the SIMULATED unit. Every press is printed instead of sent."
+fi
 echo "  Stop it with Ctrl-C."
 echo
+
+if [ "$MODE" = "esphome" ]; then
+  # The service, the blaster's own log and the plug, tagged and interleaved.
+  exec python scripts/watch.py
+fi
 
 cd backend
 exec python -m uvicorn hydrosnooze.main:app --host 0.0.0.0 --port 8000

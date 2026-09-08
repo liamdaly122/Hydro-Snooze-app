@@ -541,6 +541,31 @@ To go back to the simulator at any point:
 `HS_TRANSMITTER=fake`, so a missing spanner is proof the service is driving real infrared rather than
 printing to a terminal.
 
+### One window, three views
+
+On real hardware `dev.sh` starts three things instead of one and tags every line with where it came
+from, so there is still only one window to watch:
+
+| Tag | What it is | How much to trust it |
+|---|---|---|
+| `app` | What the service decided, and what it believes the unit is on | Belief. It cannot read the unit back |
+| `ir` | ESPHome's own log, proving the infrared left the board | Proof it was sent, not that it was received |
+| `plug` | Watts the unit is actually drawing | The only measurement in the system |
+
+A stage boundary should appear three times: about 33 press lines under `app`, the matching
+`Sending Symphony` lines under `ir`, then half a minute later the wattage under `plug` climbing to
+roughly 170 for cooling or 300 for heating.
+
+The value is in the disagreements. `app` presses with no `ir` means the service cannot reach the
+board. `ir` sending with no change in `plug` means the unit is not receiving them. Those are
+different faults with different fixes, and one window separates them without any guessing.
+
+One Ctrl-C stops all three. Nothing is left holding port 8000, which is the failure that makes the
+next run look broken when it is only leftovers.
+
+Against the simulator none of this happens: there is one process and the press log is the whole
+story, exactly as before.
+
 ### Daytime only, at first
 
 Watch the unit and the terminal at the same time. Every press is still logged, exactly as it was
