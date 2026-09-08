@@ -23,5 +23,8 @@ class FakePowerMonitor:
             return None
         return round(self.unit.watts(), 1)
 
+    async def reachable(self) -> bool:
+        return True
+
     async def close(self) -> None:
         return None

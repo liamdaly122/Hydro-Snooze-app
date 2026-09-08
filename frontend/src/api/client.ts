@@ -12,6 +12,7 @@
 
 import type {
   DeviceEvent,
+  DeviceHealth,
   DeviceState,
   Mode,
   PowerSample,
@@ -24,6 +25,15 @@ export interface LiveUpdate {
   state?: DeviceState
   schedule?: Schedule
   event?: DeviceEvent
+  health?: DeviceHealth[]
+  /**
+   * Whether the app can currently reach the service.
+   *
+   * Reported by the client rather than the service, because it is the one thing
+   * the service cannot answer: a message saying "I am up" can only arrive when
+   * it is. Silence is the signal, and only this end can hear it.
+   */
+  connected?: boolean
 }
 
 export interface ApiClient {
@@ -66,6 +76,9 @@ export interface ApiClient {
    */
   mute(): Promise<void>
   setMode(mode: Mode): Promise<void>
+
+  /** How each device is doing. The service is not in here: see LiveUpdate.connected. */
+  getHealth(): Promise<DeviceHealth[]>
 
   getEvents(limit?: number): Promise<DeviceEvent[]>
   getPowerHistory(hours?: number): Promise<PowerSample[]>

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ApiClient } from './api/client'
-import type { DeviceEvent, DeviceState, PowerSample, Schedule, ServiceInfo } from './types'
+import type {
+  DeviceEvent,
+  DeviceHealth,
+  DeviceState,
+  PowerSample,
+  Schedule,
+  ServiceInfo,
+} from './types'
 
 /**
  * Holds everything the service knows and keeps it fresh off the live feed.
@@ -14,6 +21,11 @@ export function useService(client: ApiClient) {
   const [schedule, setSchedule] = useState<Schedule | null>(null)
   const [events, setEvents] = useState<DeviceEvent[]>([])
   const [power, setPower] = useState<PowerSample[]>([])
+  const [health, setHealth] = useState<DeviceHealth[]>([])
+  // Optimistic on the first render: the socket has not failed, it has not
+  // opened yet. Showing the service as down for the half second before it
+  // connects would make the bar cry wolf every time the app is opened.
+  const [connected, setConnected] = useState(true)
 
   useEffect(() => {
     let live = true
@@ -23,13 +35,15 @@ export function useService(client: ApiClient) {
       client.getSchedule(),
       client.getEvents(),
       client.getPowerHistory(),
-    ]).then(([i, s, sch, ev, pw]) => {
+      client.getHealth(),
+    ]).then(([i, s, sch, ev, pw, hp]) => {
       if (!live) return
       setInfo(i)
       setState(s)
       setSchedule(sch)
       setEvents(ev)
       setPower(pw)
+      setHealth(hp)
     })
     return () => {
       live = false
@@ -42,6 +56,8 @@ export function useService(client: ApiClient) {
         if (update.state) setState(update.state)
         if (update.schedule) setSchedule(update.schedule)
         if (update.event) setEvents((prev) => [update.event!, ...prev].slice(0, 200))
+        if (update.health) setHealth(update.health)
+        if (update.connected !== undefined) setConnected(update.connected)
       }),
     [client],
   )
@@ -51,7 +67,7 @@ export function useService(client: ApiClient) {
   }, [client])
 
   return useMemo(
-    () => ({ info, state, schedule, events, power, refreshPower }),
-    [info, state, schedule, events, power, refreshPower],
+    () => ({ info, state, schedule, events, power, health, connected, refreshPower }),
+    [info, state, schedule, events, power, health, connected, refreshPower],
   )
 }

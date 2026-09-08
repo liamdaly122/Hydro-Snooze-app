@@ -73,5 +73,8 @@ class ShellyPowerMonitor:
             return float(watts)
         return None
 
+    async def reachable(self) -> bool:
+        return await self.read_watts() is not None
+
     async def close(self) -> None:
         await self._client.aclose()

@@ -58,5 +58,9 @@ class FakeTransmitter:
         if self.on_line:
             self.on_line(line)
 
+    async def reachable(self) -> bool:
+        """There is no board, so this is not a health check, it is a fact."""
+        return True
+
     async def close(self) -> None:
         return None

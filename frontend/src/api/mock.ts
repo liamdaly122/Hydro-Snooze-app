@@ -14,6 +14,7 @@
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   DeviceEvent,
+  DeviceHealth,
   DeviceState,
   Mode,
   PowerSample,
@@ -129,6 +130,20 @@ export class MockApiClient implements ApiClient {
       last_command_at: nowIso(),
     })
     this.log('info', 'power', 'Unit powered off, plug confirms 0.4 W')
+  }
+
+  async getHealth(): Promise<DeviceHealth[]> {
+    // Seed data has no hardware behind it, so it says so rather than showing
+    // green for devices that are not there.
+    return [
+      { name: 'plug', health: 'simulated', detail: 'No plug. Watts are invented', last_ok_at: null },
+      {
+        name: 'blaster',
+        health: 'simulated',
+        detail: 'No blaster. Presses are printed',
+        last_ok_at: null,
+      },
+    ]
   }
 
   async startRehearsal(seconds: number): Promise<void> {

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..models import DeviceState, Schedule, modes_for
+from ..models import DeviceHealth, DeviceState, Schedule, modes_for
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -68,3 +68,16 @@ def schedule_json(schedule: Schedule) -> dict[str, Any]:
         },
         "updated_at": _iso(schedule.updated_at),
     }
+
+
+def health_json(devices: list[DeviceHealth]) -> list[dict[str, Any]]:
+    """The device bar. One entry per thing that can independently stop working."""
+    return [
+        {
+            "name": d.name,
+            "health": d.health.value,
+            "detail": d.detail,
+            "last_ok_at": _iso(d.last_ok_at),
+        }
+        for d in devices
+    ]

@@ -71,6 +71,26 @@ class EsphomeTransmitter:
             )
         self._client = client
 
+    async def reachable(self) -> bool:
+        """Connect if not already, and confirm the eight buttons are really there.
+
+        Not just "did the TCP connection open". A board running the capture
+        configuration, or one flashed with codes still to fill in, answers
+        perfectly and cannot press anything, and that is worth catching in
+        daylight rather than at a stage boundary.
+        """
+        try:
+            async with self._lock:
+                await self._connect()
+                return all(b.value in self._buttons for b in Button)
+        except Exception as exc:
+            log.debug("blaster unreachable: %r", exc)
+            # A failed connection may have left a half-open client. Drop it so the
+            # next attempt starts cleanly rather than reusing something broken.
+            self._client = None
+            self._buttons = {}
+            return False
+
     async def press(self, button: Button, note: str = "") -> None:
         async with self._lock:
             await self._connect()

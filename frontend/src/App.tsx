@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BottomNav, type Screen } from './components/BottomNav'
 import { ChevronRight } from './components/Icons'
 import { PowerButton } from './components/PowerButton'
+import { DeviceBar } from './components/DeviceBar'
 import { Home } from './screens/Home'
 import { History } from './screens/History'
 import { Schedule } from './screens/Schedule'
@@ -18,7 +19,7 @@ export function App({ client }: { client: ApiClient }) {
   const [editingSchedule, setEditingSchedule] = useState(false)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [powerError, setPowerError] = useState<string | null>(null)
-  const { info, state, schedule, events, power } = useService(client)
+  const { info, state, schedule, events, power, health, connected } = useService(client)
 
   const ready = state !== null && schedule !== null
 
@@ -59,6 +60,12 @@ export function App({ client }: { client: ApiClient }) {
           />
         )}
       </header>
+
+      {/*
+        Under the header rather than on a screen, because a device going down
+        matters wherever you happen to be looking.
+      */}
+      <DeviceBar health={health} connected={connected} />
 
       {powerError && (
         <p className="app__error" onClick={() => setPowerError(null)}>

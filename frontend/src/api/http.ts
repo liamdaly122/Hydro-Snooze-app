@@ -11,6 +11,7 @@
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   DeviceEvent,
+  DeviceHealth,
   DeviceState,
   Mode,
   PowerSample,
@@ -47,6 +48,8 @@ export class HttpApiClient implements ApiClient {
   info = () => request<ServiceInfo>('/api/info')
   getState = () => request<DeviceState>('/api/state')
   getSchedule = () => request<Schedule>('/api/schedule')
+  getHealth = () => request<DeviceHealth[]>('/api/health')
+
   getEvents = (limit = 100) => request<DeviceEvent[]>(`/api/events?limit=${limit}`)
   getPowerHistory = (hours = 24) => request<PowerSample[]>(`/api/power?hours=${hours}`)
 
@@ -96,19 +99,30 @@ export class HttpApiClient implements ApiClient {
     }
   }
 
+  private emit(update: LiveUpdate): void {
+    for (const listener of this.listeners) listener(update)
+  }
+
   private open(): void {
     if (this.socket || this.closed) return
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(`${protocol}//${location.host}/api/live`)
     this.socket = socket
 
+    // Whether the app can reach the service is the one thing the service cannot
+    // report, because a message saying "I am up" only ever arrives when it is.
+    // Silence is the signal and only this end can hear it, so the socket's own
+    // state is what the device bar shows for the service.
+    socket.onopen = () => this.emit({ connected: true })
+
     socket.onmessage = (message) => {
       const payload = JSON.parse(message.data as string)
       if (payload.ping) return
-      for (const listener of this.listeners) listener(payload as LiveUpdate)
+      this.emit(payload as LiveUpdate)
     }
     socket.onclose = () => {
       this.socket = null
+      this.emit({ connected: false })
       // The Pi rebooting, or the phone waking from sleep. Keep trying quietly.
       if (!this.closed && this.listeners.size > 0) {
         this.reconnect = setTimeout(() => this.open(), 2000)

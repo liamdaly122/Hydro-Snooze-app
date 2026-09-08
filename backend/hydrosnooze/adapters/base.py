@@ -20,6 +20,15 @@ class Transmitter(Protocol):
     async def press(self, button: Button, note: str = "") -> None:
         """Send `button`. `note` is context for the press log, e.g. "wake 1/2"."""
 
+    async def reachable(self) -> bool:
+        """Whether the blaster can be talked to right now.
+
+        Presses are hours apart, so without asking, a blaster that fell off the
+        Wi-Fi at midnight would look perfectly fine until the stage that needed
+        it. Infrared is one way, so this only says the board is there, not that
+        the unit received anything.
+        """
+
     async def close(self) -> None: ...
 
 
@@ -29,5 +38,8 @@ class PowerMonitor(Protocol):
 
     async def read_watts(self) -> float | None:
         """Current draw, or None if the plug could not be reached."""
+
+    async def reachable(self) -> bool:
+        """Whether the plug answered. Every read already asks, so this is free."""
 
     async def close(self) -> None: ...

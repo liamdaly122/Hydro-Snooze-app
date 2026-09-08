@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import dev, routes
-from .api.schemas import schedule_json, state_json
+from .api.schemas import health_json, schedule_json, state_json
 from .config import get_settings
 from .service import Service
 
@@ -98,7 +98,11 @@ async def live(websocket: WebSocket) -> None:
     queue = service.subscribe()
     try:
         await websocket.send_json(
-            {"state": state_json(service.state), "schedule": schedule_json(service.schedule)}
+            {
+                "state": state_json(service.state),
+                "schedule": schedule_json(service.schedule),
+                "health": health_json(service.health()),
+            }
         )
         while True:
             try:

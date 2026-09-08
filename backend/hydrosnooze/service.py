@@ -24,7 +24,9 @@ from .events import Event, EventLog
 from .models import (
     STAGE_LABEL,
     Activity,
+    DeviceHealth,
     DeviceState,
+    Health,
     Mode,
     NightPlan,
     Power,
@@ -57,12 +59,89 @@ class Service:
         self.state = DeviceState()
         self.events.seed(self.db.recent_events(200))
 
+        # None means never asked, which is a different thing from "not answering"
+        # and the bar says so rather than showing a colour it has not earned.
+        self._plug_ok: bool | None = None
+        self._plug_ok_at: datetime | None = None
+        self._blaster_ok: bool | None = None
+        self._blaster_ok_at: datetime | None = None
+
         self._lock = asyncio.Lock()
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._tasks: list[asyncio.Task[None]] = []
         self._unsubscribe_events: Callable[[], None] | None = None
 
     # --- Lifecycle ------------------------------------------------------------
+
+    # --- Health ---------------------------------------------------------------
+    #
+    # Presses are hours apart and the plug is read every thirty seconds, so
+    # without asking, a blaster that fell off the Wi-Fi at midnight would look
+    # perfectly fine right up until the stage that needed it. Both get asked, and
+    # both remember when they last answered so a wobble reads differently from a
+    # device that has gone.
+
+    def health(self) -> list[DeviceHealth]:
+        now = self.clock.now()
+        real_plug = self.settings.power_monitor != "fake"
+        real_blaster = self.settings.transmitter != "fake"
+
+        plug = (
+            DeviceHealth.judge(
+                "plug",
+                now=now,
+                last_ok_at=self._plug_ok_at,
+                ok_now=self._plug_ok,
+                where=self.settings.shelly_host,
+                note=f"Reading {self.state.observed_power_w:.1f} W"
+                if self.state.observed_power_w is not None
+                else "",
+            )
+            if real_plug
+            else DeviceHealth("plug", Health.SIMULATED, "No plug. Watts are invented")
+        )
+
+        blaster = (
+            DeviceHealth.judge(
+                "blaster",
+                now=now,
+                last_ok_at=self._blaster_ok_at,
+                ok_now=self._blaster_ok,
+                where=self.settings.esphome_host,
+                note=f"All eight buttons ready at {self.settings.esphome_host}",
+            )
+            if real_blaster
+            else DeviceHealth("blaster", Health.SIMULATED, "No blaster. Presses are printed")
+        )
+        return [plug, blaster]
+
+    async def _check_blaster(self) -> None:
+        ok = await self.transmitter.reachable()
+        was = self._blaster_ok
+        self._blaster_ok = ok
+        if ok:
+            self._blaster_ok_at = self.clock.now()
+        # Said once on the way down and once on the way back, not every check.
+        if was is not None and was != ok:
+            if ok:
+                self.events.info("blaster", "The blaster is answering again")
+            else:
+                self.events.warning(
+                    "blaster",
+                    f"The blaster at {self.settings.esphome_host} is not answering. "
+                    "Presses will not reach the unit until it does.",
+                )
+        self._push_state()
+
+    async def _health_loop(self) -> None:
+        while True:
+            try:
+                await self._check_blaster()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # pragma: no cover
+                log.exception("blaster health check failed")
+            await self.clock.sleep(self.settings.power_sample_seconds)
 
     async def start(self) -> None:
         self._unsubscribe_events = self.events.subscribe(self._on_event)
@@ -85,6 +164,7 @@ class Service:
         self._tasks = [
             asyncio.create_task(self._tick_loop(), name="scheduler"),
             asyncio.create_task(self._power_loop(), name="power"),
+            asyncio.create_task(self._health_loop(), name="health"),
         ]
 
     async def stop(self) -> None:
@@ -124,9 +204,14 @@ class Service:
         self._broadcast({"event": event.as_dict()})
 
     def _push_state(self) -> None:
-        from .api.schemas import state_json
+        from .api.schemas import health_json, state_json
 
-        self._broadcast({"state": state_json(self.state)})
+        # Health goes with it rather than on a poll of its own. It changes for
+        # the same reasons state does, and a device bar that lags behind the
+        # thing it is describing is worse than not having one.
+        self._broadcast(
+            {"state": state_json(self.state), "health": health_json(self.health())}
+        )
 
     def _push_schedule(self) -> None:
         from .api.schemas import schedule_json
@@ -186,6 +271,19 @@ class Service:
     async def _sample_power(self) -> None:
         watts = await self.power.read_watts()
         now = self.clock.now()
+
+        # Every read is already a reachability check, so there is nothing extra
+        # to ask: a reading means the plug answered.
+        was = self._plug_ok
+        self._plug_ok = watts is not None
+        if watts is not None:
+            self._plug_ok_at = now
+        # _set_state below only pushes when the state itself changed, and a plug
+        # that has stopped answering leaves the state exactly as it was. Without
+        # this the bar would keep showing green on a dead plug.
+        plug_changed = was is not None and was != self._plug_ok
+        if plug_changed:
+            self._push_state()
         activity = self.settings.thresholds.classify(watts)
 
         # The plug is the only thing here that is actually observed, so it

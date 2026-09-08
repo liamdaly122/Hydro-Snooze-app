@@ -19,7 +19,7 @@ from ..models import (
 )
 from ..sequences import CommandFailed
 from ..service import Service
-from .schemas import schedule_json, state_json
+from .schemas import health_json, schedule_json, state_json
 
 router = APIRouter(prefix="/api")
 
@@ -87,6 +87,17 @@ async def get_schedule(request: Request) -> dict[str, object]:
 @router.get("/events")
 async def get_events(request: Request, limit: int = 100) -> list[dict[str, object]]:
     return [e.as_dict() for e in _service(request).events.recent(min(limit, 500))]
+
+
+@router.get("/health")
+async def get_health(request: Request) -> list[dict[str, object]]:
+    """One entry per thing that can independently stop working.
+
+    The service itself is not in here on purpose. If this request answered at
+    all, the service is up; whether the app can reach it is something only the
+    app can know, and it knows it from whether its live socket is connected.
+    """
+    return health_json(_service(request).health())
 
 
 @router.get("/power")
@@ -233,6 +244,13 @@ async def post_mute(request: Request) -> dict[str, object]:
 @router.post("/mode")
 async def post_mode(request: Request, body: ModeBody) -> dict[str, object]:
     service = _service(request)
+    # The same guard the temperature and mute routes have always had, and this
+    # one was missing it. A mode press on a unit that is off does nothing at all,
+    # because power is the only button it answers, but the app would have gone on
+    # to believe the mode had changed. Believing something unconfirmed is the one
+    # thing this project is built not to do.
+    if not service.state.can_set_temperature:
+        raise HTTPException(409, "The unit ignores every button but power while it is off.")
     try:
         await service.set_mode(body.mode)
     except CommandFailed as exc:

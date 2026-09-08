@@ -725,6 +725,63 @@ class DeviceState:
         return self.power is Power.ON
 
 
+class Health(str, Enum):
+    """How a device is doing, in the only terms this project can honestly use.
+
+    `OK` means the last attempt to reach it worked. `DEGRADED` means it is not
+    answering now but was recently, which is what a Wi-Fi wobble looks like and
+    is not yet worth waking up for. `DOWN` means it has not answered for long
+    enough that the night is at risk. `SIMULATED` is not a colour on a dial: it
+    says there is no device here at all, which is different from a healthy one.
+    """
+
+    OK = "ok"
+    DEGRADED = "degraded"
+    DOWN = "down"
+    SIMULATED = "simulated"
+    UNKNOWN = "unknown"
+
+
+#: How long a device can go unreachable before it stops being a wobble. Chosen
+#: against the plug's 30 second sample: five minutes is ten missed reads, which
+#: is well past coincidence, and still far short of a stage boundary.
+DEGRADED_AFTER = timedelta(minutes=5)
+
+
+@dataclass(frozen=True)
+class DeviceHealth:
+    """One device's health, with enough detail to act on rather than just a dot."""
+
+    name: str
+    health: Health
+    detail: str
+    last_ok_at: datetime | None = None
+
+    @staticmethod
+    def judge(
+        name: str,
+        *,
+        now: datetime,
+        last_ok_at: datetime | None,
+        ok_now: bool | None,
+        where: str,
+        note: str = "",
+    ) -> DeviceHealth:
+        """Turn "did the last attempt work, and when did one last work" into a colour."""
+        if ok_now is None:
+            return DeviceHealth(name, Health.UNKNOWN, f"Not checked yet. {where}".strip())
+        if ok_now:
+            return DeviceHealth(name, Health.OK, (note or f"Answering at {where}"), last_ok_at)
+        if last_ok_at is not None and now - last_ok_at < DEGRADED_AFTER:
+            ago = int((now - last_ok_at).total_seconds())
+            return DeviceHealth(
+                name, Health.DEGRADED, f"No answer for {ago}s. Last reached at {where}", last_ok_at
+            )
+        return DeviceHealth(
+            name, Health.DOWN, f"Not answering at {where}. Check its power and Wi-Fi", last_ok_at
+        )
+
+
 # --- Power thresholds ---------------------------------------------------------
 
 

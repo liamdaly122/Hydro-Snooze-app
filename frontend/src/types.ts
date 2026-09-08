@@ -110,6 +110,16 @@ export interface Schedule {
   updated_at: string | null
 }
 
+export type Health = 'ok' | 'degraded' | 'down' | 'simulated' | 'unknown'
+
+/** One thing that can independently stop working, and how it is doing. */
+export interface DeviceHealth {
+  name: string
+  health: Health
+  detail: string
+  last_ok_at: string | null
+}
+
 export interface DeviceState {
   power: Power
   /** Which part of the night is running. Known, not assumed: the app drives it. */
