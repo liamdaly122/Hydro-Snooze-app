@@ -12,6 +12,7 @@ an ASSUMPTION comment.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from enum import Enum
@@ -267,10 +268,17 @@ class Preconditioning:
         return self.mode is not None
 
 
+#: Looks up how long this bed has really taken to reach a temperature in a mode.
+#: A function rather than a value, because the mode is decided inside and the
+#: answer depends on it.
+LearnedLead = Callable[[Mode, int], "int | None"]
+
+
 def preconditioning_for(
     first_temp_c: int,
     cooling_speed: Mode,
     room_c: int = ASSUMED_ROOM_C,
+    learned: LearnedLead | None = None,
 ) -> Preconditioning:
     """Pick the mode and the head start, from the gap the bed has to close.
 
@@ -310,10 +318,25 @@ def preconditioning_for(
             f"does that job once you are in it.",
         )
 
+    # Measured beats estimated. The plug watches how long the unit runs before it
+    # settles at its setpoint, so after a few nights there is a real number for
+    # this bed in this room, rather than a rate I picked.
+    measured = learned(mode, first_temp_c) if learned else None
+    if measured is not None:
+        return Preconditioning(
+            mode,
+            min(measured, PRECONDITION_MAX_MINUTES),
+            f"{reason} Measured at about {measured} minutes on recent nights.",
+        )
+
     low, high = range_for(mode)
     per_degree = DEFAULT_LEAD_MINUTES[mode] / (high - low)
     lead = PRECONDITION_BASE_MINUTES + abs(gap) * per_degree
-    return Preconditioning(mode, min(round(lead), PRECONDITION_MAX_MINUTES), reason)
+    return Preconditioning(
+        mode,
+        min(round(lead), PRECONDITION_MAX_MINUTES),
+        f"{reason} Estimated, until the plug has watched a few of these.",
+    )
 
 
 class Stage(str, Enum):
@@ -487,6 +510,7 @@ def plan_for_wake(
     cooling_speed: Mode = Mode.QUIET,
     *,
     room_c: int = ASSUMED_ROOM_C,
+    learned: LearnedLead | None = None,
 ) -> NightPlan:
     """Work backwards from the morning you want to wake up.
 
@@ -514,7 +538,9 @@ def plan_for_wake(
         cursor = ends
 
     # Not a setting. Worked out from where the bed starts and where it has to be.
-    pre = preconditioning_for(stages[0].temp_c if stages else room_c, cooling_speed, room_c)
+    pre = preconditioning_for(
+        stages[0].temp_c if stages else room_c, cooling_speed, room_c, learned
+    )
     precool_at = bedtime_at - timedelta(minutes=pre.lead_minutes) if pre.runs else None
     return NightPlan(
         preconditioning=pre,
@@ -658,8 +684,10 @@ class Schedule:
         """How the bed gets ready tonight. Decided from the schedule, not stored."""
         return preconditioning_for(self.first_temp_c, self.cooling_speed)
 
-    def plan_for(self, wake_on: date) -> NightPlan:
-        return plan_for_wake(wake_on, self.wake_time, self.stages, self.cooling_speed)
+    def plan_for(self, wake_on: date, learned: LearnedLead | None = None) -> NightPlan:
+        return plan_for_wake(
+            wake_on, self.wake_time, self.stages, self.cooling_speed, learned=learned
+        )
 
     def next_plan(self, now: datetime) -> NightPlan | None:
         """The next night that has not started yet, or None if the schedule is off.

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
-from .models import NightPlan, Schedule, Stage, StageStep
+from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep
 
 JobKind = Literal["precool", "stage", "power_off"]
 
@@ -78,6 +78,9 @@ class Scheduler:
     #: below it runs unchanged: the same due(), the same grace windows, the same
     #: fired marks. A rehearsal is not a different code path, it is a short night.
     rehearsal: NightPlan | None = None
+    #: How long this bed has really taken, when there is enough history to say.
+    #: Set by the service; the scheduler itself stays free of side effects.
+    learned_lead: LearnedLead | None = None
 
     def plan_in_progress(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The night we are currently inside, or the next one.
@@ -95,7 +98,7 @@ class Scheduler:
             wake_on = (now + timedelta(days=offset)).date()
             if wake_on.weekday() not in schedule.days_of_week:
                 continue
-            plan = schedule.plan_for(wake_on)
+            plan = schedule.plan_for(wake_on, self.learned_lead)
             if now < plan.wake_at + POWER_OFF_GRACE:
                 return plan
         return None

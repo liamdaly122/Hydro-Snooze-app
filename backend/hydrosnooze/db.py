@@ -23,6 +23,10 @@ from .models import (
     default_stages,
 )
 
+#: Nights needed before the measured figure replaces the estimate. One night is
+#: an anecdote, and the estimate it would replace is at least consistent.
+MIN_RUNS_TO_LEARN = 3
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule (
     id                   INTEGER PRIMARY KEY CHECK (id = 1),
@@ -48,6 +52,25 @@ CREATE INDEX IF NOT EXISTS events_at ON events (at DESC);
 CREATE TABLE IF NOT EXISTS power_samples (
     at    TEXT NOT NULL PRIMARY KEY,
     watts REAL NOT NULL
+);
+
+-- How long the bed really took to reach a temperature, measured off the plug.
+--
+-- The lead time before bedtime used to be an estimate: a fixed cost plus a rate
+-- per degree, from an assumed room temperature. The plug can answer it properly.
+-- When the unit reaches its setpoint the draw falls out of the cooling band into
+-- the idle one, and the time to that fall is the answer.
+--
+-- `reached` is false when it never got there, which is worth keeping rather than
+-- discarding: a run that never idled means the target was not achievable that
+-- night, and that is the more useful thing to know.
+CREATE TABLE IF NOT EXISTS precondition_runs (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at       TEXT    NOT NULL,
+    mode     TEXT    NOT NULL,
+    target_c INTEGER NOT NULL,
+    seconds  INTEGER NOT NULL,
+    reached  INTEGER NOT NULL
 );
 """
 
@@ -227,6 +250,45 @@ class Database:
             (since.isoformat(),),
         ).fetchall()
         return [(datetime.fromisoformat(r["at"]), r["watts"]) for r in rows]
+
+    # --- What the bed actually does -------------------------------------------
+
+    def record_precondition(
+        self, at: datetime, mode: str, target_c: int, seconds: int, reached: bool
+    ) -> None:
+        self._db.execute(
+            "INSERT INTO precondition_runs (at, mode, target_c, seconds, reached) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (at.isoformat(), mode, target_c, seconds, int(reached)),
+        )
+        self._db.commit()
+
+    def learned_lead_minutes(self, mode: str, target_c: int, *, within_c: int = 3) -> int | None:
+        """How long this bed has really taken to reach about this temperature.
+
+        Averaged over runs that actually got there, at a target within a few
+        degrees, most recent first. None until there is enough to be worth
+        trusting, because one night is an anecdote and the estimate it would
+        replace is at least consistent.
+        """
+        rows = self._db.execute(
+            "SELECT seconds FROM precondition_runs "
+            "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= ? "
+            "ORDER BY id DESC LIMIT 10",
+            (mode, target_c, within_c),
+        ).fetchall()
+        if len(rows) < MIN_RUNS_TO_LEARN:
+            return None
+        return max(1, round(sum(r["seconds"] for r in rows) / len(rows) / 60))
+
+    def precondition_runs(self, limit: int = 20) -> list[tuple[datetime, str, int, int, bool]]:
+        rows = self._db.execute(
+            "SELECT * FROM precondition_runs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [
+            (datetime.fromisoformat(r["at"]), r["mode"], r["target_c"], r["seconds"], bool(r["reached"]))
+            for r in rows
+        ]
 
     def prune_power(self, before: datetime) -> None:
         self._db.execute("DELETE FROM power_samples WHERE at < ?", (before.isoformat(),))

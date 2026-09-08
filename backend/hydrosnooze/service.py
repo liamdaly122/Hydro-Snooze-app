@@ -42,6 +42,22 @@ from .sequences import CommandFailed, Commands
 
 log = logging.getLogger(__name__)
 
+#: How long to wait between attempts at a step that did not land.
+#:
+#: Matched to the blaster's health check, because the usual reason a step fails
+#: is that the blaster is off the Wi-Fi, and there is no point trying again
+#: before the thing that would tell us it is back has run.
+RETRY_AFTER = timedelta(seconds=30)
+
+#: Below this, an idle reading is the unit not having started rather than having
+#: arrived. Power on, mode change and rail-and-count take about thirty seconds of
+#: infrared before the compressor is doing anything at all.
+MIN_PRECONDITION_SECONDS = 120
+
+#: Past this it is not arriving. The cap on a lead time is two hours, so a run
+#: still going after that has answered a different question.
+MAX_PRECONDITION_SECONDS = 3 * 60 * 60
+
 
 class Service:
     def __init__(self, settings: Settings, *, clock: Clock | None = None, echo: bool = True) -> None:
@@ -53,7 +69,7 @@ class Service:
         self.events = EventLog(self.clock)
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
-        self.scheduler = Scheduler()
+        self.scheduler = Scheduler(learned_lead=self._learned_lead)
 
         self.schedule: Schedule = self.db.load_schedule()
         self.state = DeviceState()
@@ -61,6 +77,16 @@ class Service:
 
         # None means never asked, which is a different thing from "not answering"
         # and the bar says so rather than showing a colour it has not earned.
+        # Which job is being retried, and the earliest another attempt is worth
+        # making. Keyed by the job rather than a flag so a different step
+        # arriving clears it by itself.
+        # A pre-conditioning run in flight: when it started, and what it was
+        # aiming at. The plug says when it got there.
+        self._precondition: tuple[datetime, Mode, int] | None = None
+
+        self._retrying: str | None = None
+        self._retry_after: datetime | None = None
+
         self._plug_ok: bool | None = None
         self._plug_ok_at: datetime | None = None
         self._blaster_ok: bool | None = None
@@ -247,10 +273,39 @@ class Service:
         job = self.scheduler.due(self.schedule, now)
         if job is None:
             return
-        self.scheduler.fired.mark(job)
-        if job.kind == "stage":
+
+        # Backing off between attempts. Without it a blaster that is not
+        # answering would be retried every second, which floods the log and gets
+        # nowhere: whatever is wrong takes longer than a second to fix itself.
+        if self._retry_after is not None and now < self._retry_after and job.key == self._retrying:
+            return
+
+        first_try = job.key != self._retrying
+        if job.kind == "stage" and first_try:
             self._report_stage_start(job)
-        await self._run_job(job)
+
+        if await self._run_job(job):
+            # Marked only once it has actually worked. Marking before running is
+            # what made a failed stage permanent: the job was recorded as done,
+            # due() never offered it again, and the bed sat at the wrong
+            # temperature for the rest of that stage with nothing left to try.
+            self.scheduler.fired.mark(job)
+            if not first_try:
+                self.events.info("stage", f"The {job.key} step landed on a retry.")
+            self._retrying = None
+            self._retry_after = None
+            return
+
+        # Left unmarked on purpose, so due() offers it again. The stage's own
+        # window is the limit: once it closes, missed() reports it and stops.
+        if first_try:
+            self.events.warning(
+                "stage",
+                f"The {job.key} step did not land. Retrying every "
+                f"{int(RETRY_AFTER.total_seconds())}s until its window closes.",
+            )
+        self._retrying = job.key
+        self._retry_after = now + RETRY_AFTER
 
     def _report_stage_start(self, job: Job) -> None:
         """The first stage of a night is also the moment to check pre-conditioning
@@ -271,6 +326,8 @@ class Service:
     async def _sample_power(self) -> None:
         watts = await self.power.read_watts()
         now = self.clock.now()
+
+        self._watch_precondition(watts, now)
 
         # Every read is already a reachability check, so there is nothing extra
         # to ask: a reading means the plug answered.
@@ -363,13 +420,54 @@ class Service:
         if power_off:
             await self.power_off()
 
-    async def _run_job(self, job: Job) -> None:
+    def _watch_precondition(self, watts: float | None, now: datetime) -> None:
+        """Time how long the bed really takes, using the only honest sensor here.
+
+        A unit working towards a setpoint draws 170 W cooling or 300 W heating.
+        When it gets there it settles into the idle band. That fall is the answer
+        to the question the lead time has always been guessing at, and it costs
+        nothing to watch because the plug is already being read every thirty
+        seconds for other reasons.
+        """
+        if self._precondition is None or watts is None:
+            return
+        started, mode, target = self._precondition
+        elapsed = int((now - started).total_seconds())
+        activity = self.settings.thresholds.classify(watts)
+
+        if activity is Activity.IDLE and elapsed >= MIN_PRECONDITION_SECONDS:
+            self._precondition = None
+            self.db.record_precondition(started, mode.value, target, elapsed, True)
+            self.events.info(
+                "precool",
+                f"The bed reached {target}C in {elapsed // 60}m {elapsed % 60}s. "
+                "Measured off the plug, and used to time the next one.",
+            )
+            return
+
+        # Ran the whole way and never settled. Kept rather than discarded: it
+        # means the target was not reachable that night, which is worth more than
+        # the timing would have been.
+        if elapsed > MAX_PRECONDITION_SECONDS:
+            self._precondition = None
+            self.db.record_precondition(started, mode.value, target, elapsed, False)
+            self.events.warning(
+                "precool",
+                f"Ran for {elapsed // 60} minutes without settling at {target}C. The unit is "
+                "working flat out and not getting there, so that target may not be reachable "
+                "in this room.",
+            )
+
+    def _learned_lead(self, mode: Mode, target_c: int) -> int | None:
+        return self.db.learned_lead_minutes(mode.value, target_c)
+
+    async def _run_job(self, job: Job) -> bool:
         if job.kind == "precool":
-            await self._run_precool(job.plan)
-        elif job.kind == "stage" and job.step is not None:
-            await self._run_stage(job.plan, job.step)
-        elif job.kind == "power_off":
-            await self._run_power_off(job.plan)
+            return await self._run_precool(job.plan)
+        if job.kind == "stage" and job.step is not None:
+            return await self._run_stage(job.plan, job.step)
+        if job.kind == "power_off":
+            ok = await self._run_power_off(job.plan)
             # A rehearsal ends when its night does, whether the power off worked
             # or not. Leaving it in place would hold the real schedule out for
             # the whole two hour grace window afterwards.
@@ -377,14 +475,16 @@ class Service:
                 self.scheduler.rehearsal = None
                 self._set_state(rehearsal_ends_at=None, current_stage=None)
                 self.events.info("rehearsal", "Rehearsal finished. Back on the real schedule.")
+            return ok
+        return True
 
-    async def _run_precool(self, plan: NightPlan) -> None:
+    async def _run_precool(self, plan: NightPlan) -> bool:
         # Nothing is chosen here. The plan already worked out which way the bed has
         # to move, whether the unit can move it, and how long that needs.
         pre = plan.preconditioning
         if pre.mode is None:
             self.events.info("precool", pre.reason)
-            return
+            return True
 
         target = self.schedule.first_temp_c
         verb = "Pre-heating" if pre.mode is Mode.WARMING else "Pre-cooling"
@@ -399,10 +499,16 @@ class Service:
                 await self.commands.power_on()
                 self._set_state(power=Power.ON, current_stage=None)
                 await self._apply(mode, target)
+                # From here the plug is timing it. The clock starts once the
+                # presses have landed, not when the job fired, because the thirty
+                # seconds of infrared is not the bed cooling.
+                self._precondition = (self.clock.now(), mode, target)
+                return True
             except CommandFailed as exc:
                 self._fail("precool", exc)
+                return False
 
-    async def _run_stage(self, plan: NightPlan, step: StageStep) -> None:
+    async def _run_stage(self, plan: NightPlan, step: StageStep) -> bool:
         self.events.info(
             "stage",
             f"{step.label}: {step.temp_c}C in {step.mode.value} until {step.ends_at:%H:%M}",
@@ -428,10 +534,12 @@ class Service:
                     await self.commands.power_on()
                     self._set_state(power=Power.ON)
                 await self._apply(step.mode, step.temp_c)
+                return True
             except CommandFailed as exc:
                 self._fail("stage", exc)
+                return False
 
-    async def _run_power_off(self, plan: NightPlan) -> None:
+    async def _run_power_off(self, plan: NightPlan) -> bool:
         """Not optional. Without the unit's own schedule, nothing else does this.
 
         The unit's twelve hour inactivity cutoff is reset by every stage
@@ -446,6 +554,7 @@ class Service:
                 self._set_state(
                     power=Power.OFF, assumed_target_c=None, last_command_at=self.clock.now()
                 )
+                return True
             except CommandFailed as exc:
                 self.events.error(
                     "power_off",
