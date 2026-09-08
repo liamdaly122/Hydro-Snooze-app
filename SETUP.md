@@ -694,6 +694,50 @@ in the project folder:
 That builds the app on the Mac and copies it across. The Pi never builds the app; it has neither the
 memory nor the patience.
 
+### Stop the Mac first, before anything else
+
+**This is the step that matters most and it is the easiest to forget.**
+
+Until now the Mac has been driving the unit. The Pi is about to. If both are running, there are two
+schedulers pressing buttons at the same unit: both fire every stage, both send their own thirty-odd
+presses, and they interleave. The unit would end up on whatever the last press happened to say, and
+the press logs would each look perfectly correct.
+
+So on the **Mac**, before the Pi touches any hardware:
+
+```sh
+# In the terminal running dev.sh
+Ctrl-C
+
+# Then put the Mac back on the simulator, so running dev.sh again for
+# development never drives the real bed by accident.
+./scripts/use-hardware.py --fake
+```
+
+From here the Mac is a development machine again and the Pi owns the hardware.
+
+### Take the history with it
+
+A fresh install starts with an empty database. That throws away the schedule and, more to the point,
+the pre-conditioning runs the plug has measured. Three nights of those are what let the app stop
+estimating the lead time, so a week of them is worth carrying across.
+
+Stop the service first, because copying a SQLite file out from under a running writer is how you get
+a corrupt one:
+
+```sh
+ssh liam@hydrosnooze.local 'sudo systemctl stop hydrosnooze'
+```
+
+Then from the **Mac**, in the project folder:
+
+```sh
+scp backend/data/hydrosnooze.db liam@hydrosnooze.local:/opt/hydrosnooze/data/
+```
+
+Skip this if the Mac never ran against real hardware. Simulated nights are not worth carrying, and
+the learned lead times from a fake unit would be actively wrong.
+
 ### Now the swap
 
 `docs/secrets.yaml` is gitignored, so the clone on the Pi does not have it. Copy it across from the
@@ -739,6 +783,26 @@ Then open `http://hydrosnooze.local:8000` in Safari on the phone and add it to t
 
 The simulator tab is gone. It only ever appears when the transmitter is fake, so there is no way to
 jump the clock on a unit that is genuinely running.
+
+### Prove it, then trust it
+
+Reading the log is not proof. **Run a test night from the Pi**, from the Test run card behind the
+chevron on the Wake card. That is the acceptance test for the whole move: same five steps, same
+order, wattage following the modes. If it passes, the Pi is doing exactly what the Mac was.
+
+### Three things to do the same evening
+
+The Pi is load-bearing from tonight, so:
+
+- **A dashboard for the Pi itself.** `sudo apt install cockpit`, then
+  `https://hydrosnooze.local:9090`. CPU, disk, logs, the service list, and a terminal in the browser.
+  Worth having before you need it rather than after
+- **A fixed address for the Pi** in the router, alongside the plug and the blaster. A Pi that comes
+  back on a new IP after a power cut still works over `hydrosnooze.local`, but a fixed one is one
+  fewer thing to be surprised by
+- **The Shelly's 10 hour auto-off timer.** This stops being optional the moment the Pi is the only
+  thing switching the unit off. If it dies at 3am the bed stays exactly where it is, and that timer
+  is the last backstop no software of ours can fail to run
 
 ---
 

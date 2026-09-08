@@ -267,17 +267,45 @@ believes gets checked against something measured.
 
 ## Install and swap
 
-Detail in [SETUP.md](SETUP.md#step-7-move-it-to-the-pi).
+Detail in [SETUP.md](SETUP.md#step-7-move-it-to-the-pi). One evening, in this order. The order is not
+arbitrary: stopping the Mac before the Pi drives anything is what stops two schedulers pressing
+buttons at the same unit, and stopping the service before copying the database is what stops it being
+copied mid-write.
 
+### Get the Pi up
+
+- [ ] Raspberry Pi OS **Lite** 64-bit via Imager. **Gear icon before writing:** hostname
+      `hydrosnooze`, SSH on, username and password, Wi-Fi on `VM1876778_EXT`, and **timezone**
+- [ ] Boot, wait two minutes, `ssh liam@hydrosnooze.local`
+- [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`
 - [ ] On the Pi: `git clone`, then `./scripts/install.sh`
-- [ ] From the Mac, in the project folder: `./scripts/deploy.sh liam@hydrosnooze.local`
-- [ ] Edit `/opt/hydrosnooze/.env` on the Pi and change the two lines:
-      `HS_TRANSMITTER=esphome` and `HS_POWER_MONITOR=shelly`
-- [ ] Add the ESPHome host and key, and copy across the Shelly IP and the three thresholds already
-      worked out on the Mac
-- [ ] `sudo systemctl restart hydrosnooze`
-- [ ] Open `http://hydrosnooze.local:8000` on the phone and add it to the Home Screen
-- [ ] The spanner tab is gone, which is how I know it is on real hardware
+- [ ] From the Mac: `./scripts/deploy.sh liam@hydrosnooze.local`
+
+### Hand the hardware over
+
+- [ ] **Ctrl-C the Mac's `dev.sh`.** Two schedulers driving one unit is the worst outcome of the night
+- [ ] On the Mac: `./scripts/use-hardware.py --fake`, so running `dev.sh` later never drives the bed
+- [ ] `ssh liam@hydrosnooze.local 'sudo systemctl stop hydrosnooze'`
+- [ ] From the Mac: `scp backend/data/hydrosnooze.db liam@hydrosnooze.local:/opt/hydrosnooze/data/`
+      to carry the schedule and the measured lead times across
+- [ ] From the Mac: `scp docs/secrets.yaml liam@hydrosnooze.local:~/Hydro-Snooze-app/docs/`
+- [ ] On the Pi: `./scripts/use-hardware.py --env /opt/hydrosnooze/.env`
+- [ ] `sudo systemctl restart hydrosnooze && journalctl -u hydrosnooze -f`
+
+### Check it took
+
+- [ ] The log says `transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194`
+- [ ] The next line says `Local time is ... (BST, UTC+01:00)`, not UTC
+- [ ] `http://hydrosnooze.local:8000` on the phone, added to the Home Screen
+- [ ] The device bar shows **three green dots**
+- [ ] The simulator tab has gone
+- [ ] **Run a test night from the Pi.** This is the acceptance test for the whole move
+
+### Same evening, because the Pi is load-bearing now
+
+- [ ] `sudo apt install cockpit`, then `https://hydrosnooze.local:9090` for a dashboard
+- [ ] Give the Pi a fixed address in the router
+- [ ] **Set the Shelly's 10 hour auto-off timer.** The last backstop no software of ours can fail to run
 
 ---
 
