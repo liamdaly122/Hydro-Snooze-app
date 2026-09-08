@@ -114,6 +114,8 @@ export interface DeviceState {
   power: Power
   /** Which part of the night is running. Known, not assumed: the app drives it. */
   current_stage: Stage | null
+  /** When a compressed rehearsal night ends, or null if none is running. */
+  rehearsal_ends_at: string | null
   /** Set by us, never read back off the unit. */
   assumed_mode: Mode | null
   /** The last target we commanded. null means we genuinely do not know. */

@@ -55,6 +55,12 @@ class ModeBody(BaseModel):
     mode: Mode
 
 
+class RehearsalBody(BaseModel):
+    #: Bounded at both ends. Below the floor the stages cannot finish their own
+    #: presses; above it this stops being a test you stand and watch.
+    seconds: int = Field(default=300, ge=120, le=1800)
+
+
 # --- Reads --------------------------------------------------------------------
 
 
@@ -172,6 +178,41 @@ async def post_temperature(request: Request, body: TemperatureBody) -> dict[str,
         await service.set_temperature(body.target_c)
     except CommandFailed as exc:
         raise HTTPException(502, str(exc)) from exc
+    return state_json(service.state)
+
+
+@router.post("/rehearsal")
+async def post_rehearsal(request: Request, body: RehearsalBody) -> dict[str, object]:
+    """Run tonight's whole night, compressed, starting now.
+
+    For answering the one question the simulator cannot: does every stage
+    boundary really land on the unit. Same scheduler, same sequences, same plug
+    checks, short durations.
+    """
+    service = _service(request)
+    try:
+        plan = await service.start_rehearsal(body.seconds)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ends_at": plan.wake_at.isoformat(),
+        "steps": [
+            {
+                "stage": step.stage.value,
+                "starts_at": step.starts_at.isoformat(),
+                "temp_c": step.temp_c,
+                "mode": step.mode.value,
+            }
+            for step in plan.steps
+        ],
+    }
+
+
+@router.delete("/rehearsal")
+async def delete_rehearsal(request: Request) -> dict[str, object]:
+    """Stop early. Always leaves the unit off, which is where the night ends."""
+    service = _service(request)
+    await service.stop_rehearsal()
     return state_json(service.state)
 
 

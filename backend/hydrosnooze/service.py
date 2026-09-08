@@ -33,6 +33,7 @@ from .models import (
     StageStep,
     mode_for_target,
     range_for,
+    rehearsal_plan,
 )
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands
@@ -207,6 +208,63 @@ class Service:
 
     # --- Nightly jobs ---------------------------------------------------------
 
+    # --- Rehearsal ------------------------------------------------------------
+
+    async def start_rehearsal(self, seconds: int) -> NightPlan:
+        """Run tonight's night, compressed, right now.
+
+        The point is to answer one question before trusting the thing to run
+        unattended: does every stage boundary actually land on the real unit, in
+        the right order, at the right temperature, in the right mode. Reading the
+        code cannot answer it and neither can the simulator, because the only
+        part that has never been exercised is the infrared arriving at a unit
+        that is really there.
+
+        It is not a special code path. It builds a NightPlan with short stages
+        and hands it to the same scheduler, so what runs is the same due(), the
+        same fired marks, the same power checks and the same sequences that will
+        run at 2am. Only the durations differ.
+        """
+        if not self.schedule.stages:
+            raise ValueError("There are no stages to rehearse.")
+
+        plan = rehearsal_plan(
+            self.schedule.stages,
+            self.schedule.cooling_speed,
+            now=self.clock.now(),
+            total_seconds=seconds,
+        )
+        # A fresh set of marks, so a second rehearsal is not skipped as one that
+        # has already fired. The real night's marks are keyed by its own wake
+        # time, so they survive this untouched.
+        self.scheduler.fired.clear()
+        self.scheduler.rehearsal = plan
+        self._set_state(rehearsal_ends_at=plan.wake_at)
+
+        names = ", ".join(f"{s.label} {s.temp_c}C {s.mode.value}" for s in plan.steps)
+        self.events.info(
+            "rehearsal",
+            f"Rehearsing the whole night in {round((plan.wake_at - self.clock.now()).total_seconds())}s: "
+            f"{names}, then off. Real presses, real plug checks, only the clock is generous.",
+        )
+        return plan
+
+    async def stop_rehearsal(self, *, power_off: bool = True) -> None:
+        """End it early, and leave the unit off rather than running.
+
+        Stopping has to be safe on its own. Whatever the rehearsal was part way
+        through, the honest end state is the same one the night would have
+        reached, which is off.
+        """
+        if self.scheduler.rehearsal is None:
+            return
+        self.scheduler.rehearsal = None
+        self.scheduler.fired.clear()
+        self._set_state(rehearsal_ends_at=None, current_stage=None)
+        self.events.info("rehearsal", "Rehearsal stopped.")
+        if power_off:
+            await self.power_off()
+
     async def _run_job(self, job: Job) -> None:
         if job.kind == "precool":
             await self._run_precool(job.plan)
@@ -214,6 +272,13 @@ class Service:
             await self._run_stage(job.plan, job.step)
         elif job.kind == "power_off":
             await self._run_power_off(job.plan)
+            # A rehearsal ends when its night does, whether the power off worked
+            # or not. Leaving it in place would hold the real schedule out for
+            # the whole two hour grace window afterwards.
+            if self.scheduler.rehearsal is job.plan:
+                self.scheduler.rehearsal = None
+                self._set_state(rehearsal_ends_at=None, current_stage=None)
+                self.events.info("rehearsal", "Rehearsal finished. Back on the real schedule.")
 
     async def _run_precool(self, plan: NightPlan) -> None:
         # Nothing is chosen here. The plan already worked out which way the bed has

@@ -45,6 +45,17 @@ export interface ApiClient {
   powerOn(): Promise<void>
   powerOff(): Promise<void>
 
+  /**
+   * Run tonight's whole night, compressed into a few minutes, right now.
+   *
+   * The same scheduler, the same sequences, the same plug checks. Only the
+   * durations are short, because the one thing that cannot be tested any other
+   * way is whether a stage boundary really lands on the unit.
+   */
+  startRehearsal(seconds: number): Promise<void>
+  /** Stop early. Always leaves the unit off, which is where a night ends. */
+  stopRehearsal(): Promise<void>
+
   /** Immediate temperature change. Rejected only when the unit is off. */
   setTemperature(targetC: number): Promise<void>
 

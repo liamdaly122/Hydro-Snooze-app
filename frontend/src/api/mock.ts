@@ -33,6 +33,7 @@ function nowIso(): string {
 export class MockApiClient implements ApiClient {
   private state: DeviceState = {
     power: 'on',
+    rehearsal_ends_at: null,
     current_stage: 'deep',
     assumed_mode: 'quiet',
     assumed_target_c: 19,
@@ -128,6 +129,19 @@ export class MockApiClient implements ApiClient {
       last_command_at: nowIso(),
     })
     this.log('info', 'power', 'Unit powered off, plug confirms 0.4 W')
+  }
+
+  async startRehearsal(seconds: number): Promise<void> {
+    await sleep(300)
+    const ends = new Date(Date.now() + (seconds + 30) * 1000).toISOString()
+    this.patchState({ rehearsal_ends_at: ends })
+    this.log('info', 'rehearsal', `Rehearsing the whole night in ${seconds}s, then off.`)
+  }
+
+  async stopRehearsal(): Promise<void> {
+    await sleep(300)
+    this.patchState({ rehearsal_ends_at: null, current_stage: null })
+    this.log('info', 'rehearsal', 'Rehearsal stopped.')
   }
 
   async setTemperature(targetC: number): Promise<void> {

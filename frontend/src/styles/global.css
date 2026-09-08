@@ -993,3 +993,65 @@ button:disabled {
   color: var(--text-dim);
   padding-right: 4px;
 }
+
+/* --- Test run ---------------------------------------------------------------- */
+
+.rehearsal__intro {
+  margin-top: 14px;
+}
+
+.rehearsal__steps {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rehearsal__steps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: 14px;
+}
+
+.rehearsal__steps li:last-child {
+  border-bottom: 0;
+}
+
+.rehearsal__step {
+  color: var(--text-label);
+}
+
+.rehearsal__detail {
+  color: var(--text-dim);
+}
+
+.rehearsal__now {
+  margin: 14px 0 0;
+  font-size: 17px;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+
+.rehearsal__btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 13px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--control);
+  color: var(--text-label);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.rehearsal__btn:disabled {
+  color: var(--text-faint);
+}
+
+/* Stopping is the safe action, so it is not styled as a danger. */
+.rehearsal__btn--stop {
+  background: rgb(255 179 64 / 0.14);
+  color: var(--amber);
+}

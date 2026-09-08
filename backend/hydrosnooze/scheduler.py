@@ -73,6 +73,11 @@ class Scheduler:
     """Works out what should be happening. Deliberately has no side effects."""
 
     fired: FiredMarks = field(default_factory=FiredMarks)
+    #: A compressed night standing in for the real one, set while a rehearsal is
+    #: running. It is a whole NightPlan rather than a special case, so everything
+    #: below it runs unchanged: the same due(), the same grace windows, the same
+    #: fired marks. A rehearsal is not a different code path, it is a short night.
+    rehearsal: NightPlan | None = None
 
     def plan_in_progress(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The night we are currently inside, or the next one.
@@ -80,6 +85,10 @@ class Scheduler:
         Looks back a day as well as forward, because bedtime is almost always the
         evening before the wake morning.
         """
+        # A rehearsal suppresses the real night while it runs. Two nights at once
+        # would fight over the unit, and the real one is hours away in any case.
+        if self.rehearsal is not None:
+            return self.rehearsal
         if not schedule.enabled or not schedule.days_of_week or not schedule.stages:
             return None
         for offset in range(-1, 8):

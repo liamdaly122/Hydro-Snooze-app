@@ -79,6 +79,13 @@ export function App({ client }: { client: ApiClient }) {
             onChange={saveSchedule}
             error={scheduleError}
             onDismissError={() => setScheduleError(null)}
+            state={state}
+            onStartRehearsal={(seconds) =>
+              client.startRehearsal(seconds).catch((e: Error) => setScheduleError(e.message))
+            }
+            onStopRehearsal={() =>
+              client.stopRehearsal().catch((e: Error) => setScheduleError(e.message))
+            }
           />
         ) : (
           <Home

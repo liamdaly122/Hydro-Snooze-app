@@ -84,15 +84,28 @@ def main() -> int:
     parser.add_argument("--fake", action="store_true", help="go back to the simulator")
     parser.add_argument("--esphome-host", default=DEFAULT_ESPHOME_HOST)
     parser.add_argument("--shelly-host", default=DEFAULT_SHELLY_HOST)
+    parser.add_argument(
+        "--env",
+        default=None,
+        help="which .env to write. On the Pi that is /opt/hydrosnooze/.env, "
+        "since the service runs from there rather than from the clone.",
+    )
     args = parser.parse_args()
 
-    if not ENV.exists():
-        if not EXAMPLE.exists():
-            die("Neither backend/.env nor backend/.env.example exists.")
-        ENV.write_text(EXAMPLE.read_text())
-        print(f"Created {ENV.relative_to(ROOT)} from the example.")
+    # On the Pi the service runs from /opt/hydrosnooze, so the file to edit is
+    # not the one inside the clone. Shown as an absolute path when it is outside
+    # the project, because a bare ".env" there would be genuinely ambiguous.
+    env = Path(args.env).expanduser() if args.env else ENV
+    shown = env if args.env else env.relative_to(ROOT)
 
-    body = strip_owned(ENV.read_text())
+    if not env.exists():
+        if not EXAMPLE.exists():
+            die(f"Neither {shown} nor backend/.env.example exists.")
+        env.parent.mkdir(parents=True, exist_ok=True)
+        env.write_text(EXAMPLE.read_text())
+        print(f"Created {shown} from the example.")
+
+    body = strip_owned(env.read_text())
 
     if args.fake:
         block = [
@@ -125,7 +138,9 @@ def main() -> int:
             "Presses will land on the actual unit. Nothing is simulated any more.",
         ]
 
-    ENV.write_text(body + "\n" + "\n".join(block) + "\n")
+    env.write_text(body + "\n" + "\n".join(block) + "\n")
+    print()
+    print(f"Wrote {shown}")
 
     print()
     for line in summary:

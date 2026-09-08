@@ -61,6 +61,17 @@ export class HttpApiClient implements ApiClient {
     await request<DeviceState>('/api/power/off', { method: 'POST' })
   }
 
+  startRehearsal = async (seconds: number) => {
+    await request<unknown>('/api/rehearsal', {
+      method: 'POST',
+      body: JSON.stringify({ seconds }),
+    })
+  }
+
+  stopRehearsal = async () => {
+    await request<DeviceState>('/api/rehearsal', { method: 'DELETE' })
+  }
+
   setTemperature = async (targetC: number) => {
     await request<DeviceState>('/api/temperature', {
       method: 'POST',

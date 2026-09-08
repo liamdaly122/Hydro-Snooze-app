@@ -381,36 +381,50 @@ def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]
     """
     if not stages:
         return []
-
-    count = len(stages)
-    total = max(total_minutes, MIN_STAGE_MINUTES * count)
-    current = sum(s.duration_minutes for s in stages)
-    if current == total:
-        return list(stages)
-
-    raw = [total / count] * count if current <= 0 else [
-        s.duration_minutes * total / current for s in stages
-    ]
-    minutes = [int(r) for r in raw]
-
-    # Whatever truncating lost goes back to the stages that lost the most of it.
-    by_remainder = sorted(range(count), key=lambda i: raw[i] - minutes[i], reverse=True)
-    for n in range(total - sum(minutes)):
-        minutes[by_remainder[n % count]] += 1
-
-    # Then lift anything under the floor, taking from whichever stage is longest,
-    # because that is the one that can most afford it.
-    for i in range(count):
-        while minutes[i] < MIN_STAGE_MINUTES:
-            donor = max(range(count), key=lambda j: minutes[j])
-            if donor == i or minutes[donor] <= MIN_STAGE_MINUTES:
-                break
-            minutes[donor] -= 1
-            minutes[i] += 1
-
+    minutes = divide([s.duration_minutes for s in stages], total_minutes, MIN_STAGE_MINUTES)
     return [
         replace(stage, duration_minutes=m) for stage, m in zip(stages, minutes, strict=True)
     ]
+
+
+def divide(weights: list[int], total: int, floor: int) -> list[int]:
+    """Split `total` in the proportions of `weights`, with a floor under each.
+
+    The parts add up to the whole exactly, by largest remainder rather than
+    rounding each in isolation, and anything under the floor is lifted by taking
+    from whichever part can most afford it.
+
+    Shared by the real schedule, which divides a night into minutes, and by a
+    rehearsal, which divides a few minutes into seconds. Same arithmetic, same
+    awkward edges, so the same code: a five minute rehearsal of a night whose
+    last stage is a fifteenth of the whole runs into the floor immediately, and
+    it should overrun no more than a real schedule does.
+    """
+    count = len(weights)
+    if count == 0:
+        return []
+
+    total = max(total, floor * count)
+    current = sum(weights)
+    raw = [total / count] * count if current <= 0 else [w * total / current for w in weights]
+    parts = [int(r) for r in raw]
+
+    # Whatever truncating lost goes back to the parts that lost the most of it.
+    by_remainder = sorted(range(count), key=lambda i: raw[i] - parts[i], reverse=True)
+    for n in range(total - sum(parts)):
+        parts[by_remainder[n % count]] += 1
+
+    # Then lift anything under the floor, taking from whichever part is longest,
+    # because that is the one that can most afford it.
+    for i in range(count):
+        while parts[i] < floor:
+            donor = max(range(count), key=lambda j: parts[j])
+            if donor == i or parts[donor] <= floor:
+                break
+            parts[donor] -= 1
+            parts[i] += 1
+
+    return parts
 
 
 def default_stages() -> list[SleepStage]:
@@ -507,6 +521,79 @@ def plan_for_wake(
         precool_at=precool_at,
         bedtime_at=bedtime_at,
         wake_at=wake_at,
+        steps=tuple(steps),
+    )
+
+
+#: A rehearsal stage shorter than this cannot finish its own presses. A stage
+#: change is roughly thirty-five presses with real gaps between them, about ten
+#: seconds of infrared, and the plug checks either side add more.
+MIN_REHEARSAL_STAGE_S = 40
+
+#: How long before the compressed bedtime the pre-conditioning step runs.
+#: Measured rather than guessed: pre-conditioning is a power on, a mode change
+#: and a rail-and-count, which took 27 seconds end to end when this was watched
+#: running. At a 30 second lead the first stage began three seconds after it
+#: finished, which works but leaves nothing to see and no room if the unit is
+#: slower than the simulation.
+REHEARSAL_LEAD_S = 45
+
+
+def rehearsal_plan(
+    stages: list[SleepStage],
+    cooling_speed: Mode,
+    *,
+    now: datetime,
+    total_seconds: int,
+) -> NightPlan:
+    """A whole night compressed into a few minutes, for testing on real hardware.
+
+    Everything here is real except the clock. Real presses, real gaps between
+    them, real plug checks, the same modes chosen the same way, the same stages
+    in the same order. Only the durations are scaled down, so a night that takes
+    eight hours can be watched happening in five minutes.
+
+    Why not just run the simulated clock faster: `SimClock` divides every sleep
+    by its speed, which is exactly right for the simulated unit and exactly wrong
+    for a real one. At speed 60 the gaps between presses collapse to 5ms and the
+    unit sees a smear rather than thirty-five button presses. So the clock stays
+    real and the schedule gets shorter instead.
+
+    Stage proportions are kept, so the night rehearsed is the shape of the night
+    that will actually run, not a generic one.
+    """
+    if not stages:
+        raise ValueError("A rehearsal needs at least one stage.")
+
+    lengths = divide(
+        [s.duration_minutes for s in stages], total_seconds, MIN_REHEARSAL_STAGE_S
+    )
+
+    bedtime_at = now + timedelta(seconds=REHEARSAL_LEAD_S)
+    steps: list[StageStep] = []
+    cursor = bedtime_at
+    for stage, mode, seconds in zip(stages, modes_for(stages, cooling_speed), lengths, strict=True):
+        ends = cursor + timedelta(seconds=seconds)
+        steps.append(
+            StageStep(
+                stage=stage.stage,
+                starts_at=cursor,
+                ends_at=ends,
+                temp_c=stage.temp_c,
+                mode=mode,
+            )
+        )
+        cursor = ends
+
+    # Pre-conditioning is chosen the same way it is for a real night, so the
+    # rehearsal exercises that decision too. Only its head start is shortened.
+    pre = preconditioning_for(stages[0].temp_c, cooling_speed)
+    pre = replace(pre, lead_minutes=max(1, REHEARSAL_LEAD_S // 60))
+    return NightPlan(
+        preconditioning=pre,
+        precool_at=now if pre.runs else None,
+        bedtime_at=bedtime_at,
+        wake_at=cursor,
         steps=tuple(steps),
     )
 
@@ -613,6 +700,10 @@ class DeviceState:
     #: Which part of the night is running, if any. The app drives the stages
     #: itself, so unlike everything else prefixed `assumed_` this one is known.
     current_stage: Stage | None = None
+    #: When a compressed rehearsal night finishes, or None if none is running.
+    #: Known rather than believed, and it rides along here so it reaches the app
+    #: on the same live feed as everything else.
+    rehearsal_ends_at: datetime | None = None
     assumed_mode: Mode | None = None
     #: The target we last commanded. Not in the brief's data model, but the Home
     #: screen's "Now" tab has to show and edit something, and this is the only

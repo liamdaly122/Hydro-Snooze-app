@@ -601,6 +601,48 @@ believes gets checked against something measured.
 
 **Done when** setting a temperature from the phone puts that number on the unit's display.
 
+### Then rehearse a whole night, in six minutes
+
+Four presses proves the blaster works. It does not prove the **night** works, and that is a different
+question: does every stage boundary fire, in order, on time, at the right temperature, in the right
+mode, and does the unit really get switched off at the end. That is the thing I am about to trust
+unattended, and it is the one thing neither the simulator nor the tests can answer, because the part
+that has never run is the infrared arriving at a unit that is actually there.
+
+So the app can run tonight's whole night compressed. Open the schedule behind the chevron on the
+Wake card and press **Run a test night**.
+
+It is not a demo and it is not a separate code path. It builds a night with short stages and hands it
+to the same scheduler, so what runs is the same `due()`, the same fired marks, the same power checks
+and the same rail-and-count sequences that will run at 2am. Only the durations differ.
+
+Roughly six minutes:
+
+| | |
+|---|---|
+| 0:00 | Get ready. Powers on, sets the pre-conditioning mode, rails to the first temperature |
+| 0:45 | Deep |
+| 3:00 | REM |
+| 5:15 | Wake |
+| 6:00 | Switches the unit off |
+
+**Watch three things at once**, which is what the tagged terminal is for:
+
+- the unit's display changing at each boundary, which is the thing being tested
+- the `ir` lines confirming the presses left the board
+- the wattage under `plug`, which should follow: around 170 W while a cooling stage runs, around
+  300 W once the Wake stage switches to warming
+
+That last one is the real proof. It is the only place in the system where a belief gets checked
+against a measurement, and a night that goes from cooling to heating and back is exactly what the
+unit's own scheduler made impossible.
+
+It takes over from the real schedule while it runs and hands back afterwards, and it always finishes
+by switching the unit off, including if it is stopped early. Do it when you are not about to go to
+bed.
+
+**Done when** all five steps land in order and the wattage follows the modes.
+
 ---
 
 ## Step 7: move it to the Pi
@@ -625,31 +667,33 @@ memory nor the patience.
 
 ### Now the swap
 
-Edit the settings on the Pi:
+`docs/secrets.yaml` is gitignored, so the clone on the Pi does not have it. Copy it across from the
+**Mac** first, then let the same script do the edit it did here:
 
 ```sh
-nano /opt/hydrosnooze/.env
+scp docs/secrets.yaml liam@hydrosnooze.local:~/Hydro-Snooze-app/docs/
 ```
 
-Change these two lines:
+Then on the **Pi**:
+
+```sh
+cd ~/Hydro-Snooze-app
+./scripts/use-hardware.py --env /opt/hydrosnooze/.env
+```
+
+`--env` because the service runs from `/opt/hydrosnooze`, not from the clone. That writes the same
+five lines it wrote on the Mac, with the key copied across rather than retyped:
 
 ```
 HS_TRANSMITTER=esphome
+HS_ESPHOME_HOST=192.168.1.178
+HS_ESPHOME_ENCRYPTION_KEY=<copied from docs/secrets.yaml>
 HS_POWER_MONITOR=shelly
-```
-
-And add the ESPHome details, plus the Shelly lines already worked out on the Mac in step 1:
-
-```
-HS_ESPHOME_HOST=hydrosnooze-ir.local
-HS_ESPHOME_ENCRYPTION_KEY=the key from the ESPHome configuration
 HS_SHELLY_HOST=192.168.1.194
-HS_OFF_THRESHOLD_W=3
-HS_IDLE_MAX_W=85
-HS_COOLING_MAX_W=245
 ```
 
-Save with Ctrl-O then Enter, exit with Ctrl-X. Then:
+The three power thresholds are already the defaults, measured off this unit, so they only need
+adding if the numbers ever change. Then:
 
 ```sh
 sudo systemctl restart hydrosnooze

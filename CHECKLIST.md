@@ -229,6 +229,20 @@ days, so there is nothing left to wait for.
 
 `./scripts/use-hardware.py --fake` goes back to the simulator whenever needed.
 
+### Then rehearse a whole night before trusting it to run one
+
+Four presses proves the blaster. It does not prove the night. Open the schedule behind the chevron on
+the Wake card and press **Run a test night**: tonight's own stages, in order, at their own
+temperatures and modes, compressed into about six minutes on the real unit.
+
+- [ ] Get ready, Deep, REM, Wake, off. All five land, in order
+- [ ] The unit's display shows the right number at each boundary
+- [ ] The `plug` lines follow: about 170 W while cooling, about 300 W once Wake switches to warming
+- [ ] It switches the unit off at the end without being told
+
+That third one is the whole system proving itself: a belief checked against a measurement, and a
+night that goes from cooling to heating, which the unit's own scheduler could never do.
+
 That third-from-last one is the good test. It is the only place in the system where something the app
 believes gets checked against something measured.
 

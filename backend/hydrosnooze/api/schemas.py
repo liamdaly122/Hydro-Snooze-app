@@ -20,6 +20,7 @@ def state_json(state: DeviceState) -> dict[str, Any]:
     return {
         "power": state.power.value,
         "current_stage": state.current_stage.value if state.current_stage else None,
+        "rehearsal_ends_at": _iso(state.rehearsal_ends_at),
         "assumed_mode": state.assumed_mode.value if state.assumed_mode else None,
         "assumed_target_c": state.assumed_target_c,
         "observed_power_w": state.observed_power_w,

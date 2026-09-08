@@ -1,14 +1,23 @@
 import { Card } from '../components/Card'
+import { RehearsalCard } from '../components/RehearsalCard'
 import { Toggle } from '../components/Toggle'
 import { Flame, Snowflake } from '../components/Icons'
 import { DAY_INITIALS, formatDayTime, formatDays, formatDuration, formatTime, nextPlan } from '../domain'
-import { MIN_STAGE_MINUTES, STAGE_LABEL, type Schedule as ScheduleType } from '../types'
+import {
+  MIN_STAGE_MINUTES,
+  STAGE_LABEL,
+  type DeviceState,
+  type Schedule as ScheduleType,
+} from '../types'
 
 interface Props {
   draft: ScheduleType
   onChange: (patch: Partial<ScheduleType>) => void
   error: string | null
   onDismissError: () => void
+  state: DeviceState
+  onStartRehearsal: (seconds: number) => Promise<void>
+  onStopRehearsal: () => Promise<void>
 }
 
 /** Boundaries move by a quarter of an hour, which is also a stage's floor. */
@@ -33,7 +42,15 @@ function toHhMm(minutes: number): string {
  * two times say it is. There is no way in here to build a night that does not add
  * up, which is the point of editing boundaries rather than durations.
  */
-export function Schedule({ draft, onChange, error, onDismissError }: Props) {
+export function Schedule({
+  draft,
+  onChange,
+  error,
+  onDismissError,
+  state,
+  onStartRehearsal,
+  onStopRehearsal,
+}: Props) {
   const plan = nextPlan(draft)
   const pre = draft.preconditioning
   const bedMinutes = toMinutes(draft.bed_time)
@@ -212,6 +229,13 @@ export function Schedule({ draft, onChange, error, onDismissError }: Props) {
           here that a real thermometer would improve.
         </p>
       </Card>
+
+      <RehearsalCard
+        state={state}
+        schedule={draft}
+        onStart={onStartRehearsal}
+        onStop={onStopRehearsal}
+      />
 
       {error && (
         <p className="footnote" onClick={onDismissError}>
