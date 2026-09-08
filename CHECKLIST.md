@@ -138,34 +138,56 @@ no screen attached to tell me why.
 
 ## Evening two: the blaster and the codes
 
-Detail in [SETUP.md](SETUP.md#step-3-the-infrared-blaster). **This is the step everything hangs on.**
+Detail in [SETUP.md](SETUP.md#step-3-the-infrared-blaster). **This was the step everything hung on,
+and it is done.** Captured 7 September on the Mac, no Pi involved.
 
-- [ ] Plug the XIAO into USB power where it can see the unit
-- [ ] Install ESPHome on the Pi and open the dashboard at `hydrosnooze.local:6052`
-- [ ] Get the real GPIO pin numbers from Seeed's published config on GitHub. **Do not guess.** A
-      wrong pin does nothing at all and gives no error
-- [ ] Flash the capture configuration: `~/esphome/bin/esphome run docs/esphome-capture.yaml`
-- [ ] Run `./scripts/capture.py` and follow it. Three agreeing presses per button, and it rejects a
-      button whose presses disagree rather than letting a bad code through
+- [x] Plug the XIAO into the Mac over USB
+- [x] Install ESPHome on the Mac in its own venv, and fill in `docs/secrets.yaml`
+- [x] Take the GPIO pin numbers from Seeed's published config rather than guessing. GPIO3 transmits,
+      GPIO4 receives
+- [x] Flash the capture configuration: `~/esphome/bin/esphome run docs/esphome-capture.yaml`
+- [x] Run `./scripts/capture.py`. **Eight of eight clean on the first attempt**, three agreeing
+      presses each, nothing inconsistent across the set
 
-Write down all eight:
+All eight came out as Symphony, 12 bits, 38kHz carrier:
 
-- [ ] `power`
-- [ ] `schedule` (crescent moon)
-- [ ] `temp_up`
-- [ ] `temp_down`
-- [ ] `cool` (snowflake)
-- [ ] `warm` (sun)
-- [ ] `timer` (clock)
-- [ ] `mute` (speaker with X)
+| Button | | Code |
+|---|---|---|
+| `power` | | `0xDD2` |
+| `schedule` | crescent moon | `0xD94` |
+| `temp_up` | up arrow | `0xD82` |
+| `temp_down` | down arrow | `0xDC3` |
+| `cool` | snowflake | `0xD84` |
+| `warm` | sun | `0xDB2` |
+| `timer` | clock | `0xD81` |
+| `mute` | speaker with X | `0xD88` |
 
-- [ ] If they decode as a named protocol such as NEC, record the address and command. Far more
-      reliable than raw timings
-- [ ] Fill them into the button section and flash it properly
-- [ ] Pressing a button in the ESPHome dashboard makes the unit respond
+Every one shares the top nibble `0xD`, which is the remote's address, and no two buttons produced the
+same code. That is the cross-check the script does that I could not do by eye.
 
-The app never presses `schedule` or `timer`, but capture them anyway. They are two of the eight and
-skipping them saves nothing.
+- [x] Fill them into `docs/esphome-hydrosnooze.yaml`
+- [ ] Flash it: `~/esphome/bin/esphome run docs/esphome-hydrosnooze.yaml`. The board is already on the
+      Wi-Fi, so this can go over the air and the USB cable can stay out
+
+### The one thing still unknown: does a press move one degree or several
+
+The remote sends each code 8 to 12 times per tap and the unit still moves one step, so it is
+ignoring repeats inside a burst. The config copies that. But I have never watched the unit while the
+blaster sent anything, so this is belief, not measurement, and it is the last belief left.
+
+**Test it before trusting anything else**, with the unit's own display in view:
+
+- [ ] Press `temp_up` once from ESPHome and read the display
+- [ ] It goes up by exactly **one** degree. Good, nothing to change
+- [ ] It goes up by more than one, so the unit counts frames. Set `ir_frames: "1"` at the top of
+      `docs/esphome-hydrosnooze.yaml`, reflash, try again, work up until one press is one degree
+- [ ] Nothing happens at all. Aim and distance first, then raise `ir_frames`
+
+Getting this wrong is the one thing that would break the rail-and-count sequence silently, because
+every temperature the app sets would land a few degrees off and nothing would say so.
+
+- [ ] `power` turns the unit on and off
+- [ ] `cool` and `warm` change the mode
 
 ---
 

@@ -392,19 +392,79 @@ That is far more reliable than raw timings and much shorter.
 The app never presses `schedule` or `timer`, because it stopped using the unit's own scheduler. They
 are still worth capturing: they are two of the eight, and skipping them saves nothing.
 
-Then fill them into `docs/esphome-hydrosnooze.yaml` and flash that instead:
+### What came out
+
+Captured 7 September, eight of eight clean on the first attempt. All eight decoded as **Symphony,
+12 bits, 38kHz carrier**:
+
+| Button | | Code |
+|---|---|---|
+| `power` | | `0xDD2` |
+| `schedule` | crescent moon | `0xD94` |
+| `temp_up` | up arrow | `0xD82` |
+| `temp_down` | down arrow | `0xDC3` |
+| `cool` | snowflake | `0xD84` |
+| `warm` | sun | `0xDB2` |
+| `timer` | clock | `0xD81` |
+| `mute` | speaker with X | `0xD88` |
+
+Every code shares the top nibble `0xD`, which is the remote's address, and no two buttons produced
+the same code. Those are the two cross-checks that catch a bad capture which looks perfectly fine on
+its own.
+
+They are already written into `docs/esphome-hydrosnooze.yaml`, so there is nothing to fill in.
+
+### Measured, so the transmitter can copy the remote rather than approximate it
+
+Pulled out of the full capture log rather than eyeballed, over 24 presses:
+
+| | Remote | ESPHome's Symphony encoder |
+|---|---|---|
+| Bit 1 mark | 1262 to 1315 µs | 1260 µs |
+| Bit 0 mark | 421 to 447 µs | 460 µs |
+| Bit time | constant 1710 µs | constant 1720 µs |
+| Carrier | 38.0 kHz | 38.0 kHz |
+| Frames per press | 8, 10 or 12 | set by config |
+| Gap between frames | 7.2 to 9.2 ms | 34.76 ms |
+
+The bit timings match closely enough that the receiver decoded every press first time. **The gap
+between repeats is the one real difference**, which is why the config builds the burst out of single
+frames spaced by hand rather than leaving it to ESPHome's own spacing. Two substitutions at the top
+of the file, `ir_frames` and `ir_gap`, are the only numbers worth touching.
+
+### Flash it
 
 ```sh
 ~/esphome/bin/esphome run docs/esphome-hydrosnooze.yaml
 ```
 
+The board joined the Wi-Fi during the capture, so this can go over the air and the USB cable can
+stay out. It validates clean against ESPHome 2026.8.2.
+
 The names matter: the service looks for button entities called exactly `power`, `schedule`,
 `temp_up`, `temp_down`, `cool`, `warm`, `timer`, `mute`.
 
-From here the board is on the Wi-Fi and every later flash goes over the air, so the USB cable can
-come out.
+### The first press is a measurement, not a demo
 
-**Done when** pressing a button from ESPHome makes the unit respond.
+The remote sends each code 8 to 12 times per tap and the unit still moves one step, so the unit is
+ignoring repeats inside a burst rather than counting them. The config copies what the remote does.
+That is a well-founded assumption, but it is still an assumption, and it is the last one left in the
+whole project.
+
+So the first press has a job. **Stand where the unit's display is visible, press `temp_up` once, and
+read the number.**
+
+| What the display does | What it means | What to do |
+|---|---|---|
+| Up by exactly one | The unit ignores repeats, as expected | Nothing |
+| Up by more than one | The unit counts frames | Set `ir_frames: "1"`, reflash, work back up |
+| Nothing at all | Not received | Check aim and distance, then raise `ir_frames` |
+
+Worth the thirty seconds. If a press moves three degrees instead of one, the rail-and-count sequence
+still runs, still reports success, and lands every temperature in the wrong place all night with
+nothing to say so. That is exactly the class of bug this project is built to avoid.
+
+**Done when** one press of `temp_up` moves the display by exactly one degree.
 
 ---
 

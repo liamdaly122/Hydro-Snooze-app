@@ -1,9 +1,10 @@
 # ESPHome configuration for the XIAO Smart IR Mate.
 #
-# Step two of two. One thing left to fill in: the eight captured codes.
+# Step two of two, and this one is filled in. The eight codes below are the real
+# ones, captured off my own HydroSnooze remote on 7 September, three agreeing
+# presses each, nothing inconsistent across the set.
 #
-# Flash docs/esphome-capture.yaml first, press each remote button at it, and
-# write down what the log says. Then put those values in below.
+#   ~/esphome/bin/esphome run docs/esphome-hydrosnooze.yaml
 #
 # The pins are real, taken from Seeed's own configuration for this board rather
 # than guessed. GPIO3 transmits, GPIO4 receives:
@@ -15,6 +16,19 @@
 #
 # The service looks for one button entity per remote button, with these exact
 # names: power, schedule, temp_up, temp_down, cool, warm, timer, mute.
+
+substitutions:
+  # How many times one press is sent, and the extra gap between sends.
+  #
+  # These are the only two numbers here worth touching. The real remote sends the
+  # frame 8 to 12 times per tap, about 8.3ms apart, and the unit still moves one
+  # step, so it clearly ignores repeats inside a burst. These defaults copy that.
+  #
+  # If a press does nothing at all, raise ir_frames.
+  # If one press moves the temperature by more than one degree, the unit is
+  # counting frames rather than ignoring them: drop ir_frames to 1 and work up.
+  ir_frames: "8"
+  ir_gap: 1500us
 
 esphome:
   name: hydrosnooze-ir
@@ -42,70 +56,119 @@ remote_transmitter:
 
 # --- The eight buttons --------------------------------------------------------
 #
-# If the codes decoded as a named protocol such as NEC, use the protocol block
-# below and record the address and command. That is far more reliable than raw
-# timings. If they only came out as raw, use the raw form instead.
+# Symphony, 12 bits, 38kHz carrier. Every code shares the top nibble 0xD, which
+# is the remote's address, and no two buttons share a code.
+#
+# Measured off the capture, against what ESPHome's Symphony encoder sends:
+#
+#                     remote          ESPHome
+#   bit 1 mark        1262-1315us     1260us
+#   bit 0 mark         421-447us       460us
+#   bit time          constant 1710us  constant 1720us
+#   carrier           38.0kHz          38.0kHz
+#
+# Close enough that the receiver decoded every press first time. The one place
+# they differ is the gap between repeats, which is why the burst is built out of
+# single frames above rather than left to ESPHome's own 34.76ms spacing.
 
 button:
   - platform: template
     name: power
     id: btn_power
     on_press:
-      - remote_transmitter.transmit_nec:
-          address: 0x0000   # TODO
-          command: 0x0000   # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xDD2
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
   - platform: template
     name: schedule
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xD94
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
   - platform: template
     name: temp_up
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xD82
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
   - platform: template
     name: temp_down
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xDC3
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
   - platform: template
     name: cool
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xD84
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
   - platform: template
     name: warm
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xDB2
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
   - platform: template
     name: timer
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xD81
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
+  # Sent by hand once, from the app's Status card, and never automatically.
+  # The unit remembers the setting through a power cut, so this is a toggle
+  # rather than a command.
   - platform: template
     name: mute
     on_press:
-      - remote_transmitter.transmit_nec: { address: 0x0000, command: 0x0000 }  # TODO
+      - remote_transmitter.transmit_symphony:
+          data: 0xD88
+          nbits: 12
+          command_repeats: 1
+          repeat:
+            times: ${ir_frames}
+            wait_time: ${ir_gap}
 
-# --- If the codes did not decode as a named protocol ---------------------------
-#
-# Raw timings work too, they are just uglier. Replace the transmit_nec action
-# with the list the capture log printed:
-#
-#   - platform: template
-#     name: power
-#     on_press:
-#       - remote_transmitter.transmit_raw:
-#           carrier_frequency: 38kHz
-#           code: [4470, -4370, 600, -1580, 600, -480, ...]
-#
 # --- Keeping the light working -------------------------------------------------
 #
-# Seeed wires the RGB LED to GPIO7. Not needed, but it is the only way to see
-# from across the room that the board is up and on the Wi-Fi.
+# Seeed wires the RGB LED to GPIO7. Not needed, and this ends up next to a bed,
+# so it stays off. Worth uncommenting only while working out where to mount the
+# board, when seeing from across the room that it is up and on the Wi-Fi helps.
 #
 # light:
 #   - platform: esp32_rmt_led_strip
