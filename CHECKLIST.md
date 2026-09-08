@@ -275,7 +275,9 @@ copied mid-write.
 ### Get the Pi up
 
 - [ ] Raspberry Pi OS **Lite** 64-bit via Imager. **Gear icon before writing:** hostname
-      `hydrosnooze`, SSH on, username and password, Wi-Fi on `VM1876778_EXT`, and **timezone**
+      `hydrosnooze`, SSH on, username and password, Wi-Fi on `VM1876778_EXT`, and **timezone**.
+      **Re-flash even if the kit card came pre-loaded**: it has not been through that gear icon, so
+      SSH is off and it will not join the Wi-Fi, and it is the desktop image rather than Lite
 - [ ] Boot, wait two minutes, `ssh liam@hydrosnooze.local`
 - [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`
 - [ ] On the Pi: `git clone`, then `./scripts/install.sh`

@@ -653,6 +653,17 @@ Raspberry Pi OS **Lite** 64-bit, written with Raspberry Pi Imager. Click the **s
 writing**: hostname `hydrosnooze`, SSH on, username and password, Wi-Fi on `VM1876778_EXT`, and
 **locale and timezone**.
 
+**Re-flash the card even if the kit came with one pre-loaded.** A pre-loaded card has not been
+through that gear icon, which means SSH is off, the hostname is `raspberrypi`, there are no Wi-Fi
+credentials, and the timezone is whoever's it was. Without SSH or Wi-Fi none of that can be fixed
+without plugging in a monitor and keyboard. Kits also ship the desktop image rather than Lite, which
+on a machine running unattended for years means background writes to the one component most likely to
+fail. Ten minutes with Imager removes all of it.
+
+If you would rather keep what came on the card, it does work: boot it with a screen attached, then
+`sudo raspi-config` for SSH, hostname, Wi-Fi, timezone, and Boot to Console. Then pick up below at
+`git clone`.
+
 The timezone is the one that matters and it is easy to skip. The scheduler works in plain local time,
 so a Pi left on UTC runs the whole night an hour early through British Summer Time, and nothing in
 the app can tell: it would look like the schedule is simply wrong. A Pi also has no battery-backed
