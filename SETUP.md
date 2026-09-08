@@ -566,12 +566,32 @@ next run look broken when it is only leftovers.
 Against the simulator none of this happens: there is one process and the press log is the whole
 story, exactly as before.
 
+### Turning it on and off
+
+The power button sits in the top right of every screen, so it is one tap from wherever you are. It
+shows what the app knows rather than what it hopes:
+
+| | |
+|---|---|
+| Green | On. Tapping turns it off |
+| Grey | Off. Tapping turns it on |
+| Amber, broken ring | The app does not know. Tapping turns it **off** |
+
+Off is the right answer to not knowing. It is the safe direction, a unit already off ignores the
+press, and powering off is verified against the plug, so one tap always ends somewhere known. The
+ring is dashed as well as amber because green against amber is the pair a lot of people cannot
+separate, and mistaking "no idea" for "on" is the confusion that matters most here.
+
+Both actions read the plug before pressing anything and return early if the unit is already where
+you asked, so neither can be sent twice by mistake.
+
 ### Daytime only, at first
 
 Watch the unit and the terminal at the same time. Every press is still logged, exactly as it was
 against the simulator, except now each line means a real burst of infrared.
 
-- [ ] Power on, and check the plug reading climbs off standby
+- [ ] Power on with the button in the top right of the app, and check the plug reading climbs
+      off standby
 - [ ] Set a temperature, and check the display lands on that number
 - [ ] Set a mode, and check the plug reading matches: about 170 W cooling, about 300 W heating
 - [ ] Power off

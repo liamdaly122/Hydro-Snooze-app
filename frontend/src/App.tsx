@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BottomNav, type Screen } from './components/BottomNav'
 import { ChevronRight } from './components/Icons'
+import { PowerButton } from './components/PowerButton'
 import { Home } from './screens/Home'
 import { History } from './screens/History'
 import { Schedule } from './screens/Schedule'
@@ -16,6 +17,7 @@ export function App({ client }: { client: ApiClient }) {
   // around.
   const [editingSchedule, setEditingSchedule] = useState(false)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
+  const [powerError, setPowerError] = useState<string | null>(null)
   const { info, state, schedule, events, power } = useService(client)
 
   const ready = state !== null && schedule !== null
@@ -43,7 +45,26 @@ export function App({ client }: { client: ApiClient }) {
         ) : (
           <h1 className="app__title">HydroSnooze</h1>
         )}
+
+        {/*
+          In the header rather than on the home screen, because it is the one
+          thing worth reaching in a single tap from wherever you happen to be.
+        */}
+        {state && (
+          <PowerButton
+            power={state.power}
+            onOn={() => client.powerOn()}
+            onOff={() => client.powerOff()}
+            onError={setPowerError}
+          />
+        )}
       </header>
+
+      {powerError && (
+        <p className="app__error" onClick={() => setPowerError(null)}>
+          {powerError}
+        </p>
+      )}
 
       <main className="app__scroll">
         {!ready ? (

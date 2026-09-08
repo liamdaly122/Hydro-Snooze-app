@@ -221,7 +221,8 @@ days, so there is nothing left to wait for.
       line: `app` what it decided, `ir` that the infrared left the board, `plug` what the unit
       actually drew. One Ctrl-C stops all three
 - [ ] The simulator tab has gone from the app. That is proof it is driving real infrared
-- [ ] Power on from the phone, and the plug reading climbs off standby
+- [ ] Power on with the button in the top right of the app, and the plug reading climbs off
+      standby
 - [ ] Set a temperature, and the unit's display lands on that number
 - [ ] Set cooling, and the plug reads about 170 W. Set warming, and it reads about 300 W
 - [ ] Power off

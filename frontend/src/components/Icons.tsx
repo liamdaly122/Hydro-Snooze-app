@@ -37,6 +37,16 @@ export function Plus({ size = 22 }: IconProps) {
   )
 }
 
+/** IEC 5009, the symbol on every appliance, so it needs no label to be read. */
+export function Power({ size = 19 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3.5v8.5" {...stroke} strokeWidth={2} />
+      <path d="M18.4 6.8a9 9 0 1 1-12.8 0" {...stroke} strokeWidth={2} />
+    </svg>
+  )
+}
+
 export function Clock({ size = 15 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

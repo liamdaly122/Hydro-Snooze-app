@@ -80,6 +80,70 @@ button:disabled {
   color: var(--text-mid);
 }
 
+/* --- Power button ----------------------------------------------------------- */
+
+.power {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: -4px -4px -4px 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--control);
+  color: var(--text-dim);
+  transition:
+    color 0.2s var(--ease),
+    background 0.2s var(--ease),
+    opacity 0.2s var(--ease),
+    transform 0.12s var(--ease);
+}
+
+/* A 36px circle reads right in a header, but a 36px target does not. The hit
+   area is pushed back out to 44 without changing what is drawn. */
+.power::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+.power--on {
+  color: var(--green);
+  background: rgb(48 209 88 / 0.16);
+}
+
+/* Amber, not green and not grey. The app does not know, and saying so is the
+   whole rule this project runs on.
+   The broken ring says it a second time without using colour, because green
+   against amber is exactly the pair a lot of people cannot separate, and
+   mistaking "no idea" for "on" is the confusion that matters most here.
+   An outline rather than a border, so nothing moves. */
+.power--unknown {
+  color: var(--amber);
+  background: rgb(255 179 64 / 0.16);
+  outline: 1.5px dashed rgb(255 179 64 / 0.55);
+  outline-offset: -1px;
+}
+
+.power--busy {
+  opacity: 0.4;
+}
+
+.power:active {
+  transform: scale(0.92);
+}
+
+.app__error {
+  margin: 0 var(--gutter) 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgb(255 107 107 / 0.12);
+  color: var(--red);
+  font-size: 13px;
+}
+
 /* --- Card ------------------------------------------------------------------ */
 
 .card {
