@@ -1123,3 +1123,17 @@ button:disabled {
   color: var(--text-mid);
   font-weight: 500;
 }
+
+/* Mode names are words, not two-character numbers, so they need to be smaller
+   than the temperature tabs to sit on one line on a narrow phone. */
+.tab__value--mode {
+  font-size: 17px;
+  padding-top: 14px;
+}
+
+/* Nothing below is selected. Shares the look of an unknown value on purpose,
+   but not its name: "Warming" is not unknown, it is known and simply not one of
+   the three speeds, and the note under the card says which case it is. */
+.tab__value--unset {
+  color: var(--text-faint);
+}
