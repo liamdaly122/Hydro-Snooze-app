@@ -464,6 +464,15 @@ so you have to be standing in front of it.
 | Up by more than one | The unit counts frames | Set `ir_frames: "1"`, reflash, work back up |
 | Nothing at all | Not received | Check aim and distance, then raise `ir_frames` |
 
+**Measured 8 September: one press, one degree.** The display went 29, 30, 31 on three taps, so the
+unit ignores repeats inside a burst and `ir_frames: "8"` is right. Nothing needed changing.
+
+It also confirmed the quirk the whole design rests on, on real hardware for the first time. The
+display was showing the **water** temperature, 23°C, and the first tap switched it to showing the
+**target**, 29°C, without changing it. Only the taps after that moved the number. That is exactly
+why every command starts with throwaway presses, and why `mute` marks the temperature unknown
+afterwards rather than showing a figure the unit is not holding.
+
 Worth the thirty seconds. If a press moves three degrees instead of one, the rail-and-count sequence
 still runs, still reports success, and lands every temperature in the wrong place all night with
 nothing to say so. That is exactly the class of bug this project is built to avoid.
@@ -498,7 +507,58 @@ than it looks.
 
 ---
 
-## Step 6: install it on the Pi
+## Step 6: drive the real unit from the Mac
+
+Ten minutes, and worth doing before the Pi exists. The Mac already has the project, the blaster is on
+the Wi-Fi, and the plug has been answering for days. Everything the Pi will eventually do can be done
+here first, in daylight, watching it.
+
+### One command
+
+```sh
+./scripts/use-hardware.py
+```
+
+That edits `backend/.env`, which is the single file deciding whether the service drives hardware or a
+simulation. It sets the transmitter to `esphome` and the power monitor to `shelly`, fills in both
+addresses, and copies the ESPHome key straight out of `docs/secrets.yaml` so it never has to be
+retyped. The key is never printed, only masked. Run it as often as you like; it rewrites its own
+lines and leaves the rest of the file alone.
+
+To go back to the simulator at any point:
+
+```sh
+./scripts/use-hardware.py --fake
+```
+
+### Then start it
+
+```sh
+./scripts/dev.sh
+```
+
+**How to tell it worked.** The simulator tab disappears from the app. It is shown only when
+`HS_TRANSMITTER=fake`, so a missing spanner is proof the service is driving real infrared rather than
+printing to a terminal.
+
+### Daytime only, at first
+
+Watch the unit and the terminal at the same time. Every press is still logged, exactly as it was
+against the simulator, except now each line means a real burst of infrared.
+
+- [ ] Power on, and check the plug reading climbs off standby
+- [ ] Set a temperature, and check the display lands on that number
+- [ ] Set a mode, and check the plug reading matches: about 170 W cooling, about 300 W heating
+- [ ] Power off
+
+That third one is the good test. It is the only place in the whole system where something the app
+believes gets checked against something measured.
+
+**Done when** setting a temperature from the phone puts that number on the unit's display.
+
+---
+
+## Step 7: move it to the Pi
 
 On the Pi:
 

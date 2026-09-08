@@ -166,7 +166,7 @@ Every one shares the top nibble `0xD`, which is the remote's address, and no two
 same code. That is the cross-check the script does that I could not do by eye.
 
 - [x] Fill them into `docs/esphome-hydrosnooze.yaml`
-- [ ] Flash it: `~/esphome/bin/esphome run docs/esphome-hydrosnooze.yaml`. The board is already on the
+- [x] Flash it: `~/esphome/bin/esphome run docs/esphome-hydrosnooze.yaml`. The board is already on the
       Wi-Fi, so this can go over the air and the USB cable can stay out
 
 ### The one thing still unknown: does a press move one degree or several
@@ -178,8 +178,8 @@ blaster sent anything, so this is belief, not measurement, and it is the last be
 **Test it before trusting anything else**, with the unit's own display in view:
 
 - [ ] Open `http://hydrosnooze-ir.local` on the phone. Eight buttons, served by the board itself
-- [ ] Stand in front of the unit, tap `temp_up` once, and read the display
-- [ ] It goes up by exactly **one** degree. Good, nothing to change
+- [x] Stand in front of the unit, tap `temp_up` once, and read the display
+- [x] **It goes up by exactly one degree.** 29, 30, 31 on three taps. `ir_frames: "8"` is right
 - [ ] It goes up by more than one, so the unit counts frames. Set `ir_frames: "1"` at the top of
       `docs/esphome-hydrosnooze.yaml`, reflash, try again, work up until one press is one degree
 - [ ] Nothing happens at all. Aim and distance first, then raise `ir_frames`
@@ -187,8 +187,8 @@ blaster sent anything, so this is belief, not measurement, and it is the last be
 Getting this wrong is the one thing that would break the rail-and-count sequence silently, because
 every temperature the app sets would land a few degrees off and nothing would say so.
 
-- [ ] `power` turns the unit on and off
-- [ ] `cool` and `warm` change the mode
+- [x] `power` turns the unit on and off
+- [x] `cool` and `warm` change the mode
 
 The web page is a setup and debugging tool only. The app talks to the board over the API, so nothing
 in the running system depends on it.
@@ -197,7 +197,7 @@ in the running system depends on it.
 
 ## Two minutes: mute the unit
 
-- [ ] Fire the `mute` code once and check the beeping stops
+- [x] Fire the `mute` code once and check the beeping stops. **Done 8 September, it is quiet**
 
 **Once only.** The unit remembers it through a power cut, so it is a toggle rather than a command.
 Sending it again turns the beep back on, and the press that does it beeps. Nothing in the app does
@@ -209,9 +209,31 @@ unit is not holding. Not something to trigger at 2am.
 
 ---
 
+## Ten minutes: drive the real unit from the Mac
+
+Detail in [SETUP.md](SETUP.md#step-6-drive-the-real-unit-from-the-mac). Worth doing before the Pi
+exists. The Mac has the project, the blaster is on the Wi-Fi, and the plug has been answering for
+days, so there is nothing left to wait for.
+
+- [ ] `./scripts/use-hardware.py`, which points `backend/.env` at both devices and copies the ESPHome
+      key across without it needing to be retyped
+- [ ] `./scripts/dev.sh`
+- [ ] The simulator tab has gone from the app. That is proof it is driving real infrared
+- [ ] Power on from the phone, and the plug reading climbs off standby
+- [ ] Set a temperature, and the unit's display lands on that number
+- [ ] Set cooling, and the plug reads about 170 W. Set warming, and it reads about 300 W
+- [ ] Power off
+
+`./scripts/use-hardware.py --fake` goes back to the simulator whenever needed.
+
+That third-from-last one is the good test. It is the only place in the system where something the app
+believes gets checked against something measured.
+
+---
+
 ## Install and swap
 
-Detail in [SETUP.md](SETUP.md#step-6-install-it-on-the-pi).
+Detail in [SETUP.md](SETUP.md#step-7-move-it-to-the-pi).
 
 - [ ] On the Pi: `git clone`, then `./scripts/install.sh`
 - [ ] From the Mac, in the project folder: `./scripts/deploy.sh liam@hydrosnooze.local`

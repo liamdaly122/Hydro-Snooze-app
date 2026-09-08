@@ -57,7 +57,11 @@ python -m pip --version >/dev/null 2>&1 || python -m ensurepip --upgrade >/dev/n
 }
 
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -e './backend[dev]'
+# The hardware extra pulls in aioesphomeapi, which the ESPHome blaster needs.
+# It used to be left out here because the Mac only ever ran the simulator, but
+# the blaster is driven from the Mac now and a missing library at 2am is a poor
+# discovery. The Pi installer has always included it.
+python -m pip install --quiet -e './backend[dev,hardware]'
 
 if [ ! -d frontend/node_modules ]; then
   echo "Installing the app's dependencies (once, takes a minute)"
