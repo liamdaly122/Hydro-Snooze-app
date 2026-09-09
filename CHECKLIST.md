@@ -30,12 +30,12 @@ that is patience.
 - [x] XIAO Smart IR Mate
 - [x] **Raspberry Pi 4, 4GB.** More than this needs, which means it will never be the thing that is
       too slow, and it is a comfortable machine to SSH into
-- [ ] A decent A2 microSD card, 32GB (£10 to £20)
-- [ ] The official Pi 4 power supply. Under-powering a Pi produces symptoms that look exactly like
+- [x] A decent A2 microSD card, 32GB (£10 to £20)
+- [x] The official Pi 4 power supply. Under-powering a Pi produces symptoms that look exactly like
       software bugs, which is why it is worth the money rather than a phone charger. The service
       reads the Pi's own throttling flags once an hour now and pushes a plain-words warning naming
       the supply, so this is at least a thing that gets found rather than guessed at
-- [ ] A passive case. No fan: it does not need one and it may end up in a bedroom
+- [x] A passive case. No fan: it does not need one and it may end up in a bedroom
 
 Do not cheap out on the card. This runs day and night writing logs and power samples, and a cheap
 card quietly failing is the most likely way the whole thing stops working. The app does its share:
@@ -64,7 +64,7 @@ the whole reason it comes first.
       which is weak enough to drop reads
 - [x] Fix the bedroom coverage. **Done with a Wi-Fi extender: -50 dBm on `VM1876778_EXT`**, and read
       failures went from 5 in 59 to 0 in 44
-- [ ] Put the Pi and the blaster on the extended network too when they go in. Same room, same
+- [x] Put the Pi and the blaster on the extended network too when they go in. Same room, same
       problem, and the blaster is the one where a dropped connection costs a night rather than an
       `unknown`
 
@@ -136,14 +136,14 @@ The thresholds need no lines in `.env` any more. The measured values are the def
 
 Detail in [SETUP.md](SETUP.md#step-2-the-raspberry-pi).
 
-- [ ] Download Raspberry Pi Imager onto the Mac
-- [ ] Choose Raspberry Pi OS Lite (64-bit)
-- [ ] **Click the settings gear before writing.** Hostname `hydrosnooze`, SSH on, username and
+- [x] Download Raspberry Pi Imager onto the Mac
+- [x] Choose Raspberry Pi OS Lite (64-bit)
+- [x] **Click the settings gear before writing.** Hostname `hydrosnooze`, SSH on, username and
       password, Wi-Fi name and password, **locale and timezone**
-- [ ] Put it on `VM1876778_EXT`, the extender network, same as the plug and the blaster
-- [ ] Write the card, put it in, power on, wait two minutes
-- [ ] `ssh liam@hydrosnooze.local` from the Mac gives a prompt
-- [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`
+- [x] Put it on `VM1876778_EXT`, the extender network, same as the plug and the blaster
+- [x] Write the card, put it in, power on, wait two minutes
+- [x] `ssh liam@hydrosnooze.local` from the Mac gives a prompt
+- [x] `timedatectl` says `Europe/London` and `System clock synchronized: yes`
 
 That gear step is what makes this painless. Skip it and the Pi never joins the network, and there is
 no screen attached to tell me why.
@@ -207,6 +207,9 @@ blaster sent anything, so this is belief, not measurement, and it is the last be
 - [ ] Open `http://hydrosnooze-ir.local` on the phone. Eight buttons, served by the board itself
 - [x] Stand in front of the unit, tap `temp_up` once, and read the display
 - [x] **It goes up by exactly one degree.** 29, 30, 31 on three taps. `ir_frames: "8"` is right
+The two below are the branches that would have applied if it had not. Kept for the record; neither
+is outstanding.
+
 - [ ] It goes up by more than one, so the unit counts frames. Set `ir_frames: "1"` at the top of
       `docs/esphome-hydrosnooze.yaml`, reflash, try again, work up until one press is one degree
 - [ ] Nothing happens at all. Aim and distance first, then raise `ir_frames`
@@ -242,12 +245,17 @@ Detail in [SETUP.md](SETUP.md#step-6-drive-the-real-unit-from-the-mac). Worth do
 exists. The Mac has the project, the blaster is on the Wi-Fi, and the plug has been answering for
 days, so there is nothing left to wait for.
 
+**Done, and now superseded.** The Mac drove the bed from 7 September until the Pi took over on the
+9th, so everything below happened. The unticked boxes are the individual checks, left as they were
+rather than backfilled from memory: the Pi's own version of each is ticked further down, and that is
+the one that counts now.
+
 - [ ] `./scripts/use-hardware.py`, which points `backend/.env` at both devices and copies the ESPHome
       key across without it needing to be retyped
 - [ ] `./scripts/dev.sh`. On real hardware it starts three things in one window and tags every
       line: `app` what it decided, `ir` that the infrared left the board, `plug` what the unit
       actually drew. One Ctrl-C stops all three
-- [ ] The simulator tab has gone from the app. That is proof it is driving real infrared
+- [x] The simulator tab has gone from the app. That is proof it is driving real infrared
 - [ ] Power on with the button in the top right of the app, and the plug reading climbs off
       standby
 - [ ] Set a temperature, and the unit's display lands on that number
@@ -262,10 +270,10 @@ Four presses proves the blaster. It does not prove the night. Open the schedule 
 the Wake card and press **Run a test night**: tonight's own stages, in order, at their own
 temperatures and modes, compressed into about six minutes on the real unit.
 
-- [ ] Get ready, Deep, REM, Wake, off. All five land, in order
-- [ ] The unit's display shows the right number at each boundary
+- [x] Get ready, Deep, REM, Wake, off. All five land, in order
+- [x] The unit's display shows the right number at each boundary
 - [ ] The `plug` lines follow: about 170 W while cooling, about 300 W once Wake switches to warming
-- [ ] It switches the unit off at the end without being told
+- [x] It switches the unit off at the end without being told
 
 That third one is the whole system proving itself: a belief checked against a measurement, and a
 night that goes from cooling to heating, which the unit's own scheduler could never do.
@@ -284,80 +292,110 @@ copied mid-write.
 
 ### Get the Pi up
 
-- [ ] Raspberry Pi OS **Lite** 64-bit via Imager. **Gear icon before writing:** hostname
+- [x] Raspberry Pi OS **Lite** 64-bit via Imager. **Gear icon before writing:** hostname
       `hydrosnooze`, SSH on, username and password, Wi-Fi on `VM1876778_EXT`, and **timezone**.
       **Re-flash even if the kit card came pre-loaded**: it has not been through that gear icon, so
       SSH is off and it will not join the Wi-Fi, and it is the desktop image rather than Lite
-- [ ] Boot, wait two minutes, `ssh liam@hydrosnooze.local`
-- [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`. Both halves matter and
+- [x] Boot, wait two minutes, `ssh liam@hydrosnooze.local`
+- [x] `timedatectl` says `Europe/London` and `System clock synchronized: yes`. Both halves matter and
       they are different problems: the first is which timezone stage times are read in, the second is
       whether the Pi knows the time at all. It has no battery-backed clock, so at boot it believes it
       is whenever it last shut down until the network corrects it
-- [ ] On the Pi: `sudo apt update && sudo apt install -y git` **first**. Pi OS Lite does not ship
+- [x] On the Pi: `sudo apt update && sudo apt install -y git` **first**. Pi OS Lite does not ship
       git, so the clone below fails with `git: command not found` without it
-- [ ] On the Pi: `git clone`, then `./scripts/install.sh`. **The clone is not what runs.** It is
+- [x] On the Pi: `git clone`, then `./scripts/install.sh`. **The clone is not what runs.** It is
       where the unit file and the scripts are read from; `install.sh` copies the backend to
       `/opt/hydrosnooze` and that is what systemd starts
-- [ ] From the Mac: `./scripts/deploy.sh liam@hydrosnooze.local`
+- [x] From the Mac: `./scripts/deploy.sh liam@hydrosnooze.local`
 
 ### Hand the hardware over
 
-- [ ] **Ctrl-C the Mac's `dev.sh`.** Two schedulers driving one unit is the worst outcome of the night
-- [ ] On the Mac: `./scripts/use-hardware.py --fake`, so running `dev.sh` later never drives the bed
-- [ ] On the Mac: `./scripts/notify.py --heartbeat ""`. **This one is easy to skip and it matters.**
+- [x] **Ctrl-C the Mac's `dev.sh`.** Two schedulers driving one unit is the worst outcome of the night
+- [x] On the Mac: `./scripts/use-hardware.py --fake`, so running `dev.sh` later never drives the bed
+- [x] On the Mac: `./scripts/notify.py --heartbeat ""`. **This one is easy to skip and it matters.**
       The heartbeat is what raises the alarm when a machine goes quiet, and it cannot tell which
       machine is pinging. A Mac left pinging the same URL keeps the check green through a night the
       Pi spent switched off. `use-hardware.py --fake` does not cover this: it only touches the
       hardware lines
-- [ ] `ssh liam@hydrosnooze.local 'sudo systemctl stop hydrosnooze'`
-- [ ] From the Mac: `scp backend/data/hydrosnooze.db liam@hydrosnooze.local:/opt/hydrosnooze/data/`
+- [x] `ssh liam@hydrosnooze.local 'sudo systemctl stop hydrosnooze'`
+- [x] From the Mac: `scp backend/data/hydrosnooze.db liam@hydrosnooze.local:/opt/hydrosnooze/data/`
       to carry the schedule and the measured lead times across
-- [ ] From the Mac: `scp docs/secrets.yaml liam@hydrosnooze.local:~/Hydro-Snooze-app/docs/`
-- [ ] On the Pi: `./scripts/use-hardware.py --env /opt/hydrosnooze/.env`
-- [ ] `sudo systemctl restart hydrosnooze && journalctl -u hydrosnooze -f`
+- [x] From the Mac: `scp docs/secrets.yaml liam@hydrosnooze.local:~/Hydro-Snooze-app/docs/`
+- [x] On the Pi: `./scripts/use-hardware.py --env /opt/hydrosnooze/.env`
+- [x] `sudo systemctl restart hydrosnooze && journalctl -u hydrosnooze -f`
 
 ### Check it took
 
-- [ ] The log says `transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194`
-- [ ] The next line says `Local time is ... (BST, UTC+01:00)`, not UTC
-- [ ] `systemctl cat hydrosnooze | grep '^After='` shows **two** lines, `network-online.target` and
+- [x] The log says `transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194`
+- [x] The next line says `Local time is ... (BST, UTC+01:00)`, not UTC
+- [x] `systemctl cat hydrosnooze | grep '^After='` shows **two** lines, `network-online.target` and
       `time-sync.target`. The service waits for the clock to be set before scheduling anything, and
       this is the systemd half of that. One line means the unit file did not get written
-- [ ] `iw dev wlan0 get power_save` says `off`. Raspberry Pi OS leaves it on, and it causes exactly
+- [x] `iw dev wlan0 get power_save` says `off`. Raspberry Pi OS leaves it on, and it causes exactly
       the dropped connections that cost the night on 9 September. `install.sh` turns it off
-- [ ] `vcgencmd get_throttled` says `throttled=0x0`. Anything else and the power supply or the cable
+- [x] `vcgencmd get_throttled` says `throttled=0x0`. Anything else and the power supply or the cable
       is the first thing to change, before debugging any software. The service watches this hourly
       and will say so on its own, but it is worth one look on the first evening
-- [ ] `http://hydrosnooze.local:8000` on the phone, added to the Home Screen
-- [ ] The device bar shows **four green chips**: Service, Blaster, Plug and Alerts. Alerts is the
+- [x] `http://hydrosnooze.local:8000` on the phone, added to the Home Screen
+- [x] The device bar shows **four green chips**: Service, Blaster, Plug and Alerts. Alerts is the
       new one and it is amber until both the topic and the heartbeat are set, which is the next
       block. Amber there is correct at this point, not a fault
-- [ ] The simulator tab has gone
-- [ ] **Run a test night from the Pi.** This is the acceptance test for the whole move
+- [x] The simulator tab has gone
+- [x] **Run a test night from the Pi.** This is the acceptance test for the whole move
 
 ### Same evening, because the Pi is load-bearing now
 
-- [ ] **Carry the existing topic across rather than making a second one.** The phone is already
+- [x] **Carry the existing topic across rather than making a second one.** The phone is already
       subscribed to the one set up on 9 September, so read it off the Mac with
       `./scripts/notify.py`, then on the Pi:
       `./scripts/notify.py --env /opt/hydrosnooze/.env --topic <that string>`. Running it bare
       would generate a fresh topic and the phone would be listening to the old one
-- [ ] `./scripts/notify.py --env /opt/hydrosnooze/.env --heartbeat <the healthchecks.io ping URL>`.
+- [x] `./scripts/notify.py --env /opt/hydrosnooze/.env --heartbeat <the healthchecks.io ping URL>`.
       Same URL as the Mac was using. The Pi taking over the pings is the point
-- [ ] `sudo systemctl restart hydrosnooze`, then prove it: `./scripts/notify.py --test`. It asks
+- [x] `sudo systemctl restart hydrosnooze`, then prove it: `./scripts/notify.py --test`. It asks
       the running service to send it, so arriving proves the Pi read the topic rather than just
       that ntfy works. The first real notification should not be the one at 2am
-- [ ] The Alerts chip in the app has gone green
-- [ ] Check the watchdog took, which only exists on the Pi. The service says so itself in the
+- [x] The Alerts chip in the app has gone green
+- [x] Check the watchdog took, which only exists on the Pi. The service says so itself in the
       startup log: **`systemd is watching, pinging every 45s`**. If that line is missing, systemd
       is not watching and the unit file did not take. `systemctl show hydrosnooze -p NRestarts`
       is the number worth checking back on later: `0` means it has never needed saving
-- [ ] `sudo apt install cockpit`, then `https://hydrosnooze.local:9090` for a dashboard
-- [ ] Try `./scripts/diagnose.py` once while everything is working, so the command is familiar
+- [x] `sudo apt install cockpit`, then `https://hydrosnooze.local:9090` for a dashboard
+- [x] Try `./scripts/diagnose.py` once while everything is working, so the command is familiar
       before the morning it is needed
 - [ ] Give the Pi a fixed address in the router
 - [ ] **Set the Shelly's daily off/on schedule**, 09:00 off and 19:00 on. Not auto-off, which
       would not have worked. The last backstop no software of ours can fail to run
+
+---
+
+## Stress tested, 9 September
+
+Not a plan, a record. Ten deliberate failures on the real Pi, every one recovered from. This is the
+evidence for trusting it overnight, and it is worth keeping because "it worked when I set it up" is
+not the same claim.
+
+- [x] **Kill the process** (`kill -9`). Back in 5 seconds, `NRestarts` went to 1
+- [x] **Kill it six times over.** Came back every time. That is `StartLimitIntervalSec=0` earning
+      its line: systemd's default is to give up after five starts in a short window
+- [x] **Freeze it without killing it** (`kill -STOP`). **The 9 September failure exactly**: a process
+      alive and doing nothing, which `Restart=always` cannot see. `Watchdog timeout (limit 1min 30s)`,
+      killed and restarted. Seven seconds of outage against four hours on the Mac
+- [x] **Unplug the blaster.** Chip amber then red, a push to the phone, retries every 33 seconds,
+      reconnected on its own when plugged back in
+- [x] **Unplug the plug.** Retries every 37 seconds, the extra few being the two attempts each read
+      makes. Found the gap that a lost plug said nothing, since fixed
+- [x] **Cut the Wi-Fi to both at once.** 22 minutes of total hardware failure, no restart, no
+      watchdog fire, both loops independent and neither accelerating. The scheduler never stalled,
+      which is the thing that actually failed in September
+- [x] **Pull the power.** Came back on its own, no login, no command
+- [x] **Restart mid-night.** No false "missed stage" alarms, which is the bug fixed that morning
+- [x] **Stop it for 20 minutes.** healthchecks.io emailed. **The only test that proves you find out
+      rather than that it recovers**, and the one worth repeating if anything about the alerting
+      ever changes
+
+Three fixes came out of this that 370 tests had not found: the plug never pushing, the journal
+recording breakage but not recovery, and `diagnose.py` printing the heartbeat URL in full.
 
 ---
 
@@ -368,6 +406,10 @@ Detail in [SETUP.md](SETUP.md#earning-trust-before-sleeping-on-it).
 ### Daytime only, at first
 
 Watch the unit each time, and watch `journalctl -u hydrosnooze -f` in a Terminal.
+
+The test night on the Pi covered all four of these in sequence and they landed, so these are a
+deliberate repeat rather than an open question. Worth doing anyway, one at a time, watching the
+unit's own display rather than the app.
 
 - [ ] Power on
 - [ ] Power off
