@@ -287,6 +287,11 @@ copied mid-write.
 
 - [ ] **Ctrl-C the Mac's `dev.sh`.** Two schedulers driving one unit is the worst outcome of the night
 - [ ] On the Mac: `./scripts/use-hardware.py --fake`, so running `dev.sh` later never drives the bed
+- [ ] On the Mac: `./scripts/notify.py --heartbeat ""`. **This one is easy to skip and it matters.**
+      The heartbeat is what raises the alarm when a machine goes quiet, and it cannot tell which
+      machine is pinging. A Mac left pinging the same URL keeps the check green through a night the
+      Pi spent switched off. `use-hardware.py --fake` does not cover this: it only touches the
+      hardware lines
 - [ ] `ssh liam@hydrosnooze.local 'sudo systemctl stop hydrosnooze'`
 - [ ] From the Mac: `scp backend/data/hydrosnooze.db liam@hydrosnooze.local:/opt/hydrosnooze/data/`
       to carry the schedule and the measured lead times across
@@ -299,16 +304,29 @@ copied mid-write.
 - [ ] The log says `transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194`
 - [ ] The next line says `Local time is ... (BST, UTC+01:00)`, not UTC
 - [ ] `http://hydrosnooze.local:8000` on the phone, added to the Home Screen
-- [ ] The device bar shows **three green dots**
+- [ ] The device bar shows **four green chips**: Service, Blaster, Plug and Alerts. Alerts is the
+      new one and it is amber until both the topic and the heartbeat are set, which is the next
+      block. Amber there is correct at this point, not a fault
 - [ ] The simulator tab has gone
 - [ ] **Run a test night from the Pi.** This is the acceptance test for the whole move
 
 ### Same evening, because the Pi is load-bearing now
 
-- [ ] `./scripts/notify.py --env /opt/hydrosnooze/.env`, then subscribe to the topic it prints in
-      the **ntfy** app on the phone, and restart the service
-- [ ] Prove it: `./scripts/notify.py --test`. The first real notification should not be the one
-      at 2am
+- [ ] **Carry the existing topic across rather than making a second one.** The phone is already
+      subscribed to the one set up on 9 September, so read it off the Mac with
+      `./scripts/notify.py`, then on the Pi:
+      `./scripts/notify.py --env /opt/hydrosnooze/.env --topic <that string>`. Running it bare
+      would generate a fresh topic and the phone would be listening to the old one
+- [ ] `./scripts/notify.py --env /opt/hydrosnooze/.env --heartbeat <the healthchecks.io ping URL>`.
+      Same URL as the Mac was using. The Pi taking over the pings is the point
+- [ ] `sudo systemctl restart hydrosnooze`, then prove it: `./scripts/notify.py --test`. It asks
+      the running service to send it, so arriving proves the Pi read the topic rather than just
+      that ntfy works. The first real notification should not be the one at 2am
+- [ ] The Alerts chip in the app has gone green
+- [ ] Check the watchdog took, which only exists on the Pi. The service says so itself in the
+      startup log: **`systemd is watching, pinging every 45s`**. If that line is missing, systemd
+      is not watching and the unit file did not take. `systemctl show hydrosnooze -p NRestarts`
+      is the number worth checking back on later: `0` means it has never needed saving
 - [ ] `sudo apt install cockpit`, then `https://hydrosnooze.local:9090` for a dashboard
 - [ ] Try `./scripts/diagnose.py` once while everything is working, so the command is familiar
       before the morning it is needed

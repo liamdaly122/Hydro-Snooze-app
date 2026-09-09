@@ -795,6 +795,13 @@ Then open `http://hydrosnooze.local:8000` in Safari on the phone and add it to t
 The simulator tab is gone. It only ever appears when the transmitter is fake, so there is no way to
 jump the clock on a unit that is genuinely running.
 
+The device bar has **four** chips: Service, Blaster, Plug and **Alerts**. The fourth is not a device.
+It is whether anything would tell me if this stopped working, and it sits beside the other three
+because three green dots saying the hardware is fine mean very little at 3am if nothing is watching
+them. It is also the only row that can be wrong in a way I would never spot by looking, since a
+notifier that is switched off looks exactly like a quiet night. It is green only when both the topic
+and the heartbeat are set, and amber naming the missing half when only one is.
+
 ### Prove it, then trust it
 
 Reading the log is not proof. **Run a test night from the Pi**, from the Test run card behind the
@@ -812,12 +819,6 @@ One command generates a topic and writes it into `.env`:
 ./scripts/notify.py
 ```
 
-On the Pi, point it at the installed settings instead:
-
-```sh
-./scripts/notify.py --env /opt/hydrosnooze/.env
-```
-
 It prints a long random string. Install **ntfy** on the phone, tap +, and
 subscribe to exactly that. There is no account and no key: the topic name is the
 only secret there is, which is why it is generated rather than typed.
@@ -829,8 +830,59 @@ notification should not be the one at 2am:
 ./scripts/notify.py --test
 ```
 
+That asks the running service to send it, and falls back to sending directly only
+if nothing answers. Worth knowing which one it did: a notification sent by the
+service proves the service read the topic out of `.env`, which is the half that
+can silently be wrong.
+
 `./scripts/notify.py --off` stops it. Running it again never invents a second
 topic, and the hardware swap script leaves it alone.
+
+**On the Pi, carry the topic across rather than making a second one.** The phone
+is already subscribed to the one set up on the Mac, and a fresh topic means the
+phone is listening to a string nothing sends to any more:
+
+```sh
+./scripts/notify.py                                    # on the Mac, to read it
+./scripts/notify.py --env /opt/hydrosnooze/.env --topic <that string>
+```
+
+`--env` because the service runs from `/opt/hydrosnooze` rather than from the
+clone, the same reason `use-hardware.py` needs it.
+
+### A heartbeat, for the failure nothing on the Pi can report
+
+Notifications cover everything the service can see going wrong. They cannot cover
+the service not being there, because a dead process sends nothing, and neither
+does a Pi with a corrupt SD card or no power. That failure is invisible from the
+inside by definition, so something outside has to notice the silence.
+
+[healthchecks.io](https://healthchecks.io) is free and does exactly this. Make one
+check, set its period to 15 minutes and its grace to 10, and it hands over a ping
+URL:
+
+```sh
+./scripts/notify.py --heartbeat https://hc-ping.com/<the uuid>
+```
+
+The service then pings it every five minutes, and **only while the scheduler is
+completing ticks**, which is the same liveness test the watchdog uses. Not "the
+process exists" but "it is doing its job". A Pi that is powered but wedged looks
+dead from outside, which for the purposes of a night it is. Three missed pings and
+healthchecks.io emails me.
+
+`--heartbeat ""` turns it off.
+
+**When the Pi takes over, turn the heartbeat off on the Mac.** This is the easiest
+thing on this page to skip and one of the more expensive. The heartbeat is a
+statement that some machine is alive and it cannot tell which one; a Mac still
+pinging the same URL holds the check green through a night the Pi spent switched
+off, which is the exact failure the heartbeat exists to catch. `use-hardware.py
+--fake` does not do it, because it only rewrites the hardware lines:
+
+```sh
+./scripts/notify.py --heartbeat ""     # on the Mac, after the swap
+```
 
 Only problems are sent: anything at error level, plus the handful of warnings
 that mean the night is not doing what it should. The thirty ordinary events of a
