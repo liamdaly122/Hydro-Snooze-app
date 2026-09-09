@@ -58,9 +58,25 @@ class Commands:
     # --- Building blocks ------------------------------------------------------
 
     async def _press(self, button: Button, note: str = "", gap: float | None = None) -> float:
-        """Send one press and wait the gap. Returns how long the gap was."""
+        """Send one press and wait the gap. Returns how long the gap was.
+
+        Every failure to send becomes a CommandFailed here, whatever the
+        transmitter raised. That is the one thing the layer above catches, and a
+        press that did not go out is a command that did not work regardless of
+        which library named the error.
+
+        Catching broadly is on purpose and was learned the hard way: an
+        aioesphomeapi APIConnectionError escaped this path, went past the
+        scheduler's handler for CommandFailed, and left the nightly loop retrying
+        the same stage every second until morning.
+        """
         before = self.clock.now()
-        await self.tx.press(button, note)
+        try:
+            await self.tx.press(button, note)
+        except CommandFailed:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise CommandFailed(f"Could not send {button.value}: {exc}") from exc
         wait = self.settings.command_gap_s if gap is None else gap
         if wait:
             await self.clock.sleep(wait)

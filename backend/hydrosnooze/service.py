@@ -288,7 +288,26 @@ class Service:
         if job.kind == "stage" and first_try:
             self._report_stage_start(job)
 
-        if await self._run_job(job):
+        # Anything at all going wrong here counts as the job not landing.
+        #
+        # This used to let exceptions through to _tick_loop's catch-all, and the
+        # cost was severe: neither the success branch nor the failure branch
+        # below ran, so the job stayed unmarked AND no backoff was recorded, and
+        # due() handed back the same job every second for hours. A blaster that
+        # dropped off the Wi-Fi produced a stack trace at 1Hz all night.
+        #
+        # Catching broadly is deliberate. At this boundary there is no failure
+        # that should be treated as anything other than "it did not work, wait
+        # and try again", and the alternative is a loop that cannot stop.
+        try:
+            landed = await self._run_job(job)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("job %s raised", job.key)
+            landed = False
+            if first_try:
+                self.events.error("stage", f"The {job.key} step failed: {exc}")
+
+        if landed:
             # Marked only once it has actually worked. Marking before running is
             # what made a failed stage permanent: the job was recorded as done,
             # due() never offered it again, and the bed sat at the wrong
@@ -308,6 +327,9 @@ class Service:
                 f"The {job.key} step did not land. Retrying every "
                 f"{int(RETRY_AFTER.total_seconds())}s until its window closes.",
             )
+        # Set before anything else can go wrong, so the backoff holds even if the
+        # events above throw. This is the line whose absence caused the 1Hz loop.
+
         self._retrying = job.key
         self._retry_after = now + RETRY_AFTER
 
