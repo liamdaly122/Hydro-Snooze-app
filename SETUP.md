@@ -112,17 +112,39 @@ http://192.168.1.194/rpc/Switch.GetStatus?id=0
 A blob of JSON comes back with `"apower"` in it. That is the exact endpoint the service uses, so
 this one check proves the whole plug half of the project.
 
-### Set the auto-off timer, while I am already in the app
+### Set the daily schedule, while I am already in the app
 
-Find the auto-off setting under the device's output options and set it to **10 hours**. Some screens
-want seconds, in which case that is **36000**.
+**A correction, written after nearly getting this wrong.** These notes said "auto-off, 10 hours" for
+weeks. Do not do that. Shelly's auto-off counts from the moment the output **switches on**, and this
+app never switches the plug: `shelly.py` only ever calls `Switch.GetStatus`. The output is on
+permanently and the bed is driven by infrared. So auto-off would either do nothing at all, because
+the relay never cycles, or cut power at an arbitrary time relative to the plug's last boot and leave
+it off, because nothing turns it back on. Losing the bed and the power monitoring together at 02:00
+is worse than the problem it was meant to solve.
 
-**This is not optional.** The app drives the night itself, so the unit never switches itself off,
-and the software temperature ceiling is set to the unit's own maximum, so nothing in the app stops a
-warming stage running at 55°C. If the Pi dies at 3am, this timer is the only thing left.
+The intent was right. If the Pi dies at 3am while the unit is warming, something other than this
+software has to stop it running all day, because the app drives the night itself and the ceiling is
+the unit's own maximum of 55°C.
 
-Doing it now rather than later means the backstop is in place before anything is ever left running
-unattended.
+The mechanism is a **daily schedule**, not auto-off. Under Schedules in the Shelly app:
+
+| | |
+|---|---|
+| Turn **OFF** | 09:00, every day |
+| Turn **ON** | 19:00, every day |
+
+Time-based rather than event-based, so it cannot be defeated by the relay never cycling.
+
+**Why those hours.** The night is 22:30 to 06:30 and pre-conditioning can start up to three hours
+before bedtime, so the earliest the unit ever comes on is 19:30. That leaves two and a half hours of
+margin after wake and thirty minutes before the earliest possible start.
+
+**One coupling to remember.** Move the wake time later than 09:00, or bedtime earlier than 19:00, and
+these have to move too. Nothing in the app can check this, which is the honest limitation: it is the
+one setting that lives entirely outside the system.
+
+The plug stays on Wi-Fi while its output is off, so the app keeps reading it and honestly reports
+0 W and "off" through the day.
 
 ### Read the four states
 
@@ -1060,7 +1082,9 @@ The Pi is load-bearing from tonight, so:
 - **A fixed address for the Pi** in the router, alongside the plug and the blaster. A Pi that comes
   back on a new IP after a power cut still works over `hydrosnooze.local`, but a fixed one is one
   fewer thing to be surprised by
-- **The Shelly's 10 hour auto-off timer.** This stops being optional the moment the Pi is the only
+- **The Shelly's daily off/on schedule**, 09:00 off and 19:00 on. Not auto-off; see
+  [step 1](#set-the-daily-schedule-while-i-am-already-in-the-app) for why that would not have
+  worked. This stops being optional the moment the Pi is the only
   thing switching the unit off. If it dies at 3am the bed stays exactly where it is, and that timer
   is the last backstop no software of ours can fail to run
 
@@ -1109,7 +1133,7 @@ disagree, believe the chart: it is the only part of the screen that is measured.
 
 ### Then trust it
 
-And keep the Shelly's auto-off timer set as a backstop.
+And keep the Shelly's daily off/on schedule set as a backstop.
 
 ---
 
@@ -1182,5 +1206,5 @@ file was not rewritten, and the `git pull` and `install.sh` above are what is ne
 | Presses sent, unit ignores them | The codes are wrong, or the blaster cannot see the unit. Back to step 4 |
 | A stage did not change | Check the event log for a missed stage warning, then the power chart for whether the draw changed |
 | A stage set the right number but the bed never moved | Check which mode it used. If a stage between 25 and 35°C is warming when the bed needed to come down, the assumption from step 1 was wrong |
-| The unit was still on in the morning | Check the event log for the power off entry. Then check the Shelly's auto-off timer is set |
+| The unit was still on in the morning | Check the event log for the power off entry. Then check the Shelly's daily schedule is still set |
 | Anything else | `journalctl -u hydrosnooze -n 100` |

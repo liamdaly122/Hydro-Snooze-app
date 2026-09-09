@@ -68,14 +68,20 @@ the whole reason it comes first.
       problem, and the blaster is the one where a dropped connection costs a night rather than an
       `unknown`
 
-### Set the auto-off timer while I am in the app
+### Set the daily schedule while I am in the app
 
-- [ ] Auto-off, 10 hours (36000 seconds on screens that want seconds). **Not confirmed done.** The
-      one item on this page nothing in software can check for me
+**Not auto-off.** These notes said auto-off for weeks and it was wrong: it counts from the moment the
+output switches on, and the app never switches the plug, only reads it. It would have done nothing,
+or cut power at an arbitrary hour and left it off. Detail in
+[SETUP.md](SETUP.md#set-the-daily-schedule-while-i-am-already-in-the-app).
+
+- [ ] Under **Schedules**: turn **OFF** at 09:00 daily, turn **ON** at 19:00 daily. **Not confirmed
+      done.** The one item on this page nothing in software can check for me
 
 **Not optional.** The app drives the night itself, so the unit never switches itself off, and the
-temperature ceiling is the unit's own maximum of 55°C. If the Pi dies at 3am this timer is the only
-thing standing between that and a bed that stays hot all day.
+temperature ceiling is the unit's own maximum of 55°C. If the Pi dies at 3am this is the only thing
+standing between that and a bed that stays hot all day. Two and a half hours of margin after the
+06:30 wake, thirty minutes before the earliest pre-conditioning could start.
 
 ### Measure the four states
 
@@ -350,7 +356,8 @@ copied mid-write.
 - [ ] Try `./scripts/diagnose.py` once while everything is working, so the command is familiar
       before the morning it is needed
 - [ ] Give the Pi a fixed address in the router
-- [ ] **Set the Shelly's 10 hour auto-off timer.** The last backstop no software of ours can fail to run
+- [ ] **Set the Shelly's daily off/on schedule**, 09:00 off and 19:00 on. Not auto-off, which
+      would not have worked. The last backstop no software of ours can fail to run
 
 ---
 
@@ -394,7 +401,7 @@ walked through the unit's setup wizard and nothing is unverifiable.
 ### Then trust it
 
 - [ ] Turn off the phone alarm safety net, if I want to
-- [ ] Confirm the Shelly auto-off timer is still set
+- [ ] Confirm the Shelly's daily off/on schedule is still set
 
 ---
 
