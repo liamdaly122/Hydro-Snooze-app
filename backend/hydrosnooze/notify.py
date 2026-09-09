@@ -125,3 +125,52 @@ class Notifier:
     async def close(self) -> None:
         for task in list(self._tasks):
             task.cancel()
+
+
+#: How often to say "still here". Should be comfortably more often than the
+#: period configured at the other end, so one missed ping is not an alarm.
+HEARTBEAT_EVERY = timedelta(minutes=5)
+
+
+class Heartbeat:
+    """A dead man's switch, for the failure nothing inside the Pi can report.
+
+    Notifications only arrive if the Pi is alive enough to send one. A power cut,
+    a dead SD card, a router that never comes back: all of those produce silence,
+    and silence is indistinguishable from a quiet night where nothing went wrong.
+
+    So the Pi says "still here" on a timer to something outside the house, and
+    that something raises the alarm when the saying stops. It is the only way to
+    be told about a machine that cannot tell you anything.
+
+    Deliberately reports liveness rather than health. A blaster wobble is
+    something the Pi can report itself, and routing it here too would mean the
+    "your bed controller is offline" alarm cried wolf, which is how an alarm
+    stops being read.
+    """
+
+    def __init__(self, clock: Clock, url: str = "", *, timeout: float = 10.0) -> None:
+        self.clock = clock
+        self.url = url.strip()
+        self.timeout = timeout
+        self.last_ok_at: datetime | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.url)
+
+    async def ping(self) -> bool:
+        """Say we are here. Never raises: a missed ping is not worth a night."""
+        if not self.enabled:
+            return False
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(self.url)
+                response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("heartbeat failed: %r", exc)
+            return False
+        self.last_ok_at = self.clock.now()
+        return True

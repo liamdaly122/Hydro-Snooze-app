@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     ntfy_topic: str = ""
     ntfy_server: str = "https://ntfy.sh"
 
+    #: A healthchecks.io ping URL, or any URL that notices when it stops being
+    #: called. Empty means no heartbeat.
+    #:
+    #: This is the only alarm that survives the Pi itself dying, because it is
+    #: raised by something outside the house rather than by the Pi.
+    heartbeat_url: str = ""
+
     # --- Power thresholds, measured ------------------------------------------
     #
     # Taken off a King HS1001 through a Shelly Plug S Gen3, walking the unit

@@ -38,7 +38,7 @@ from .models import (
     rehearsal_plan,
 )
 from . import watchdog
-from .notify import Notifier
+from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands
 
@@ -81,6 +81,7 @@ class Service:
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
         self.scheduler = Scheduler(learned_lead=self._learned_lead)
         self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
+        self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
 
         self.schedule: Schedule = self.db.load_schedule()
         self.state = DeviceState()
@@ -190,6 +191,22 @@ class Service:
                 continue
             watchdog.alive()
 
+    async def _heartbeat_loop(self) -> None:
+        """Tell the outside world we are still here, while we still are.
+
+        Same liveness signal the watchdog uses: not "the process exists" but
+        "the scheduler is completing ticks". A Pi that is powered but wedged
+        should look dead from outside, because for the purposes of a night it is.
+        """
+        while True:
+            last = self._last_tick_at
+            ticking = last is not None and (self.clock.now() - last) <= STUCK_AFTER
+            if ticking:
+                await self.heartbeat.ping()
+            else:
+                log.error("no scheduler tick since %s, holding the heartbeat back", last)
+            await self.clock.sleep(HEARTBEAT_EVERY.total_seconds())
+
     async def _health_loop(self) -> None:
         while True:
             try:
@@ -235,8 +252,18 @@ class Service:
         # service started, and before this everything above has already run.
         watchdog.ready()
 
+        if self.heartbeat.enabled:
+            self._tasks.append(
+                asyncio.create_task(self._heartbeat_loop(), name="heartbeat")
+            )
+
         if self.notifier.enabled:
             self.events.info("service", "Notifications on. Problems will reach the phone.")
+        if self.heartbeat.enabled:
+            self.events.info(
+                "service",
+                "Heartbeat on. If this machine stops saying it is here, you will be told.",
+            )
 
     async def stop(self) -> None:
         for task in self._tasks:

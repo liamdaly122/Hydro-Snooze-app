@@ -108,12 +108,33 @@ def main() -> int:
     parser.add_argument("--test", action="store_true", help="send one now")
     parser.add_argument("--off", action="store_true", help="stop sending")
     parser.add_argument("--topic", default=None, help="use this instead of a generated one")
+    parser.add_argument(
+        "--heartbeat",
+        default=None,
+        metavar="URL",
+        help="a healthchecks.io ping URL, the alarm that survives this machine dying",
+    )
     parser.add_argument("--env", default=None, help="which .env to write (the Pi uses its own)")
     args = parser.parse_args()
 
     env = Path(args.env).expanduser() if args.env else ENV
     shown = env if args.env else env.relative_to(ROOT)
     server = read(env, SERVER_KEY, DEFAULT_SERVER)
+
+    if args.heartbeat is not None:
+        write(env, "HS_HEARTBEAT_URL", args.heartbeat or None)
+        print()
+        if args.heartbeat:
+            print(f"{GREEN}Heartbeat set.{RESET} {DIM}Written to {shown}{RESET}")
+            print()
+            print("  This machine will now say it is still here every five minutes.")
+            print("  When it stops, healthchecks.io raises the alarm, which is the one")
+            print("  kind of failure nothing running on this machine could report.")
+        else:
+            print("Heartbeat off.")
+        print()
+        print("Restart the service for it to take effect.")
+        return 0
 
     if args.off:
         write(env, KEY, None)

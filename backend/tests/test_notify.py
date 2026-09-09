@@ -157,3 +157,58 @@ def test_it_really_sends_on_a_socket(tmp_path, monkeypatch):
     finally:
         server.close()
         os.unlink(path)
+
+
+# --- The heartbeat: the alarm that survives this machine dying -------------------
+
+
+@pytest.mark.asyncio
+async def test_a_heartbeat_with_no_url_does_nothing():
+    from hydrosnooze.notify import Heartbeat
+
+    beat = Heartbeat(VirtualClock(NOW), url="")
+    assert not beat.enabled
+    assert await beat.ping() is False
+
+
+@pytest.mark.asyncio
+async def test_a_failed_ping_never_raises():
+    """Taking the night down because a heartbeat could not be sent would be the
+    exact opposite of what it is for."""
+    from hydrosnooze.notify import Heartbeat
+
+    beat = Heartbeat(VirtualClock(NOW), url="http://192.0.2.1:9/ping", timeout=0.1)
+    assert await beat.ping() is False
+    assert beat.last_ok_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_stuck_scheduler_stops_the_heartbeat():
+    """The point of the whole thing. A Pi that is powered but wedged has to look
+    dead from outside, because for the purposes of a night it is."""
+    from datetime import timedelta
+
+    from hydrosnooze.config import Settings
+    from hydrosnooze.service import STUCK_AFTER, Service
+
+    clock = VirtualClock(NOW)
+    service = Service(Settings(db_path=":memory:"), clock=clock, echo=False)
+
+    pings: list[str] = []
+
+    async def record() -> bool:
+        pings.append("ping")
+        return True
+
+    service.heartbeat.ping = record
+    service.heartbeat.url = "https://example.invalid/ping"
+
+    service._last_tick_at = clock.now()
+    ticking = service._last_tick_at is not None and (
+        clock.now() - service._last_tick_at
+    ) <= STUCK_AFTER
+    assert ticking, "a scheduler that just ticked should be beating"
+
+    clock.advance(STUCK_AFTER + timedelta(seconds=1))
+    stuck = (clock.now() - service._last_tick_at) > STUCK_AFTER
+    assert stuck, "a scheduler that stopped ticking should not be beating"
