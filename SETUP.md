@@ -664,24 +664,47 @@ If you would rather keep what came on the card, it does work: boot it with a scr
 `sudo raspi-config` for SSH, hostname, Wi-Fi, timezone, and Boot to Console. Then pick up below at
 `git clone`.
 
-The timezone is the one that matters and it is easy to skip. The scheduler works in plain local time,
-so a Pi left on UTC runs the whole night an hour early through British Summer Time, and nothing in
-the app can tell: it would look like the schedule is simply wrong. A Pi also has no battery-backed
-clock, so it only knows the time because it asked the network on boot.
+### The clock, which is two separate problems
 
-Two things guard this now. `install.sh` checks both and warns, and the service prints what it thinks
-the time is in its first two log lines:
+The timezone is the first and it is easy to skip. The scheduler works in plain local time, so a Pi
+left on UTC runs the whole night an hour early through British Summer Time, and nothing in the app
+can tell: it would look like the schedule is simply wrong. Set it in the gear icon, or afterwards:
+
+```sh
+sudo timedatectl set-timezone Europe/London
+```
+
+The service prints what it thinks the time is in its first two log lines, so this is one glance:
 
 ```
 INFO  hydrosnooze  HydroSnooze up. transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194
 INFO  hydrosnooze  Local time is Tue 08 Sep 22:14 (BST, UTC+01:00). Stage times are read in this timezone.
 ```
 
-If that says UTC in summer, fix it before anything else:
+The second problem is whether the Pi knows the time **at all**, which is a different thing and took
+longer to see. A Pi has no battery-backed clock. At boot it believes it is roughly whenever it last
+shut down, which is close enough to look right and wrong enough to matter. Leave it unplugged from
+Friday, plug it back in on Monday evening, and it starts up believing it is Friday afternoon: it
+would schedule a night that ended three days ago, then jump three days forward the moment the network
+answered. Nothing downstream could tell.
 
-```sh
-sudo timedatectl set-timezone Europe/London
-```
+`After=network-online.target` says the network is up. It does not say the time is right, and the two
+are not the same thing.
+
+Three guards now, because ordering on its own is not a guarantee:
+
+- `install.sh` enables **`systemd-time-wait-sync`**, which ships disabled. That is what makes
+  `time-sync.target` mean "the clock has been set" rather than "we got as far as trying"
+- the unit file orders **after `time-sync.target`** as well as after the network
+- the service **holds off scheduling** until the clock is confirmed, and says so in the event log
+
+The last one is the belt to the other two, and the part I was most careful with is that it does not
+become a new way for the bed to never run. It waits ten minutes. If the clock is still unconfirmed it
+runs anyway and says at error level that it is running on a clock nothing checked, which reaches the
+phone. No night at all is the worse of the two outcomes.
+
+Nothing to configure for any of this, and nothing changes on the Mac: a machine with a clock and a
+battery cannot be asked the question and does not need to be.
 
 **Where the Pi goes does not matter.** It reaches the blaster and the plug over Wi-Fi, so it needs no
 line of sight to anything and does not have to be in the bedroom. Only the blaster needs to see the
@@ -695,8 +718,15 @@ cd Hydro-Snooze-app
 ./scripts/install.sh
 ```
 
-That sets up Python, installs the service, and registers it to start on boot. Then from the **Mac**,
-in the project folder:
+That sets up Python, installs the service, and registers it to start on boot.
+
+**The clone is not what runs.** `install.sh` copies the backend to `/opt/hydrosnooze`, and that copy
+is what systemd starts. The clone stays behind as the place the unit file and the scripts are read
+from: `notify.py`, `use-hardware.py` and `diagnose.py` are all run from here. Worth knowing before
+the first upgrade, because the two can drift apart. See
+[Updating the Pi later](#updating-the-pi-later).
+
+Then from the **Mac**, in the project folder:
 
 ```sh
 ./scripts/deploy.sh liam@hydrosnooze.local
@@ -748,6 +778,10 @@ scp backend/data/hydrosnooze.db liam@hydrosnooze.local:/opt/hydrosnooze/data/
 
 Skip this if the Mac never ran against real hardware. Simulated nights are not worth carrying, and
 the learned lead times from a fake unit would be actively wrong.
+
+An older database is fine to copy. The service adds any table it is missing on the way in and leaves
+the schedule, the power history and the events alone, so there is no migration step and nothing to
+do by hand.
 
 ### Now the swap
 
@@ -988,6 +1022,63 @@ disagree, believe the chart: it is the only part of the screen that is measured.
 ### Then trust it
 
 And keep the Shelly's auto-off timer set as a backstop.
+
+---
+
+## Updating the Pi later
+
+There are two copies of this project on the Pi and only one of them runs. Getting that the wrong way
+round is a quiet way to spend an evening, because the service restarts cleanly and reports nothing
+wrong while running the old code.
+
+| Where | What it is | Updated by |
+|---|---|---|
+| `~/Hydro-Snooze-app` | the clone. Where `install.sh`, the unit file and the scripts are read from | `git pull` |
+| `/opt/hydrosnooze` | what actually runs: `backend/`, `venv/`, `static/`, `.env`, `data/` | `deploy.sh` or `install.sh` |
+
+### Most changes: one command, from the Mac
+
+```sh
+./scripts/deploy.sh liam@hydrosnooze.local
+```
+
+Builds the app, copies the frontend and the backend to `/opt/hydrosnooze`, restarts the service. It
+copies from the Mac's working tree rather than from git, so the Pi's clone plays no part and quietly
+falls behind. That is fine, right up until it is not.
+
+The database and `.env` are excluded, so neither is ever overwritten by a deploy.
+
+### Some changes need the Pi as well
+
+```sh
+ssh liam@hydrosnooze.local
+cd ~/Hydro-Snooze-app
+git pull
+./scripts/install.sh
+```
+
+Needed whenever a change touches:
+
+- **`docs/hydrosnooze.service`**, the systemd unit. This is the one that catches people out.
+  `deploy.sh` restarts the service but never rewrites the unit file, so a change to it looks
+  deployed and is not
+- **`scripts/`**, since those are run from the clone
+- **`backend/pyproject.toml`**, a new dependency. `deploy.sh` copies the file but never runs pip, so
+  the service comes back with a `ModuleNotFoundError` and restart-loops
+
+`install.sh` is safe to run again. It keeps `.env`, keeps the venv, and excludes `data/`, so the
+settings and the database survive. It does not build the app, so if the frontend changed too, follow
+it with `deploy.sh` from the Mac.
+
+### Checking it took
+
+```sh
+systemctl cat hydrosnooze | grep '^After='     # the unit file is current
+journalctl -u hydrosnooze -n 20                # it came back up
+```
+
+That should print two lines, `network-online.target` and `time-sync.target`. One line means the unit
+file was not rewritten, and the `git pull` and `install.sh` above are what is needed.
 
 ---
 

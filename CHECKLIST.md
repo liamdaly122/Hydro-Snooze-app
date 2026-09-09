@@ -279,8 +279,13 @@ copied mid-write.
       **Re-flash even if the kit card came pre-loaded**: it has not been through that gear icon, so
       SSH is off and it will not join the Wi-Fi, and it is the desktop image rather than Lite
 - [ ] Boot, wait two minutes, `ssh liam@hydrosnooze.local`
-- [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`
-- [ ] On the Pi: `git clone`, then `./scripts/install.sh`
+- [ ] `timedatectl` says `Europe/London` and `System clock synchronized: yes`. Both halves matter and
+      they are different problems: the first is which timezone stage times are read in, the second is
+      whether the Pi knows the time at all. It has no battery-backed clock, so at boot it believes it
+      is whenever it last shut down until the network corrects it
+- [ ] On the Pi: `git clone`, then `./scripts/install.sh`. **The clone is not what runs.** It is
+      where the unit file and the scripts are read from; `install.sh` copies the backend to
+      `/opt/hydrosnooze` and that is what systemd starts
 - [ ] From the Mac: `./scripts/deploy.sh liam@hydrosnooze.local`
 
 ### Hand the hardware over
@@ -303,6 +308,9 @@ copied mid-write.
 
 - [ ] The log says `transmitter=esphome at 192.168.1.178, power=shelly at 192.168.1.194`
 - [ ] The next line says `Local time is ... (BST, UTC+01:00)`, not UTC
+- [ ] `systemctl cat hydrosnooze | grep '^After='` shows **two** lines, `network-online.target` and
+      `time-sync.target`. The service waits for the clock to be set before scheduling anything, and
+      this is the systemd half of that. One line means the unit file did not get written
 - [ ] `http://hydrosnooze.local:8000` on the phone, added to the Home Screen
 - [ ] The device bar shows **four green chips**: Service, Blaster, Plug and Alerts. Alerts is the
       new one and it is amber until both the topic and the heartbeat are set, which is the next
@@ -350,6 +358,11 @@ Watch the unit each time, and watch `journalctl -u hydrosnooze -f` in a Terminal
 
 If the presses land, the codes are good and the hard part is behind me.
 
+A restart mid-night is free now. Systemd brings the service back after a crash and the watchdog
+brings it back after a stall, and it reads back which jobs already ran rather than reporting a night
+that went fine as a night full of missed stages. Worth knowing while watching the log: a restart in
+there is not a problem to chase.
+
 ### Then watch a stage change
 
 - [ ] Watch one stage boundary land, and check the unit takes the new temperature
@@ -371,6 +384,19 @@ walked through the unit's setup wizard and nothing is unverifiable.
 
 - [ ] Turn off the phone alarm safety net, if I want to
 - [ ] Confirm the Shelly auto-off timer is still set
+
+---
+
+## Changing anything after this
+
+Detail in [SETUP.md](SETUP.md#updating-the-pi-later). Two copies live on the Pi and only one of them
+runs, so it is worth reading once before the first upgrade rather than during it.
+
+- Most changes: **`./scripts/deploy.sh liam@hydrosnooze.local`** from the Mac. Builds, copies,
+  restarts. Never touches `.env` or the database
+- Changes to the **systemd unit**, the **scripts**, or **dependencies**: on the Pi, `git pull` then
+  `./scripts/install.sh`. `deploy.sh` does not rewrite the unit file, so a change there looks
+  deployed and is not, which is the trap worth knowing about
 
 ---
 
