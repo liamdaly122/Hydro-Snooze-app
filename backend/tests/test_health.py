@@ -95,4 +95,65 @@ def test_real_hardware_starts_unknown_rather_than_assuming(monkeypatch):
         ),
         echo=False,
     )
-    assert all(d.health is Health.UNKNOWN for d in service.health())
+    devices = [d for d in service.health() if d.name in ("plug", "blaster")]
+    assert all(d.health is Health.UNKNOWN for d in devices)
+
+
+# --- Whether anything is watching ---------------------------------------------
+
+
+def alerts(*, topic="", heartbeat_url=""):
+    """The alerts row from a service with the given notification setup."""
+    from hydrosnooze.config import Settings
+    from hydrosnooze.service import Service
+
+    service = Service(
+        Settings(db_path=":memory:", ntfy_topic=topic, heartbeat_url=heartbeat_url),
+        echo=False,
+    )
+    return next(d for d in service.health() if d.name == "alerts")
+
+
+def test_nothing_watching_is_reported_as_down_not_as_fine():
+    """The failure this row exists for. A working bed with nothing watching
+    looks identical to a working bed that is watching, right up until the night
+    it breaks and nobody is told."""
+    verdict = alerts()
+    assert verdict.health is Health.DOWN
+    assert "notify.py" in verdict.detail
+
+
+def test_pushes_without_a_heartbeat_is_only_half_the_job():
+    """Pushes cover everything the service can see going wrong. They cannot
+    cover the service itself dying, because a dead process sends nothing."""
+    verdict = alerts(topic="secret-topic-name")
+    assert verdict.health is Health.DEGRADED
+    assert "Missing a heartbeat" in verdict.detail
+
+
+def test_a_heartbeat_without_pushes_is_the_other_half():
+    verdict = alerts(heartbeat_url="https://hc-ping.example/uuid")
+    assert verdict.health is Health.DEGRADED
+    assert "Missing push notifications" in verdict.detail
+
+
+def test_both_set_up_is_the_only_green():
+    verdict = alerts(topic="secret-topic-name", heartbeat_url="https://hc-ping.example/uuid")
+    assert verdict.health is Health.OK
+
+
+def test_the_topic_is_never_put_on_screen():
+    """It is the entire secret. Anyone reading it over a shoulder can push to
+    the phone, and worse, can read every notification sent."""
+    verdict = alerts(topic="secret-topic-name", heartbeat_url="https://hc-ping.example/uuid")
+    assert "secret-topic-name" not in verdict.detail
+
+
+def test_the_watchdog_is_mentioned_only_where_there_is_one(monkeypatch):
+    """On a Mac there is no systemd, so there is nothing to restart the service
+    and nothing to claim. Saying so would be the confident lie again."""
+    monkeypatch.delenv("WATCHDOG_USEC", raising=False)
+    assert "watchdog" not in alerts(topic="t", heartbeat_url="u").detail
+
+    monkeypatch.setenv("WATCHDOG_USEC", "90000000")
+    assert "watchdog" in alerts(topic="t", heartbeat_url="u").detail

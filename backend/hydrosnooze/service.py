@@ -156,7 +156,50 @@ class Service:
             if real_blaster
             else DeviceHealth("blaster", Health.SIMULATED, "No blaster. Presses are printed")
         )
-        return [plug, blaster]
+        return [plug, blaster, self._alerts_health()]
+
+    def _alerts_health(self) -> DeviceHealth:
+        """Whether anything would actually tell you if this stopped working.
+
+        Not a device, but it belongs beside them: three green dots saying the
+        hardware is fine mean very little if nothing is watching at 3am. It is
+        also the one row that can be wrong in a way you would never notice,
+        because a notifier that is switched off looks exactly like a quiet night.
+        """
+        pushes = self.notifier.enabled
+        beats = self.heartbeat.enabled
+        watched = watchdog.interval_seconds() is not None
+
+        on = []
+        off = []
+        (on if pushes else off).append("push notifications")
+        (on if beats else off).append("a heartbeat")
+        # Only meaningful under systemd. On a Mac there is nothing to restart it,
+        # so its absence is a fact about the machine rather than a misconfiguration.
+        if watched:
+            on.append("a watchdog")
+
+        if pushes and beats:
+            extra = " and a watchdog" if watched else ""
+            return DeviceHealth(
+                "alerts",
+                Health.OK,
+                f"Problems reach your phone, and so does this machine going quiet{extra}.",
+                self.heartbeat.last_ok_at,
+            )
+        if pushes or beats:
+            return DeviceHealth(
+                "alerts",
+                Health.DEGRADED,
+                f"Only {' and '.join(on)}. Missing {' and '.join(off)}.",
+                self.heartbeat.last_ok_at,
+            )
+        return DeviceHealth(
+            "alerts",
+            Health.DOWN,
+            "Nothing would tell you if this stopped working. "
+            "Set both up with ./scripts/notify.py",
+        )
 
     async def _check_blaster(self) -> None:
         ok = await self.transmitter.reachable()

@@ -1064,6 +1064,7 @@ button:disabled {
 
 .devices__row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
