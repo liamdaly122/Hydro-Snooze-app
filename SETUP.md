@@ -962,6 +962,88 @@ systemctl show hydrosnooze -p WatchdogTimestamp -p NRestarts
 `NRestarts` climbing is the number worth knowing. Zero means it has never needed
 saving.
 
+The unit file also sets `StartLimitIntervalSec=0`. Without it, systemd stops
+trying after five starts in a short window, and `Restart=always` quietly stops
+meaning always. With `RestartSec=5` it almost certainly never gets there, and
+almost certainly is the wrong standard for the one line whose whole job is to
+bring this back.
+
+### The card, which is the likeliest single thing to end this project
+
+Not a guess. It is the one component running every minute of every night, and a
+cheap one quietly failing is the most plausible way the whole setup stops.
+
+The power samples were far and away its heaviest writer: a row every thirty
+seconds, each its own committed transaction, each one an fsync that flash turns
+into an erase of a block thousands of times larger than the row. Two changes,
+both invisible from outside:
+
+- the database uses **WAL with `synchronous=NORMAL`**, which appends and syncs at
+  a checkpoint rather than fsyncing on every commit
+- samples are **written twenty at a time**, which is ten minutes of them
+
+Measured over a simulated day of sampling, before and after:
+
+```
+before   11,544 fdatasync calls
+after         8
+```
+
+The cost is stated rather than glossed over. An unclean stop loses whatever is in
+hand, up to ten minutes of chart, and nothing else. Not the schedule, not events
+already written, and not the file: I checked with a `kill -9` mid-run, and the
+integrity check came back clean with the schedule and events intact. Nothing can
+read a wrong answer either, because every read flushes first, so a held sample is
+unwritten but never invisible.
+
+`install.sh` also caps the journal at 200M. The default is a tenth of the card,
+which on a 32GB one is three gigabytes of logs nobody will read.
+
+**One thing this changes for you.** WAL puts two companion files next to the
+database, `hydrosnooze.db-wal` and `hydrosnooze.db-shm`. A clean shutdown folds
+them back in and removes them, which is another reason the swap above stops the
+service before copying the database rather than after.
+
+### The Pi's own power supply, which it can now report on
+
+Under-voltage is the commonest reason a Pi behaves as though the software is
+broken, and it leaves no other trace: the machine stays up, the network stutters,
+reads fail, and every symptom points at the code. These notes have warned about it
+from the start, and warning about it is not the same as noticing it.
+
+The Pi does know. It keeps a bitmask of what its power and thermal management has
+had to do, and the service now reads it once an hour and says so in plain words:
+
+> The Pi is not getting enough power and being throttled right now. That is almost
+> always the power supply or the cable rather than anything running on it. Use the
+> official Pi supply, and not a phone charger. Left alone it corrupts the SD card
+> eventually.
+
+It reaches the phone, because hardware going wrong underneath everything else is
+worth knowing about. It is said **once per boot rather than once an hour**: those
+bits stay set until the next restart, so repeating it would be one problem and a
+hundred pushes, and by the third night I would have muted the app that was telling
+me the truth.
+
+`./scripts/diagnose.py` collects the raw figure too. `throttled=0x0` is the good
+answer.
+
+### Wi-Fi power saving, which Raspberry Pi OS leaves on
+
+`wlan0` ships with power saving enabled. It produces intermittent latency and
+connections that drop without saying so, which is exactly the failure that cost a
+night on 9 September, and both the plug and the blaster are reached over Wi-Fi.
+The Pi is mains powered and doing nothing else, so there is nothing to save it
+for.
+
+`install.sh` turns it off and makes it stick across reboots. It applies it with
+`iw` rather than by reactivating the connection, because that would drop the SSH
+session it is usually being run over. Check it took:
+
+```sh
+iw dev wlan0 get power_save
+```
+
 ### Three things to do the same evening
 
 The Pi is load-bearing from tonight, so:

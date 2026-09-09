@@ -33,7 +33,19 @@ REPEAT_AFTER = timedelta(minutes=30)
 
 #: Warnings worth waking someone for. Everything at error level goes anyway;
 #: these are the warnings that mean the night is not doing what it should.
-LOUD_WARNINGS = ("did not land", "not answering", "Unit was off", "cancelled out")
+#:
+#: "The Pi is" catches the machine reporting on itself: under-voltage, throttling,
+#: heat. Those are hardware going wrong underneath everything else, and they are
+#: reported once per boot rather than hourly, so there is no risk of the phone
+#: being buried by one bad power supply.
+LOUD_WARNINGS = (
+    "did not land",
+    "not answering",
+    "Unit was off",
+    "cancelled out",
+    "The Pi is",
+    "The Pi has",
+)
 
 TITLES = {
     "error": "HydroSnooze problem",

@@ -6,6 +6,12 @@
 
 [Unit]
 Description=HydroSnooze
+
+# Without this, systemd stops trying after five starts in a short window and
+# Restart=always quietly stops meaning always. With RestartSec=5 it almost
+# certainly never gets there, and almost certainly is the wrong standard for the
+# one line whose whole job is to bring this back.
+StartLimitIntervalSec=0
 Documentation=https://github.com/liamdaly122/Hydro-Snooze-app
 After=network-online.target
 Wants=network-online.target

@@ -156,6 +156,41 @@ if [ "$SKIP_SYSTEMD" = "1" ]; then
   UNIT="$PREFIX/${SERVICE_NAME}.service"
 fi
 
+# --- The machine underneath -----------------------------------------------------
+
+if [ "$SKIP_SYSTEMD" != "1" ]; then
+  # Wi-Fi power saving is on by default on Raspberry Pi OS, and it is a poor fit
+  # for this. Both the plug and the blaster are reached over Wi-Fi, and the
+  # symptom of power saving is exactly the one that cost a night on 9 September:
+  # intermittent latency and a connection that drops without saying so. The Pi is
+  # mains powered and doing nothing else, so there is nothing to save it for.
+  #
+  # iw applies it now without bouncing the link, which matters because this is
+  # usually being run over SSH on that same link. nmcli makes it survive a reboot.
+  WLAN=$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2; exit }')
+  if [ -n "$WLAN" ]; then
+    say "Turning off Wi-Fi power saving on $WLAN"
+    as_root iw dev "$WLAN" set power_save off 2>/dev/null || true
+    WIFI_CONN=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null \
+      | awk -F: '$2 == "802-11-wireless" { print $1; exit }')
+    if [ -n "$WIFI_CONN" ]; then
+      as_root nmcli connection modify "$WIFI_CONN" wifi.powersave 2 >/dev/null 2>&1 \
+        || echo "   Could not make it permanent. After a reboot, run: sudo iw dev $WLAN set power_save off"
+    fi
+  fi
+
+  # The journal is this machine's only record of what happened, so it is worth
+  # keeping. It is not worth letting it take a tenth of the card, which is the
+  # default. Two hundred megabytes is months of this service.
+  if [ -d /etc/systemd ]; then
+    say "Capping the journal at 200M"
+    as_root mkdir -p /etc/systemd/journald.conf.d
+    printf '[Journal]\nSystemMaxUse=200M\n' \
+      | as_root tee /etc/systemd/journald.conf.d/hydrosnooze.conf >/dev/null
+    as_root systemctl restart systemd-journald 2>/dev/null || true
+  fi
+fi
+
 # A Pi has no battery-backed clock, so at boot it believes it is roughly whenever
 # it last shut down. systemd-time-wait-sync is what makes time-sync.target mean
 # "the clock has actually been set" rather than "we got as far as trying", and it

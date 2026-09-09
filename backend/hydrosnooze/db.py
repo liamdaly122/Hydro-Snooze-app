@@ -112,15 +112,51 @@ SCHEDULE_COLUMNS = (
 LEGACY_PHASE_MINUTES = (240, 240, 30)
 
 
+#: How many power samples to hold before writing them as one transaction.
+#:
+#: This database lives on an SD card and the samples are far and away its
+#: heaviest writer: one row every thirty seconds is 2,880 committed transactions
+#: a day, each a handful of bytes that the card turns into an erase of a block
+#: thousands of times larger. Twenty at a time is ten minutes of them.
+#:
+#: The card is already the component most likely to end this project, so it is
+#: worth the one cost: an unclean shutdown loses whatever is still in hand. That
+#: is up to ten minutes of chart and nothing else. Nothing can read a wrong
+#: answer, because every read flushes first, so a held sample is unwritten but
+#: never invisible.
+POWER_BATCH = 20
+
+
 class Database:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._pending_power: list[tuple[str, float]] = []
+        self._tune_for_an_sd_card()
         self._db.executescript(SCHEMA)
         self._migrate()
         self._db.commit()
+
+    def _tune_for_an_sd_card(self) -> None:
+        """Two pragmas, and the reason for both is the same component.
+
+        The default rollback journal fsyncs on every commit, and flash turns each
+        of those into an erase far larger than the row being written. WAL appends
+        instead and syncs at a checkpoint, which is the difference between
+        thousands of fsyncs a day and a handful.
+
+        synchronous=NORMAL is the honest half of the trade. A power cut can lose
+        the last few committed transactions. It cannot corrupt the file, which is
+        the failure that would actually matter, and everything at risk is a power
+        sample or an event rather than the schedule.
+
+        An in-memory database has no journal to set and reports the mode it kept
+        rather than failing, so the tests need no special case.
+        """
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
 
     def _migrate(self) -> None:
         """Bring an older database up to the current schema.
@@ -177,6 +213,13 @@ class Database:
         self._db.commit()
 
     def close(self) -> None:
+        """Write what is in hand, then let SQLite fold the WAL back in.
+
+        A clean close checkpoints and removes the -wal file, which is what makes
+        copying the database somewhere else safe. That is exactly why the setup
+        stops the service before doing it.
+        """
+        self.flush_power()
         self._db.close()
 
     # --- Schedule -------------------------------------------------------------
@@ -274,13 +317,24 @@ class Database:
     # --- Power ----------------------------------------------------------------
 
     def add_power_sample(self, at: datetime, watts: float) -> None:
-        self._db.execute(
-            "INSERT OR REPLACE INTO power_samples (at, watts) VALUES (?, ?)",
-            (at.isoformat(), watts),
-        )
-        self._db.commit()
+        self._pending_power.append((at.isoformat(), watts))
+        if len(self._pending_power) >= POWER_BATCH:
+            self.flush_power()
+
+    def flush_power(self) -> None:
+        """Write whatever is in hand. Called before every read of it, so the
+        batching is invisible to anything asking a question."""
+        if not self._pending_power:
+            return
+        with self._db:
+            self._db.executemany(
+                "INSERT OR REPLACE INTO power_samples (at, watts) VALUES (?, ?)",
+                self._pending_power,
+            )
+        self._pending_power.clear()
 
     def power_history(self, since: datetime) -> list[tuple[datetime, float]]:
+        self.flush_power()
         rows = self._db.execute(
             "SELECT at, watts FROM power_samples WHERE at >= ? ORDER BY at",
             (since.isoformat(),),
@@ -327,6 +381,7 @@ class Database:
         ]
 
     def prune_power(self, before: datetime) -> None:
+        self.flush_power()
         self._db.execute("DELETE FROM power_samples WHERE at < ?", (before.isoformat(),))
         self._db.commit()
 

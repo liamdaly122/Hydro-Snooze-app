@@ -133,6 +133,11 @@ def main() -> int:
         section("DISK", run("df", "-h")),
         section("MEMORY", run("free", "-h")),
         section("WI-FI", run("iwconfig")),
+        # The commonest reason a Pi behaves as though the software is broken, and
+        # the one that leaves no other trace. "throttled=0x0" is the good answer;
+        # anything else and the power supply is the first thing to change.
+        section("POWER AND HEAT", run("vcgencmd", "get_throttled")),
+        section("TEMPERATURE", run("vcgencmd", "measure_temp")),
     ]
 
     text = "\n".join(str(p) for p in parts)

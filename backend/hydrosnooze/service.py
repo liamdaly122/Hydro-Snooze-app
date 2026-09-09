@@ -38,7 +38,7 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import clocksync, watchdog
+from . import clocksync, pi, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands
@@ -117,6 +117,11 @@ class Service:
         # cannot be trusted.
         self._clock_ok: bool = False
         self._clock_waiting_since: float | None = None
+
+        # Which of the Pi's throttling bits have already been reported. They are
+        # sticky until the next boot, so without this one bad power supply would
+        # be an hourly push forever.
+        self._pi_reported: int = 0
 
         self._plug_ok: bool | None = None
         self._plug_ok_at: datetime | None = None
@@ -574,6 +579,29 @@ class Service:
             if now.minute == 0 and now.second < self.settings.power_sample_seconds:
                 self.db.prune_power(now - timedelta(days=7))
                 self.db.prune_events(keep=EVENTS_KEPT)
+                self._check_the_pi()
+
+    def _check_the_pi(self) -> None:
+        """Ask the machine underneath whether it is coping.
+
+        Under-voltage is the commonest reason a Pi behaves as though the software
+        is broken, and it never says so out loud: the machine stays up, the
+        network stutters, and every symptom points somewhere else. The notes have
+        warned about it from the start. Warning is not noticing.
+
+        Only new bits are reported. The sticky ones stay set until the next boot,
+        so saying it again every hour would be one problem and a hundred pushes,
+        and the notifier would be right to have taught me to ignore it by the
+        third night.
+        """
+        mask = pi.throttled()
+        if mask is None:
+            return  # Not a Pi. Nothing to ask.
+        new = mask & ~self._pi_reported
+        if not new:
+            return
+        self._pi_reported |= mask
+        self.events.warning("service", pi.describe(mask))
 
     # --- Nightly jobs ---------------------------------------------------------
 

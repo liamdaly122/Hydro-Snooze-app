@@ -32,11 +32,15 @@ that is patience.
       too slow, and it is a comfortable machine to SSH into
 - [ ] A decent A2 microSD card, 32GB (£10 to £20)
 - [ ] The official Pi 4 power supply. Under-powering a Pi produces symptoms that look exactly like
-      software bugs
+      software bugs, which is why it is worth the money rather than a phone charger. The service
+      reads the Pi's own throttling flags once an hour now and pushes a plain-words warning naming
+      the supply, so this is at least a thing that gets found rather than guessed at
 - [ ] A passive case. No fan: it does not need one and it may end up in a bedroom
 
 Do not cheap out on the card. This runs day and night writing logs and power samples, and a cheap
-card quietly failing is the most likely way the whole thing stops working.
+card quietly failing is the most likely way the whole thing stops working. The app does its share:
+the database uses WAL and batches power samples twenty at a time, which took a day of sampling from
+11,544 fsyncs to 8, and `install.sh` caps the journal at 200M. A good card is the other half.
 
 ---
 
@@ -311,6 +315,11 @@ copied mid-write.
 - [ ] `systemctl cat hydrosnooze | grep '^After='` shows **two** lines, `network-online.target` and
       `time-sync.target`. The service waits for the clock to be set before scheduling anything, and
       this is the systemd half of that. One line means the unit file did not get written
+- [ ] `iw dev wlan0 get power_save` says `off`. Raspberry Pi OS leaves it on, and it causes exactly
+      the dropped connections that cost the night on 9 September. `install.sh` turns it off
+- [ ] `vcgencmd get_throttled` says `throttled=0x0`. Anything else and the power supply or the cable
+      is the first thing to change, before debugging any software. The service watches this hourly
+      and will say so on its own, but it is worth one look on the first evening
 - [ ] `http://hydrosnooze.local:8000` on the phone, added to the Home Screen
 - [ ] The device bar shows **four green chips**: Service, Blaster, Plug and Alerts. Alerts is the
       new one and it is amber until both the topic and the heartbeat are set, which is the next
