@@ -57,13 +57,49 @@ def write(env: Path, key: str, value: str | None) -> None:
     env.write_text("\n".join(lines) + "\n")
 
 
+def ask_the_service(port: int = 8000) -> bool:
+    """Have the running service send it, rather than sending it ourselves.
+
+    Better than a direct send for two reasons. It is plain HTTP to localhost, so
+    it sidesteps TLS entirely. And it proves the thing that actually matters:
+    that the service picked the topic up out of .env. Sending from here would
+    only ever prove that this terminal can reach ntfy.
+    """
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/notify/test", data=b"", method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def trusted_context():
+    """An SSL context that trusts the CA bundle pip installed, if there is one.
+
+    A Python from python.org does not use the macOS keychain: it ships its own
+    OpenSSL with an empty trust store until `Install Certificates.command` has
+    been run. That produces CERTIFICATE_VERIFY_FAILED for every HTTPS call from
+    a stock script, while the service is unaffected because httpx carries
+    certifi's bundle with it. Borrowing that same bundle costs nothing.
+    """
+    import ssl
+
+    for path in (ROOT / "backend" / ".venv" / "lib").glob(
+        "python*/site-packages/certifi/cacert.pem"
+    ):
+        return ssl.create_default_context(cafile=str(path))
+    return None
+
+
 def send(server: str, topic: str, title: str, message: str) -> None:
     request = urllib.request.Request(
         f"{server.rstrip('/')}/{topic}",
         data=message.encode(),
         headers={"Title": title, "Priority": "high", "Tags": "warning"},
     )
-    with urllib.request.urlopen(request, timeout=10):
+    with urllib.request.urlopen(request, timeout=10, context=trusted_context()):
         pass
 
 
@@ -110,13 +146,30 @@ def main() -> int:
 
     if args.test:
         print()
-        try:
-            send(server, topic, "HydroSnooze", "Test notification. Setup is working.")
-        except (urllib.error.URLError, OSError) as exc:
-            print(f"{RED}Could not send it:{RESET} {exc}")
-            print(f"{DIM}Check this machine is online. The service is unaffected either way.{RESET}")
-            return 1
-        print(f"{GREEN}Sent.{RESET} It should arrive on the phone within a second or two.")
+        # The running service first. It proves more and needs no TLS.
+        if ask_the_service():
+            print(f"{GREEN}Sent by the service.{RESET} It should arrive within a second or two.")
+            print(f"{DIM}That also confirms the service read the topic out of .env.{RESET}")
+        else:
+            print(f"{DIM}The service is not answering, sending directly instead.{RESET}")
+            try:
+                send(server, topic, "HydroSnooze", "Test notification. Setup is working.")
+            except Exception as exc:
+                print(f"{RED}Could not send it:{RESET} {exc}")
+                if "CERTIFICATE_VERIFY" in str(exc):
+                    print()
+                    print("That is this Mac's Python having no certificates rather than")
+                    print("anything being wrong with the setup. Fix it once, for every")
+                    print("script you ever run:")
+                    print()
+                    print(f'  {BOLD}open "/Applications/Python 3.13/Install Certificates.command"{RESET}')
+                    print()
+                    print(f"{DIM}Adjust the version to match. The service is unaffected either{RESET}")
+                    print(f"{DIM}way: it carries its own bundle, so it can already send.{RESET}")
+                else:
+                    print(f"{DIM}Check this machine is online. The service is unaffected.{RESET}")
+                return 1
+            print(f"{GREEN}Sent.{RESET} It should arrive on the phone within a second or two.")
         print(f"{DIM}Nothing arriving means the app is subscribed to a different string.{RESET}")
     else:
         print()
