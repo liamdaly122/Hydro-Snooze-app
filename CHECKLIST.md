@@ -310,6 +310,8 @@ copied mid-write.
 - [ ] Prove it: `./scripts/notify.py --test`. The first real notification should not be the one
       at 2am
 - [ ] `sudo apt install cockpit`, then `https://hydrosnooze.local:9090` for a dashboard
+- [ ] Try `./scripts/diagnose.py` once while everything is working, so the command is familiar
+      before the morning it is needed
 - [ ] Give the Pi a fixed address in the router
 - [ ] **Set the Shelly's 10 hour auto-off timer.** The last backstop no software of ours can fail to run
 

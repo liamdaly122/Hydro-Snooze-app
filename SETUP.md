@@ -839,6 +839,24 @@ muted, and then the one that mattered is muted too. The same problem is only sen
 once every thirty minutes, so a stage retrying for its whole window is one push
 rather than twenty.
 
+### When something has gone wrong, one command collects the evidence
+
+```sh
+./scripts/diagnose.py
+```
+
+Writes a single file to the home directory with everything needed to work out
+what happened: whether systemd has been restarting it and how often, the service
+log, its own events, what it believes, what the plug measured, the settings, the
+clock, and the state of the machine underneath.
+
+**Secrets are masked before anything is written**, by name rather than by value,
+so the infrared key and the notification topic never reach a file whose whole
+purpose is to be pasted to someone else.
+
+Worth running once while everything is fine, so the command is familiar before
+the morning it is actually needed.
+
 ### A watchdog, for the failure Restart=always cannot catch
 
 `Restart=always` catches a process that dies. It does not catch one that is
