@@ -801,6 +801,61 @@ Reading the log is not proof. **Run a test night from the Pi**, from the Test ru
 chevron on the Wake card. That is the acceptance test for the whole move: same five steps, same
 order, wattage following the modes. If it passes, the Pi is doing exactly what the Mac was.
 
+### Notifications, so a bad night does not wait until morning
+
+The event log is thorough and useless while you are asleep. On 9 September the
+system knew within seconds that the blaster had gone, and had no way to say so.
+
+**On the phone:** install **ntfy** from the App Store, tap +, and subscribe to a
+topic. The topic is just a string you invent, and it is the only secret involved,
+so make it long and unguessable rather than `hydrosnooze`:
+
+```
+hydrosnooze-liam-7f3a91c4
+```
+
+**On the Pi:** the same string in `/opt/hydrosnooze/.env`, then restart.
+
+```
+HS_NTFY_TOPIC=hydrosnooze-liam-7f3a91c4
+```
+
+No account, no key, nothing to run. Anyone who knows the topic can read the
+messages, which is why the random suffix matters.
+
+**Then prove it rather than hoping**, because the first real notification should
+not be the one at 2am:
+
+```sh
+curl -X POST http://hydrosnooze.local:8000/api/notify/test
+```
+
+Only problems are sent: anything at error level, plus the handful of warnings
+that mean the night is not doing what it should. The thirty ordinary events of a
+normal night are not, because a phone that buzzes at every stage boundary gets
+muted, and then the one that mattered is muted too. The same problem is only sent
+once every thirty minutes, so a stage retrying for its whole window is one push
+rather than twenty.
+
+### A watchdog, for the failure Restart=always cannot catch
+
+`Restart=always` catches a process that dies. It does not catch one that is
+running perfectly and doing nothing useful, which is exactly what happened: the
+scheduler spun for four hours getting nowhere and looked healthy throughout.
+
+The unit file now sets `WatchdogSec=90`, and the service pings systemd **only
+while the scheduler is completing ticks**. If ticks stop, the pings stop, and
+systemd restarts it. Nothing to configure, and off a Pi it is all a no-op.
+
+You can watch it working:
+
+```sh
+systemctl show hydrosnooze -p WatchdogTimestamp -p NRestarts
+```
+
+`NRestarts` climbing is the number worth knowing. Zero means it has never needed
+saving.
+
 ### Three things to do the same evening
 
 The Pi is load-bearing from tonight, so:

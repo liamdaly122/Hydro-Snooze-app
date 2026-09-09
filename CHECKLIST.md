@@ -305,6 +305,10 @@ copied mid-write.
 
 ### Same evening, because the Pi is load-bearing now
 
+- [ ] Install **ntfy** on the phone and subscribe to a long random topic, then put the same string
+      in `/opt/hydrosnooze/.env` as `HS_NTFY_TOPIC` and restart
+- [ ] Prove it: `curl -X POST http://hydrosnooze.local:8000/api/notify/test`. The first real
+      notification should not be the one at 2am
 - [ ] `sudo apt install cockpit`, then `https://hydrosnooze.local:9090` for a dashboard
 - [ ] Give the Pi a fixed address in the router
 - [ ] **Set the Shelly's 10 hour auto-off timer.** The last backstop no software of ours can fail to run

@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     esphome_button_service: str = "send_ir"
     shelly_host: str = "hydrosnooze-plug.local"
 
+    # --- Telling someone ------------------------------------------------------
+    #: An ntfy.sh topic. Empty means no notifications, which is the default.
+    #: The topic name is the only secret there is, so make it long and random:
+    #:   HS_NTFY_TOPIC=hydrosnooze-liam-7f3a91c4
+    ntfy_topic: str = ""
+    ntfy_server: str = "https://ntfy.sh"
+
     # --- Power thresholds, measured ------------------------------------------
     #
     # Taken off a King HS1001 through a Shelly Plug S Gen3, walking the unit

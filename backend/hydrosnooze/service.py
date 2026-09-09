@@ -37,6 +37,8 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
+from . import watchdog
+from .notify import Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands
 
@@ -52,6 +54,10 @@ RETRY_AFTER = timedelta(seconds=30)
 #: Events to keep. About thirty a night, so this is a couple of months of
 #: history, which is far more than anyone reads and still nothing on a card.
 EVENTS_KEPT = 2000
+
+#: How long without a completed tick before the scheduler counts as stuck.
+#: Generous against a one second loop, and far shorter than a stage boundary.
+STUCK_AFTER = timedelta(minutes=3)
 
 #: Below this, an idle reading is the unit not having started rather than having
 #: arrived. Power on, mode change and rail-and-count take about thirty seconds of
@@ -74,6 +80,7 @@ class Service:
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
         self.scheduler = Scheduler(learned_lead=self._learned_lead)
+        self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
 
         self.schedule: Schedule = self.db.load_schedule()
         self.state = DeviceState()
@@ -87,6 +94,11 @@ class Service:
         # A pre-conditioning run in flight: when it started, and what it was
         # aiming at. The plug says when it got there.
         self._precondition: tuple[datetime, Mode, int] | None = None
+
+        # When the scheduler last completed a tick. The watchdog pings systemd
+        # only while this keeps moving, so a loop that is running but stuck stops
+        # the pings and gets restarted, which Restart=always would never do.
+        self._last_tick_at: datetime | None = None
 
         self._retrying: str | None = None
         self._retry_after: datetime | None = None
@@ -163,6 +175,21 @@ class Service:
                 )
         self._push_state()
 
+    async def _watchdog_loop(self, every: float) -> None:
+        """Tell systemd we are alive, but only while the scheduler is ticking.
+
+        The distinction is the whole point. A process that exists is not the same
+        as one doing its job, and it was the second that failed.
+        """
+        while True:
+            await self.clock.sleep(every)
+            last = self._last_tick_at
+            stuck = last is not None and (self.clock.now() - last) > STUCK_AFTER
+            if stuck:
+                log.error("no scheduler tick since %s, letting the watchdog fire", last)
+                continue
+            watchdog.alive()
+
     async def _health_loop(self) -> None:
         while True:
             try:
@@ -191,11 +218,25 @@ class Service:
                 "night, or HS_TRANSMITTER=esphome once the blaster is captured.",
             )
         await self._sample_power()
+        self._last_tick_at = self.clock.now()
         self._tasks = [
             asyncio.create_task(self._tick_loop(), name="scheduler"),
             asyncio.create_task(self._power_loop(), name="power"),
             asyncio.create_task(self._health_loop(), name="health"),
         ]
+
+        every = watchdog.interval_seconds()
+        if every is not None:
+            self._tasks.append(
+                asyncio.create_task(self._watchdog_loop(every), name="watchdog")
+            )
+            log.info("systemd is watching, pinging every %.0fs", every)
+        # Says the unit is up. Type=notify waits for this before calling the
+        # service started, and before this everything above has already run.
+        watchdog.ready()
+
+        if self.notifier.enabled:
+            self.events.info("service", "Notifications on. Problems will reach the phone.")
 
     async def stop(self) -> None:
         for task in self._tasks:
@@ -206,6 +247,7 @@ class Service:
         self._tasks.clear()
         if self._unsubscribe_events:
             self._unsubscribe_events()
+        await self.notifier.close()
         await self.transmitter.close()
         await self.power.close()
         self.db.close()
@@ -232,6 +274,7 @@ class Service:
     def _on_event(self, event: Event) -> None:
         self.db.add_event(event)
         self._broadcast({"event": event.as_dict()})
+        self.notifier.on_event(event)
 
     def _push_state(self) -> None:
         from .api.schemas import health_json, state_json
@@ -254,6 +297,7 @@ class Service:
         while True:
             try:
                 await self._tick()
+                self._last_tick_at = self.clock.now()
             except asyncio.CancelledError:
                 raise
             except Exception:  # pragma: no cover

@@ -71,6 +71,7 @@ async def get_info(request: Request) -> dict[str, object]:
         "fake_transmitter": service.settings.transmitter == "fake",
         "fake_power_monitor": service.settings.power_monitor == "fake",
         "max_temperature_c": service.settings.max_temperature_c,
+        "notifications": service.notifier.enabled,
     }
 
 
@@ -225,6 +226,21 @@ async def delete_rehearsal(request: Request) -> dict[str, object]:
     service = _service(request)
     await service.stop_rehearsal()
     return state_json(service.state)
+
+
+@router.post("/notify/test")
+async def post_notify_test(request: Request) -> dict[str, object]:
+    """Send one notification on demand.
+
+    Setting a topic and hoping is not the same as knowing it arrives, and the
+    first real notification should not be the one at 2am.
+    """
+    service = _service(request)
+    if not await service.notifier.test():
+        raise HTTPException(
+            409, "No notification topic set. Add HS_NTFY_TOPIC to .env and restart."
+        )
+    return {"sent": True}
 
 
 @router.post("/mute")

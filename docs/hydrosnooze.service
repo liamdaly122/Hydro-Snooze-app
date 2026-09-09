@@ -11,7 +11,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=exec
+Type=notify
+NotifyAccess=main
 User=__USER__
 WorkingDirectory=__PREFIX__
 
@@ -27,6 +28,17 @@ ExecStart=__PREFIX__/venv/bin/python -m uvicorn hydrosnooze.main:app --host 0.0.
 # It runs unattended overnight and its whole job is to be there at 22:00.
 Restart=always
 RestartSec=5
+
+# Restart=always catches a process that dies. It does not catch one that is
+# running perfectly and doing nothing useful, which is the failure that actually
+# happened on 9 September: the scheduler spun getting nowhere for four hours and
+# from the outside looked healthy the whole time.
+#
+# The service pings this only while the scheduler is completing ticks, so a loop
+# that is alive but stuck stops pinging and gets restarted. Ninety seconds is
+# long enough that a slow stage boundary, which holds the lock for about ten
+# seconds of infrared, never trips it.
+WatchdogSec=90
 
 # It only needs its own directory and the local network.
 NoNewPrivileges=true
