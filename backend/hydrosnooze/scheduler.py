@@ -17,11 +17,14 @@ simulated one with no special casing.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Callable, Literal
 
 from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep
+
+log = logging.getLogger(__name__)
 
 JobKind = Literal["precool", "stage", "power_off"]
 
@@ -52,20 +55,52 @@ class Job:
 class FiredMarks:
     """Which jobs have already run, keyed by the night they belonged to.
 
-    Keyed by wake time rather than a flag, so a restart does not re-fire a job and
-    a second night is never confused with the first.
+    Keyed by wake time rather than a flag, so a second night is never confused
+    with the first: a mark left over from yesterday does not match tonight's plan
+    and is quietly ignored.
+
+    Written through to storage as well as held in memory, which it was not until
+    9 September. That was harmless while a restart was an unusual event. It
+    stopped being harmless the day Restart=always and the watchdog made restarts
+    routine and the notifier started pushing to a phone: the marks went with the
+    process, the next tick decided every stage that had already run had been
+    missed, and a night that went perfectly rang two alarms at 3am. A false alarm
+    at 3am is worse than no alarm, because it is how you learn to ignore the real
+    one.
+
+    The store is a plain callback rather than a database handle, so the scheduler
+    keeps knowing nothing about where any of this is kept. Left unset, as it is in
+    every test and in the simulator, this behaves exactly as it always did.
     """
 
     done: dict[str, datetime] = field(default_factory=dict)
+    #: Called with the whole set whenever it changes.
+    store: Callable[[dict[str, datetime]], None] | None = None
 
     def mark(self, job: Job) -> None:
         self.done[job.key] = job.plan.wake_at
+        self._save()
 
     def has_fired(self, job: Job) -> bool:
         return self.done.get(job.key) == job.plan.wake_at
 
     def clear(self) -> None:
         self.done.clear()
+        self._save()
+
+    def _save(self) -> None:
+        """Never allowed to take the night down with it.
+
+        A mark is written after its job has already run, so a failure here means
+        the next restart repeats an idempotent sequence. Raising instead would
+        abandon the tick that was reporting a success.
+        """
+        if self.store is None:
+            return
+        try:
+            self.store(dict(self.done))
+        except Exception:  # noqa: BLE001
+            log.exception("could not save the fired marks")
 
 
 @dataclass

@@ -156,6 +156,18 @@ if [ "$SKIP_SYSTEMD" = "1" ]; then
   UNIT="$PREFIX/${SERVICE_NAME}.service"
 fi
 
+# A Pi has no battery-backed clock, so at boot it believes it is roughly whenever
+# it last shut down. systemd-time-wait-sync is what makes time-sync.target mean
+# "the clock has actually been set" rather than "we got as far as trying", and it
+# ships disabled. The service holds off on its own account too; this is the
+# cheaper half of the same fix, and it costs a few seconds at boot.
+if [ "$SKIP_SYSTEMD" != "1" ] && systemctl list-unit-files systemd-time-wait-sync.service >/dev/null 2>&1; then
+  if ! systemctl is-enabled --quiet systemd-time-wait-sync.service 2>/dev/null; then
+    say "Enabling systemd-time-wait-sync, so the clock is set before the service starts"
+    as_root systemctl enable systemd-time-wait-sync.service >/dev/null 2>&1 || true
+  fi
+fi
+
 say "Writing $UNIT"
 UNIT_BODY=$(sed -e "s|__USER__|$RUN_USER|g" -e "s|__PREFIX__|$PREFIX|g" "$ROOT/docs/hydrosnooze.service")
 

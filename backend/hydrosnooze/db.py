@@ -64,6 +64,23 @@ CREATE TABLE IF NOT EXISTS power_samples (
 -- `reached` is false when it never got there, which is worth keeping rather than
 -- discarding: a run that never idled means the target was not achievable that
 -- night, and that is the more useful thing to know.
+-- Which jobs have already run tonight, so a restart does not forget.
+--
+-- This lived only in memory until 9 September, which was harmless while a
+-- restart was an unusual event. It stopped being harmless the day Restart=always
+-- and the watchdog made restarts routine and the notifier started pushing to a
+-- phone: the marks were lost, the next tick decided every stage that had already
+-- run had been missed, and a night that went perfectly sent two alarms at 3am.
+--
+-- Keyed by job rather than by night, so this table holds five rows and never
+-- grows. The wake time is the value, and `has_fired` compares it, so a mark left
+-- over from a previous night simply does not match and is ignored. Nothing to
+-- prune.
+CREATE TABLE IF NOT EXISTS fired_jobs (
+    key     TEXT PRIMARY KEY,
+    wake_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS precondition_runs (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     at       TEXT    NOT NULL,
@@ -234,6 +251,25 @@ class Database:
             (keep,),
         )
         self._db.commit()
+
+    # --- Which jobs have already run --------------------------------------------
+
+    def fired_marks(self) -> dict[str, datetime]:
+        rows = self._db.execute("SELECT key, wake_at FROM fired_jobs").fetchall()
+        return {r["key"]: datetime.fromisoformat(r["wake_at"]) for r in rows}
+
+    def set_fired_marks(self, marks: dict[str, datetime]) -> None:
+        """Replace the lot, in one transaction.
+
+        Whole-set rather than one row at a time because there are five of them and
+        a half-written set is a worse thing to come back to than a stale one.
+        """
+        with self._db:
+            self._db.execute("DELETE FROM fired_jobs")
+            self._db.executemany(
+                "INSERT INTO fired_jobs (key, wake_at) VALUES (?, ?)",
+                [(key, at.isoformat()) for key, at in marks.items()],
+            )
 
     # --- Power ----------------------------------------------------------------
 

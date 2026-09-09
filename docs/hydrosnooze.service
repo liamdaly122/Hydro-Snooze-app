@@ -10,6 +10,16 @@ Documentation=https://github.com/liamdaly122/Hydro-Snooze-app
 After=network-online.target
 Wants=network-online.target
 
+# A Pi has no battery-backed clock, and network-online says the network is up,
+# not that the time is right. The two are not the same thing, and the scheduler
+# works in plain local time so it cannot tell the difference.
+#
+# time-sync.target only means anything once systemd-time-wait-sync is enabled,
+# which install.sh does. The service checks for itself as well and holds off
+# scheduling until the clock is confirmed, because ordering is not a guarantee.
+After=time-sync.target
+Wants=time-sync.target
+
 [Service]
 Type=notify
 NotifyAccess=main

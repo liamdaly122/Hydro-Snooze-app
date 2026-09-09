@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -37,7 +38,7 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import watchdog
+from . import clocksync, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands
@@ -80,6 +81,12 @@ class Service:
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
         self.scheduler = Scheduler(learned_lead=self._learned_lead)
+        # Read back what already ran tonight before anything can ask. A restart is
+        # a routine event now: systemd brings the service back after a crash and
+        # the watchdog brings it back after a stall, so losing this in memory
+        # meant a good night reporting itself as a failed one afterwards.
+        self.scheduler.fired.done = self.db.fired_marks()
+        self.scheduler.fired.store = self.db.set_fired_marks
         self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
 
@@ -103,6 +110,13 @@ class Service:
 
         self._retrying: str | None = None
         self._retry_after: datetime | None = None
+
+        # Whether the clock has been confirmed against the network yet, and when
+        # this started waiting. A Pi has no clock of its own at boot; see
+        # clocksync.py. Monotonic, because the whole point is that the other one
+        # cannot be trusted.
+        self._clock_ok: bool = False
+        self._clock_waiting_since: float | None = None
 
         self._plug_ok: bool | None = None
         self._plug_ok_at: datetime | None = None
@@ -374,7 +388,62 @@ class Service:
                 log.exception("scheduler tick failed")
             await self.clock.sleep(1)
 
+    def _clock_trusted(self) -> bool:
+        """Whether it is safe to act on what the clock says.
+
+        A Pi does not know the time until the network tells it, and until then it
+        believes it is roughly whenever it last shut down. Scheduling on that
+        would run the wrong night, or report a night that has not happened yet as
+        missed, and nothing downstream could tell.
+
+        Not a permanent gate. It waits, and if the answer never comes it runs
+        anyway and says so, because a bed that never runs is worse than a bed
+        that ran on an unconfirmed clock. See clocksync.GIVE_UP_AFTER_S.
+        """
+        if self._clock_ok:
+            return True
+
+        if clocksync.synchronised() is not False:
+            # Confirmed, or a machine with a clock of its own, which cannot be
+            # asked and does not need to be.
+            if self._clock_waiting_since is not None:
+                self.events.info(
+                    "service", "The clock is set. Scheduling from here."
+                )
+            self._clock_ok = True
+            self._clock_waiting_since = None
+            return True
+
+        waited = time.monotonic()
+        if self._clock_waiting_since is None:
+            self._clock_waiting_since = waited
+            self.events.warning(
+                "service",
+                "This machine does not know the time yet, so nothing is being "
+                "scheduled. It has no clock of its own and is waiting for the "
+                "network to tell it.",
+            )
+            return False
+
+        if waited - self._clock_waiting_since < clocksync.GIVE_UP_AFTER_S:
+            return False
+
+        self._clock_ok = True
+        self.events.error(
+            "service",
+            "The clock was never confirmed against the network, and waiting "
+            f"{clocksync.GIVE_UP_AFTER_S // 60} minutes has not fixed it. "
+            "Scheduling anyway, because no night at all is worse, but tonight's "
+            "times may be wrong. Check this machine can reach the internet.",
+        )
+        return True
+
     async def _tick(self) -> None:
+        # Before anything reads the clock. Everything below this line is a
+        # decision about what time it is.
+        if not self._clock_trusted():
+            return
+
         now = self.clock.now()
 
         # A missed stage means the bed spent that stretch of the night at the
@@ -535,8 +604,9 @@ class Service:
             total_seconds=seconds,
         )
         # A fresh set of marks, so a second rehearsal is not skipped as one that
-        # has already fired. The real night's marks are keyed by its own wake
-        # time, so they survive this untouched.
+        # has already fired. This drops the real night's marks too, which is
+        # harmless: every job is idempotent, so the worst case is a stage being
+        # set to a temperature it is already holding.
         self.scheduler.fired.clear()
         self.scheduler.rehearsal = plan
         self._set_state(rehearsal_ends_at=plan.wake_at)
