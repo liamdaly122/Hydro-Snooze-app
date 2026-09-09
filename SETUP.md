@@ -713,10 +713,16 @@ unit.
 ### Then, on the Pi:
 
 ```sh
+sudo apt update && sudo apt install -y git
 git clone https://github.com/liamdaly122/Hydro-Snooze-app.git
 cd Hydro-Snooze-app
 ./scripts/install.sh
 ```
+
+**Lite means genuinely minimal, and git is one of the things it leaves out.** Without that first line
+the clone fails with `git: command not found`, which is a confusing place to land two minutes into a
+new machine. `install.sh` handles the other two Lite is missing, `python3-venv` and `rsync`, so this
+is the only one to do by hand.
 
 That sets up Python, installs the service, and registers it to start on boot.
 

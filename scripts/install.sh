@@ -177,6 +177,13 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
       as_root nmcli connection modify "$WIFI_CONN" wifi.powersave 2 >/dev/null 2>&1 \
         || echo "   Could not make it permanent. After a reboot, run: sudo iw dev $WLAN set power_save off"
     fi
+  else
+    # Silence here would be the worst of both: the setting left on, and no way to
+    # know it had been. A wired machine is a fine reason to skip; a missing iw is
+    # not, and from the outside the two look identical.
+    say "No wireless interface found, so Wi-Fi power saving was left alone"
+    echo "   Fine if this Pi is on ethernet. If it is on Wi-Fi, iw is probably not"
+    echo "   installed: sudo apt install -y iw, then run this again."
   fi
 
   # The journal is this machine's only record of what happened, so it is worth

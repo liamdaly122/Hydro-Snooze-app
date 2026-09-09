@@ -287,6 +287,8 @@ copied mid-write.
       they are different problems: the first is which timezone stage times are read in, the second is
       whether the Pi knows the time at all. It has no battery-backed clock, so at boot it believes it
       is whenever it last shut down until the network corrects it
+- [ ] On the Pi: `sudo apt update && sudo apt install -y git` **first**. Pi OS Lite does not ship
+      git, so the clone below fails with `git: command not found` without it
 - [ ] On the Pi: `git clone`, then `./scripts/install.sh`. **The clone is not what runs.** It is
       where the unit file and the scripts are read from; `install.sh` copies the backend to
       `/opt/hydrosnooze` and that is what systemd starts
