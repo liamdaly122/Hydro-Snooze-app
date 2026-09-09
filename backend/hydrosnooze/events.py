@@ -6,6 +6,7 @@ away and nothing is dropped quietly.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -13,7 +14,16 @@ from typing import Callable, Literal
 
 from .clock import Clock
 
+log = logging.getLogger(__name__)
+
 Level = Literal["info", "warning", "error"]
+
+#: How each level lands in the journal.
+TO_LOG: dict[Level, int] = {
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
 
 
 @dataclass
@@ -47,6 +57,12 @@ class EventLog:
         )
         self._next_id += 1
         self._events.append(event)
+        # Also to the journal, which until now recorded devices breaking and not
+        # devices mending: "the blaster is not answering" was there and "the
+        # blaster is answering again" was not, because one came from a logger and
+        # the other only from here. Half a story is worse than none at 7am, when
+        # the journal is what you have over SSH and the app is not.
+        log.log(TO_LOG[level], "%s: %s", kind, message)
         for listener in list(self._listeners):
             listener(event)
         return event

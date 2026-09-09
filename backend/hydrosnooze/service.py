@@ -554,6 +554,20 @@ class Service:
         # this the bar would keep showing green on a dead plug.
         plug_changed = was is not None and was != self._plug_ok
         if plug_changed:
+            # Said out loud, not just coloured in. The blaster has always done
+            # this and the plug never did, which was the wrong way round: the
+            # plug is the only thing here that measures anything, so losing it
+            # means nothing can be verified for the rest of the night. A red dot
+            # at 2am is a red dot nobody is looking at.
+            if self._plug_ok:
+                self.events.info("plug", "The plug is answering again")
+            else:
+                self.events.warning(
+                    "plug",
+                    f"The plug at {self.settings.shelly_host} is not answering. "
+                    "Nothing can be checked against a measurement until it does: "
+                    "watts is the only real reading here and the rest is belief.",
+                )
             self._push_state()
         activity = self.settings.thresholds.classify(watts)
 

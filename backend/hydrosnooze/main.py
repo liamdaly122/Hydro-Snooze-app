@@ -33,6 +33,26 @@ logging.basicConfig(
 # is noise, and on the Pi it would bury `journalctl -u hydrosnooze -f` at 3am.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+
+class QuietExpectedDisconnects(logging.Filter):
+    """Drop one specific stack trace for a condition that is handled.
+
+    When the blaster goes away mid-connection, aioesphomeapi tries to hang up
+    politely, gets no answer, and logs a full traceback at ERROR. That is not an
+    error here. It is what unplugging the blaster looks like from the inside, the
+    reconnect deals with it, and the health check reports it in words.
+
+    A journal already full of tracebacks for expected things is a journal in
+    which a real one is harder to see, and this one is read at 7am after a bad
+    night. Everything else aioesphomeapi has to say still comes through.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "disconnect request failed" not in record.getMessage()
+
+
+logging.getLogger("aioesphomeapi.connection").addFilter(QuietExpectedDisconnects())
+
 log = logging.getLogger("hydrosnooze")
 
 
