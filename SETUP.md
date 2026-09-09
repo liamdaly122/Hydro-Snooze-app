@@ -806,29 +806,31 @@ order, wattage following the modes. If it passes, the Pi is doing exactly what t
 The event log is thorough and useless while you are asleep. On 9 September the
 system knew within seconds that the blaster had gone, and had no way to say so.
 
-**On the phone:** install **ntfy** from the App Store, tap +, and subscribe to a
-topic. The topic is just a string you invent, and it is the only secret involved,
-so make it long and unguessable rather than `hydrosnooze`:
-
-```
-hydrosnooze-liam-7f3a91c4
-```
-
-**On the Pi:** the same string in `/opt/hydrosnooze/.env`, then restart.
-
-```
-HS_NTFY_TOPIC=hydrosnooze-liam-7f3a91c4
-```
-
-No account, no key, nothing to run. Anyone who knows the topic can read the
-messages, which is why the random suffix matters.
-
-**Then prove it rather than hoping**, because the first real notification should
-not be the one at 2am:
+One command generates a topic and writes it into `.env`:
 
 ```sh
-curl -X POST http://hydrosnooze.local:8000/api/notify/test
+./scripts/notify.py
 ```
+
+On the Pi, point it at the installed settings instead:
+
+```sh
+./scripts/notify.py --env /opt/hydrosnooze/.env
+```
+
+It prints a long random string. Install **ntfy** on the phone, tap +, and
+subscribe to exactly that. There is no account and no key: the topic name is the
+only secret there is, which is why it is generated rather than typed.
+
+Restart the service, then **prove it rather than hoping**, because the first real
+notification should not be the one at 2am:
+
+```sh
+./scripts/notify.py --test
+```
+
+`./scripts/notify.py --off` stops it. Running it again never invents a second
+topic, and the hardware swap script leaves it alone.
 
 Only problems are sent: anything at error level, plus the handful of warnings
 that mean the night is not doing what it should. The thirty ordinary events of a
