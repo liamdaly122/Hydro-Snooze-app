@@ -122,8 +122,8 @@ def is_valid_for_mode(target_c: int, mode: Mode) -> bool:
 # any durations, and any mix of heating and cooling in one night.
 #
 # What that costs is spelled out where it matters: the unit will no longer switch
-# itself off, so the app must, and the Shelly's own auto-off timer stops being a
-# nicety and becomes the last line of defence.
+# itself off, so the app must, and the Shelly's daily off/on schedule stops being
+# a nicety and becomes the last line of defence.
 
 #: The unit's own Smart Sleep Schedule still exists in the hardware, and the
 #: physical remote can still arm it. The app never does, but the simulated unit
@@ -841,7 +841,7 @@ class PowerThresholds:
 #: Liam's decision, so in practice the only ceiling is the hardware's: a warming
 #: stage can be set anywhere in 25 to 55.
 #:
-#: Lower it in .env to put a software ceiling back. With it here, the Shelly's own
-#: auto-off timer is the only thing that limits how long a hot bed stays hot, which
-#: is why SETUP.md treats setting that timer as required rather than optional.
+#: Lower it in .env to put a software ceiling back. With it here, the Shelly's
+#: daily off/on schedule is the only thing limiting how long a hot bed stays hot,
+#: which is why SETUP.md treats setting it as required rather than optional.
 DEFAULT_MAX_TEMPERATURE_C = WARMING_RANGE[1]

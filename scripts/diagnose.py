@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import re
 import shutil
 import socket
 import subprocess
@@ -34,13 +33,67 @@ ROOT = Path(__file__).resolve().parent.parent
 #: Anything whose name matches this has its value replaced. Matching on the name
 #: rather than the value, because a secret that has not been guessed yet still
 #: needs hiding, and a value-based filter can only redact what it already knows.
-SECRET = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|TOPIC|PSK", re.I)
+#: Settings safe to print in full. Everything not on this list is masked.
+#:
+#: The rule used to be the other way round: mask anything whose name looked
+#: secret, print the rest. That failed the first time it was tried on a real
+#: file. HS_HEARTBEAT_URL does not contain KEY or TOKEN or SECRET, so a file
+#: whose entire purpose is to be pasted to a stranger printed, in full, the URL
+#: that silences the alarm. Anyone holding it can ping healthchecks.io and keep
+#: the check green through a night the Pi spent dead.
+#:
+#: Masking by default is the only version that stays correct. A setting added
+#: next year is secret until someone decides otherwise, rather than public until
+#: someone remembers.
+SAFE = frozenset(
+    {
+        "HS_TRANSMITTER",
+        "HS_POWER_MONITOR",
+        "HS_ESPHOME_HOST",
+        "HS_ESPHOME_PORT",
+        "HS_ESPHOME_BUTTON_SERVICE",
+        "HS_SHELLY_HOST",
+        "HS_NTFY_SERVER",
+        "HS_DB_PATH",
+        "HS_STATIC_DIR",
+        "HS_LOG_LEVEL",
+        "HS_OFF_THRESHOLD_W",
+        "HS_IDLE_MAX_W",
+        "HS_COOLING_MAX_W",
+        "HS_POWER_SAMPLE_SECONDS",
+        "HS_COMMAND_GAP_MS",
+        "HS_SAVE_WAIT_MS",
+        "HS_ARM_WAIT_S",
+        "HS_POWER_SETTLE_S",
+        "HS_MAX_TEMPERATURE_C",
+        "HS_SIM_SPEED",
+        "HS_SIM_AUTO_APPLY_FROM_ANY_PHASE",
+    }
+)
 
 
 def mask(value: str) -> str:
     if not value:
         return ""
     return f"{value[:3]}...{value[-2:]} ({len(value)} chars)" if len(value) > 8 else "set"
+
+
+def deployed_at(prefix: Path = Path("/opt/hydrosnooze/backend")) -> str:
+    """When the code that is actually running was last copied across.
+
+    There is no git history in /opt/hydrosnooze, because deploy.sh rsyncs rather
+    than pulls. The newest file in it is the next best answer, and it is enough
+    to tell whether a deploy landed.
+    """
+    if not prefix.exists():
+        return f"({prefix} does not exist, so nothing is deployed there)"
+    newest = max(
+        (f.stat().st_mtime for f in prefix.rglob("*.py")),
+        default=None,
+    )
+    if newest is None:
+        return f"(no Python found in {prefix})"
+    return f"{prefix}, last deployed {datetime.fromtimestamp(newest):%a %d %b %H:%M}"
 
 
 def run(*command: str, timeout: int = 20) -> str:
@@ -75,7 +128,7 @@ def env_file(path: Path) -> list[str]:
             continue
         key, _, value = stripped.partition("=")
         key, value = key.strip(), value.split("#")[0].strip().strip("\"'")
-        out.append(f"{key}={mask(value) if SECRET.search(key) else value}")
+        out.append(f"{key}={value if key.upper() in SAFE else mask(value)}")
     return out or ["(no settings set)"]
 
 
@@ -105,7 +158,19 @@ def main() -> int:
             f"Local time  {datetime.now().astimezone():%a %d %b %H:%M %Z %z}\n\n"
             f"{run('timedatectl')}",
         ),
-        section("VERSION", run("git", "-C", str(ROOT), "log", "-1", "--format=%h %ad %s")),
+        section(
+            "VERSION",
+            "This clone:  "
+            + run("git", "-C", str(ROOT), "log", "-1", "--format=%h %ad %s").strip()
+            + "\n"
+            # Not the same thing, and the difference has already caused confusion.
+            # deploy.sh rsyncs from the Mac's working tree straight into
+            # /opt/hydrosnooze, so the code that is running can be newer than the
+            # clone this script is reading the git log from. Reporting only the
+            # clone means answering "what version are you running" wrongly, which
+            # is a poor way to start debugging.
+            + "\nRunning:     " + deployed_at(),
+        ),
         # First, because a service that has been restarting is the whole answer.
         section(
             "HAS IT BEEN RESTARTING",

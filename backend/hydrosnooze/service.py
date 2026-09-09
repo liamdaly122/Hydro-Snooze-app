@@ -802,7 +802,9 @@ class Service:
         The unit's twelve hour inactivity cutoff is reset by every stage
         transition, so it will not save us. If this fails, the only thing left
         standing between a dead Pi and a bed running all day is the Shelly's own
-        auto-off timer.
+        daily schedule: off at 09:00, on at 19:00. Not its auto-off timer, which
+        counts from the moment the output switches on and would never fire here,
+        because nothing in this app ever switches the plug. It only reads it.
         """
         self.events.info("power_off", f"Night finished at {plan.wake_at:%H:%M}, switching off")
         async with self._lock:
@@ -815,8 +817,8 @@ class Service:
             except CommandFailed as exc:
                 self.events.error(
                     "power_off",
-                    f"{exc} The unit will not switch itself off. Check it, and check the "
-                    "Shelly's own auto-off timer is set.",
+                    f"{exc}. The unit will not switch itself off. Check it, and check "
+                    "the Shelly's daily schedule is still set: off at 09:00, on at 19:00.",
                 )
                 self._set_state(last_error=str(exc), power=Power.UNKNOWN)
 
