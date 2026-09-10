@@ -245,7 +245,14 @@ class Service:
                 last_ok_at=self._blaster_ok_at,
                 ok_now=self._blaster_ok,
                 where=self.settings.esphome_host,
-                note=f"All eight buttons ready at {self.settings.esphome_host}",
+                # Deliberately not "ready". Green here means the board answered
+                # over Wi-Fi and still holds all eight codes. Whether the beam
+                # left the LED, reached the unit and was understood is not
+                # observable from this side at all, because infrared is one-way,
+                # and a chip that implies otherwise sends someone hunting through
+                # the software for a fault that is a line of sight.
+                note=f"All eight codes, answering at {self.settings.esphome_host}. "
+                "Only the plug can confirm a press landed",
             )
             if real_blaster
             else DeviceHealth("blaster", Health.SIMULATED, "No blaster. Presses are printed")
@@ -970,16 +977,30 @@ class Service:
         if wanted is None or wanted is running or bed is None:
             return
 
+        # Never queue behind something else. A correction is a comfort, and a
+        # stage boundary or a button someone just pressed is not: waiting for the
+        # lock here would put every command from the app behind up to forty
+        # presses of infrared and make the whole app look dead. There is another
+        # chance in thirty seconds.
+        if self._lock.locked():
+            return
+
+        # Set before the presses, not after, so a failure backs off exactly like
+        # a success. Setting it only on success meant a blaster that had gone
+        # away was retried on every single sample, and each retry holds the
+        # command lock through forty presses of connect-and-time-out. A feature
+        # about noise had a way to take the unit away from its owner.
+        self._mode_changed_at = now
+
         async with self._lock:
             try:
                 await self._apply(wanted, step.temp_c)
             except CommandFailed as exc:
                 # Never fatal. The stage carries on in whichever mode it was
                 # already in, which is the mode the schedule asked for.
-                self._fail("stage", exc)
+                self._fail("mode", exc)
                 return
 
-        self._mode_changed_at = now
         if wanted.is_cooling:
             self.events.info(
                 "mode",

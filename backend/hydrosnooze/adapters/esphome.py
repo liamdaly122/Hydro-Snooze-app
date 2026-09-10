@@ -102,14 +102,30 @@ class EsphomeTransmitter:
         change when the board is reflashed and would otherwise go stale.
         """
         try:
+            return not await self.missing_buttons()
+        except Exception as exc:
+            log.debug("blaster unreachable: %r", exc)
+            return False
+
+    async def missing_buttons(self) -> list[str]:
+        """Which buttons the board does not have, raising if it cannot be asked.
+
+        The same question `reachable` asks, with the two failures kept apart.
+        `reachable` has to collapse them into one boolean because a device bar
+        chip is one colour, but a person trying to work out why the bed will not
+        respond needs to know whether nothing answered or whether something
+        answered and was missing a code. Those have completely different fixes,
+        and reporting the first as the second sends someone to reflash a board
+        that was never the problem.
+        """
+        try:
             async with self._lock:
                 await self._connect()
                 await self._load_buttons()
-                return all(b.value in self._buttons for b in Button)
-        except Exception as exc:
-            log.debug("blaster unreachable: %r", exc)
+                return [b.value for b in Button if b.value not in self._buttons]
+        except Exception:
             await self._drop()
-            return False
+            raise
 
     async def press(self, button: Button, note: str = "") -> None:
         """Send one press, reconnecting once if the link has gone.

@@ -34,6 +34,7 @@ from hydrosnooze.models import (
     Stage,
     quieter_mode,
 )
+from hydrosnooze.sequences import CommandFailed
 from hydrosnooze.service import MODE_DWELL, Service
 
 NOW = datetime(2026, 9, 11, 2, 0)
@@ -236,3 +237,59 @@ async def test_a_whole_night_settles_rather_than_flapping(service):
             was = service.state.assumed_mode
 
     assert swaps == 1, f"settled once and stayed, got {swaps} swaps"
+
+
+# --- Never taking the unit away from its owner ---------------------------------
+#
+# Found the evening this shipped, from a report that the app had gone dead: the
+# power button did nothing and neither did the temperature. A correction holds the
+# command lock through about forty presses, and a blaster that has gone away turns
+# each of those into a connect and a timeout. Retried every thirty seconds, that
+# is a comfort feature quietly monopolising the unit.
+
+
+@pytest.mark.asyncio
+async def test_a_correction_never_queues_behind_a_command(service):
+    """Waiting for the lock would put a button someone just pressed behind forty
+    presses of infrared, and the app would look dead while it happened."""
+    step = step_at(service, 27, Mode.WARMING)
+    bed(service, 27.1)
+
+    await service._lock.acquire()
+    try:
+        await service._correct_mode(step, Power.ON, service.clock.now())
+    finally:
+        service._lock.release()
+
+    assert service.state.assumed_mode is Mode.WARMING, "it waited its turn"
+
+
+@pytest.mark.asyncio
+async def test_a_correction_that_fails_backs_off_like_one_that_worked(service):
+    """The bug. Starting the clock only on success meant a blaster that had gone
+    away was retried on every single sample, holding the lock each time."""
+    step = step_at(service, 27, Mode.WARMING)
+    bed(service, 27.1)
+
+    tried = 0
+
+    async def refuse(mode, target):
+        nonlocal tried
+        tried += 1
+        raise CommandFailed("the blaster is not answering")
+
+    service._apply = refuse
+    await service._correct_mode(step, Power.ON, service.clock.now())
+    assert tried == 1
+
+    # The next few samples must not try again.
+    for _ in range(10):
+        service.clock.advance(timedelta(seconds=30))
+        bed(service, 27.1)
+        await service._correct_mode(step, Power.ON, service.clock.now())
+    assert tried == 1, "retried a broken blaster on every sample"
+
+    service.clock.advance(MODE_DWELL)
+    bed(service, 27.1)
+    await service._correct_mode(step, Power.ON, service.clock.now())
+    assert tried == 2, "and does try again once the dwell has passed"
