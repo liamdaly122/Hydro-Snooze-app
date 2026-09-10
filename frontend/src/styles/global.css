@@ -731,6 +731,38 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* Three lines need naming. Wraps rather than squashing at 390px. */
+.chart__key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.chart__key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart__swatch {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+/* The range being drawn, said out loud. The axis is padded to at least six
+   degrees so a steady night looks steady, and that padding is invisible unless
+   the numbers are shown. */
+.chart__key-scale {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .log {
   margin-top: 8px;
   display: flex;

@@ -277,3 +277,51 @@ feature exists to remove would be a strange way to start.
 
 Two degrees below the setpoint in silence is a better night than exactly the setpoint next to a
 geiger counter. That judgement is mine, not the software's, and the thresholds are where it lives.
+
+---
+
+## The morning report
+
+Every night produced a few thousand measurements and nobody read any of them. The event log holds
+everything and is far too long. The device bar holds this moment and has forgotten the last eight
+hours. So "did that go well?" meant opening the app and scrolling, which nobody does on the fourth
+morning.
+
+Twenty minutes after the wake time, once the power off has had its own window and the night is
+completely over, one message:
+
+```
+All 3 stages landed.
+Ready in 22m, 19.2 to 26.1C, measured on the hoses.
+Bed ran 26.2 to 28.2C, never more than 0.2C off the stage it was in.
+Swapped mode twice to keep it quiet.
+1.5 kWh.
+```
+
+A night with something wrong says so on the first line, names what was missed, quotes the first
+warning, and arrives with a different title so it can be told apart at a glance.
+
+Two things it has to get right, and they pull against each other. Short enough to read without
+deciding to, and honest enough that a quiet one means something. A report that says "all fine" on a
+night with a missed stage is worse than no report, because it is how you learn to stop reading them.
+
+It is a scheduled job like every other one, with the same fired mark, so it is sent once and a
+restart does not send it again.
+
+## The bed chart
+
+The power chart says what the machine did. This says what happened to the bed, which is the thing
+the machine is for, and nothing could show it until the probes went on.
+
+Three lines: the bed, the water going out, and the room. The gap between the first two is the part
+worth looking at. Wide means heat is moving. The two closing together means the exchange has
+finished and the bed is where it was asked to be.
+
+Two decisions in it are about not lying:
+
+- **Gaps are gaps.** Wherever the probe board was quiet the line stops and starts again rather than
+  being drawn straight across, because a flat line through a hole is the chart lying about the one
+  thing it exists to show
+- **The axis never spans less than six degrees.** Fitting it to the data would be the obvious thing
+  and it would make the best possible night, a bed holding 27.0 to 27.4, look like a rollercoaster
+

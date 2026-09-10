@@ -105,9 +105,24 @@ class Notifier:
             return
         self._sent[key] = now
 
-        title = TITLES.get(event.level, "HydroSnooze")
+        self.push(TITLES.get(event.level, "HydroSnooze"), event.message, tag="warning")
+
+    def push(self, title: str, message: str, *, tag: str = "warning") -> None:
+        """Send one, without asking whether it is worth waking someone for.
+
+        `on_event` is for things going wrong and is deliberately hard to get
+        through: errors always, and warnings only from a short allowlist. The
+        morning report is neither. It is a scheduled message about a night that
+        has already finished, sent because it was asked for rather than because
+        something broke, so it comes through here instead.
+
+        Never blocks and never raises, the same as everything else in this file.
+        Failing to send is not worth taking anything down for.
+        """
+        if not self.enabled:
+            return
         try:
-            task = asyncio.get_running_loop().create_task(self._post(title, event.message))
+            task = asyncio.get_running_loop().create_task(self._post(title, message, tag))
         except RuntimeError:
             # No loop, so this is a test or a script. Nothing to do.
             return
@@ -115,15 +130,23 @@ class Notifier:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _post(self, title: str, message: str) -> None:
+    async def _post(self, title: str, message: str, tag: str = "warning") -> None:
         try:
             import httpx
 
+            # A report is not an emergency. Default priority so it waits for the
+            # phone to be picked up rather than pushing past a silent mode that
+            # was set on purpose.
+            urgent = tag == "warning"
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 await client.post(
                     f"{self.server}/{self.topic}",
                     content=message.encode(),
-                    headers={"Title": title, "Priority": "high", "Tags": "warning"},
+                    headers={
+                        "Title": title,
+                        "Priority": "high" if urgent else "default",
+                        "Tags": tag,
+                    },
                 )
         except Exception as exc:  # noqa: BLE001
             # Swallowed on purpose. Failing to send a notification is not worth

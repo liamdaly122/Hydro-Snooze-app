@@ -26,7 +26,7 @@ from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep
 
 log = logging.getLogger(__name__)
 
-JobKind = Literal["precool", "stage", "power_off"]
+JobKind = Literal["precool", "stage", "power_off", "report"]
 
 #: How late a stage transition is still worth making. Past this the stage is
 #: mostly over and setting it would be worse than leaving the bed alone.
@@ -35,6 +35,14 @@ STAGE_GRACE = timedelta(minutes=20)
 #: The unit no longer switches itself off, so this one is not optional. The
 #: window is generous because failing to power off leaves a bed heating all day.
 POWER_OFF_GRACE = timedelta(hours=2)
+
+#: How long after the wake time to send the morning report.
+#:
+#: After the power off rather than with it, so the report is written about a
+#: night that has entirely finished, including whether switching off worked. Far
+#: enough back from the alarm that it is read over breakfast rather than in the
+#: first confused seconds of being awake.
+REPORT_AFTER = timedelta(minutes=20)
 
 
 @dataclass(frozen=True)
@@ -83,6 +91,14 @@ class FiredMarks:
 
     def has_fired(self, job: Job) -> bool:
         return self.done.get(job.key) == job.plan.wake_at
+
+    def keys_for(self, plan: NightPlan) -> set[str]:
+        """Which jobs have already run for this particular night.
+
+        The marks outlive a night by design, so asking "what ran" without naming
+        the night would answer with yesterday's as well.
+        """
+        return {key for key, at in self.done.items() if at == plan.wake_at}
 
     def clear(self) -> None:
         self.done.clear()
@@ -176,6 +192,15 @@ class Scheduler:
         off = Job("power_off", plan)
         if plan.wake_at <= now < plan.wake_at + POWER_OFF_GRACE and not self.fired.has_fired(off):
             return off
+
+        # Last, and after the power off has had its own window to run, so the
+        # report describes a night that is completely over. A fired mark like
+        # everything else here, so it is sent once and a restart does not send it
+        # again.
+        due_at = plan.wake_at + REPORT_AFTER
+        report = Job("report", plan)
+        if due_at <= now < plan.wake_at + POWER_OFF_GRACE and not self.fired.has_fired(report):
+            return report
 
         return None
 

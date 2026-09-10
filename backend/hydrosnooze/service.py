@@ -40,7 +40,7 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import clocksync, pi, watchdog
+from . import clocksync, pi, report, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands
@@ -982,14 +982,14 @@ class Service:
         self._mode_changed_at = now
         if wanted.is_cooling:
             self.events.info(
-                "stage",
+                "mode",
                 f"The bed is at {bed:.1f}C against a {step.temp_c}C stage, so it has stopped "
                 f"warming and switched to {wanted.value}. Body heat holds it from here, and "
                 "this is the quiet half of the unit.",
             )
         else:
             self.events.info(
-                "stage",
+                "mode",
                 f"The bed has dropped to {bed:.1f}C against a {step.temp_c}C stage, so it is "
                 "warming again. Cooling can take heat out of a bed and never put it back.",
             )
@@ -1048,6 +1048,8 @@ class Service:
             return await self._run_precool(job.plan)
         if job.kind == "stage" and job.step is not None:
             return await self._run_stage(job.plan, job.step)
+        if job.kind == "report":
+            return self._send_report(job.plan)
         if job.kind == "power_off":
             ok = await self._run_power_off(job.plan)
             # A rehearsal ends when its night does, whether the power off worked
@@ -1094,6 +1096,31 @@ class Service:
             except CommandFailed as exc:
                 self._fail("precool", exc)
                 return False
+
+    def _send_report(self, plan: NightPlan) -> bool:
+        """One message about the night that has just finished.
+
+        Never fails the job. A report that could not be built is worth a line in
+        the log and nothing more: the night is already over, there is nothing to
+        retry, and marking it unfired would have it tried again every minute for
+        the rest of the grace window.
+        """
+        try:
+            start, end = report.window(plan)
+            summary = report.build(
+                plan,
+                self.db.night_history(start),
+                self.db.events_between(start, end),
+                self.scheduler.fired.keys_for(plan),
+                self.db.precondition_since(start),
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("could not build the morning report")
+            return True
+
+        self.events.add(summary.level, "report", summary.body)
+        self.notifier.push(summary.title, summary.body, tag="sleeping_accommodation")
+        return True
 
     async def _run_stage(self, plan: NightPlan, step: StageStep) -> bool:
         self.events.info(

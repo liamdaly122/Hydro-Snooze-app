@@ -213,16 +213,26 @@ export class MockApiClient implements ApiClient {
       if (mins >= 21 * 60 + 30 && mins < 22 * 60) watts = 178
       else if (mins >= 22 * 60 || mins < 6 * 60 + 30) watts = 150 + Math.sin(t / 5_400_000) * 42
       else watts = 0.4
-      // The bed follows the unit rather than leading it, and the return hose runs
-      // a little above the flow while there is a body putting heat into it.
+      // The probes report all day whatever the unit is doing: they are taped to
+      // the hoses, and a hose sitting still still has a temperature. With the
+      // unit off the water drifts to the room, which is what makes the shape of
+      // this chart worth looking at in the first place.
+      const room = round1(19.7 + Math.sin(t / 43_200_000) * 0.8)
       const running = watts > 5
-      const flow = running ? 26.5 + Math.sin(t / 7_200_000) * 1.4 : null
+      const flow = running ? 26.5 + Math.sin(t / 7_200_000) * 1.4 : room + 0.4
+      // Return above flow while a body is putting heat in, and level with it
+      // once nothing is moving.
+      const back = running ? flow + 0.6 : flow
+      // A gap where the probe board dropped off the Wi-Fi, because the chart has
+      // to be honest about those and the only way to see that it is, is to have
+      // one in the seed data.
+      const quiet = mins >= 3 * 60 + 10 && mins < 3 * 60 + 50
       out.push({
         at: d.toISOString(),
         watts: round1(Math.max(0.3, watts + (Math.random() - 0.5) * 8)),
-        flow_c: flow === null ? null : round1(flow),
-        return_c: flow === null ? null : round1(flow + 0.6),
-        room_c: 19.7,
+        flow_c: quiet ? null : round1(flow),
+        return_c: quiet ? null : round1(back),
+        room_c: quiet ? null : room,
       })
     }
     return out

@@ -353,6 +353,27 @@ class Database:
         )
         self._db.commit()
 
+    def events_between(self, start: datetime, end: datetime) -> list[Event]:
+        """Everything logged inside a stretch of time, oldest first.
+
+        For the morning report, which asks about one night rather than about the
+        last two hundred things that happened.
+        """
+        rows = self._db.execute(
+            "SELECT * FROM events WHERE at >= ? AND at <= ? ORDER BY id",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        return [
+            Event(
+                id=r["id"],
+                at=datetime.fromisoformat(r["at"]),
+                level=r["level"],  # type: ignore[arg-type]
+                kind=r["kind"],
+                message=r["message"],
+            )
+            for r in rows
+        ]
+
     def recent_events(self, limit: int = 200) -> list[Event]:
         rows = self._db.execute(
             "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)
@@ -495,6 +516,11 @@ class Database:
             ),
         )
         self._db.commit()
+
+    def precondition_since(self, start: datetime) -> PreconditionRow | None:
+        """The pre-conditioning run for one night, or None if it never ran."""
+        rows = [r for r in self.precondition_runs(5) if r.at >= start]
+        return rows[0] if rows else None
 
     def learned_lead_minutes(self, mode: str, target_c: int, *, within_c: int = 3) -> int | None:
         """How long this bed has really taken to reach about this temperature.
