@@ -1137,6 +1137,22 @@ And keep the Shelly's daily off/on schedule set as a backstop.
 
 ---
 
+## Step 8: the temperature probes
+
+A separate page, because it is a separate device and a separate evening:
+**[docs/temperature-probes.md](docs/temperature-probes.md)**.
+
+Worth saying why it matters rather than treating it as another gadget. Infrared is
+one-way, so every number in this app is a belief except the wattage from the plug.
+`DeviceState` admits it in its own field names: one `observed_`, the rest
+`assumed_`. Three probes on one wire make the bed itself measurable, which is what
+lets the app check its own work instead of hoping.
+
+The board is an ESP32-C3, flashed with ESPHome exactly like the blaster, talking
+to the service over the same API. Nothing new to learn, just a second device.
+
+---
+
 ## Updating the Pi later
 
 There are two copies of this project on the Pi and only one of them runs. Getting that the wrong way
