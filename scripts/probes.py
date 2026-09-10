@@ -3,7 +3,7 @@
 
     ./scripts/probes.py                                  # stage 1: find the probes
     ./scripts/probes.py --label                          # stage 2: name them probe_1..3
-    ./scripts/probes.py --head A --foot B --room C       # stage 3: the real one
+    ./scripts/probes.py --flow A --return B --room C     # stage 3: the real one
 
 Setting up three probes means writing the same file three times: once with no
 sensors to discover what is on the wire, once with neutral names so each one can
@@ -171,9 +171,16 @@ def main() -> int:
         "can be identified by warming it",
     )
     parser.add_argument("addresses", nargs="*", help="addresses, or a pasted log")
-    parser.add_argument("--head", help="stage 3: the probe at torso height")
-    parser.add_argument("--foot", help="stage 3: the probe at the far end")
-    parser.add_argument("--room", help="stage 3: the ambient probe")
+    # On the hoses rather than in the bed. The flow probe reads the water the
+    # unit is circulating, which is the thing its setpoint actually refers to, so
+    # it checks the unit against what it was told. The return reads that water
+    # after the bed has had it, and the difference between the two is the heat
+    # actually moving, which no probe taped under a sheet could tell us.
+    parser.add_argument("--flow", help="stage 3: on the hose going to the bed")
+    parser.add_argument(
+        "--return", dest="water_return", help="stage 3: on the hose coming back"
+    )
+    parser.add_argument("--room", help="stage 3: air temperature, away from the bed")
     parser.add_argument(
         "--seeed",
         action="store_true",
@@ -182,33 +189,35 @@ def main() -> int:
     args = parser.parse_args()
     board = "seeed" if args.seeed else "supermini"
 
-    roles = (args.head, args.foot, args.room)
+    roles = (args.flow, args.water_return, args.room)
 
     # --- Stage 3: the real thing ---------------------------------------------
     if any(roles):
         if not all(roles):
-            die("Stage 3 needs all three: --head, --foot and --room.")
+            die("Stage 3 needs all three: --flow, --return and --room.")
         found = clean(list(roles))
         if len(found) != 3:
             die(
                 "Those are not three different addresses.",
                 "Each is 0x followed by sixteen hex characters, and no two probes share one.",
             )
-        head, foot, room = found
+        flow, back, room = found
         body = (
             HEADER
             + WEB
             + BUS
             + "\nsensor:"
             + sensor(
-                head,
-                "bed_head",
+                flow,
+                "water_flow",
                 "30s",
                 5,
                 "Not decoration. A bad read on a long 1-Wire cable arrives as -127"
                 "\n      # or 85, and a median of five throws it away silently.",
             )
-            + sensor(foot, "bed_foot", "30s", 5)
+            # Named water_return rather than return, because ESPHome turns an id
+            # into a C++ variable and `return` is a keyword there.
+            + sensor(back, "water_return", "30s", 5)
             + sensor(room, "room", "60s", 3)
             + RSSI
         )
@@ -218,10 +227,9 @@ def main() -> int:
             [
                 f"{BOLD}~/esphome/bin/esphome run docs/esphome-probes.yaml{RESET}",
                 "",
-                f"{DIM}Then watch for ten minutes. All three should read within about a{RESET}",
-                f"{DIM}degree of each other and of the room. Two reading identically to{RESET}",
-                f"{DIM}two decimal places would mean the same address twice, and this{RESET}",
-                f"{DIM}script refuses that, so it should not happen.{RESET}",
+                f"{DIM}With the unit off, all three should read within about a degree of{RESET}",
+                f"{DIM}each other. Once it is running, flow should track the setpoint and{RESET}",
+                f"{DIM}return should differ from it by however hard the bed is working.{RESET}",
             ],
             board,
         )
@@ -264,7 +272,7 @@ def main() -> int:
                 "",
                 "Then stage 3:",
                 "",
-                f"  {BOLD}./scripts/probes.py --head 0x.. --foot 0x.. --room 0x..{RESET}",
+                f"  {BOLD}./scripts/probes.py --flow 0x.. --return 0x.. --room 0x..{RESET}",
             ],
             board,
         )

@@ -150,9 +150,9 @@ One command, with each address against the job it is doing:
 
 ```sh
 ./scripts/probes.py \
-  --head 0x1c0000031edd2828 \
-  --foot 0x3a00000320f18b28 \
-  --room 0x9b000003215c4f28
+  --flow 0xba0000002618c028 \
+  --return 0x5c00000000e73f28 \
+  --room 0x2900000025d73f28
 
 ~/esphome/bin/esphome run docs/esphome-probes.yaml
 ```
@@ -188,37 +188,67 @@ than the Seeed design, and they vary between individual units.
 
 ## Step 7: place the probes, and run a night doing nothing
 
-- **bed_head**: on top of the pad, under the sheet, at torso height. Not directly
-  underneath where I lie, because compression and body contact swamp the reading
-- **bed_foot**: the far end or the other side, so the two together say whether the
-  bed cools evenly
-- **room**: across the room, off the floor, away from the radiator, the window and
-  the door
+**On the hoses, not in the bed.** A probe taped under a sheet measures one spot,
+affected by exactly where it sits, body contact and compression. A probe on the
+hoses measures the actual thermal exchange, which is a cleaner signal and a more
+useful one.
 
-Then **leave it alone for one night**. No service changes, nothing reading it.
-Just look at the numbers in the morning.
+- **water_flow**: on the hose **going to** the bed. This is the water the unit is
+  circulating, which is the thing its setpoint actually refers to
+- **water_return**: on the hose **coming back**. The same water after the bed has
+  had it
+- **room**: air temperature, away from the bed, off the floor, not near the
+  radiator, the window or the door
 
-One night of real readings says more about where the probes should go than any
-amount of planning, and it costs nothing but patience.
+### Getting good contact, which matters more than position
 
----
+A probe resting against a hose reads a mixture of hose and room air, and the room
+will win. Two things fix that:
 
-## The thing that will look like a fault and is not
+1. **Press the metal tip flat along the hose**, running with it rather than across
+   it, and tape it down firmly. More contact area is better
+2. **Insulate over the top.** Foam pipe lagging, or a wrap of anything, over the
+   probe and a few centimetres of hose either side
 
-**The probe will not agree with the setpoint.**
+Without the insulation the readings will be pulled towards room temperature and
+the difference between flow and return, which is the interesting part, will be
+squashed towards nothing.
 
-The HS1001's setpoint is the temperature of the **water it circulates**. The probe
-measures the **surface of the pad**, through a sheet, in a room. Set 24°C and the
-probe may well read 26°C, or 22°C.
+Keep both probes the same distance from the unit, so the comparison between them
+is fair.
 
-That is not drift and it is not a broken probe. They are two different
-measurements of two different things.
+### Then leave it alone for one night
 
-So for the first week the probe is **a new fact, not a check on the old belief**.
-Only once there are a few nights of both is the relationship between them
-learnable, and only then is it fair to let the app say "the unit did not do what
-it was told". The other way round produces alarms about a discrepancy that was
-never a fault.
+No service changes, nothing reading it. Just look at the numbers in the morning.
+
+That night is what tells us what the numbers really do, which is what the
+mode-switching thresholds have to be set against.
+
+## What the two water probes tell you
+
+This is the part that makes hoses better than a pad probe.
+
+**Flow should track the setpoint.** It is the water the unit circulates, and the
+setpoint is a statement about that water. So this probe is a direct check on
+whether the unit did what infrared told it to, which nothing in this project could
+do before. Expect a lag of a few minutes and some offset, but they should move
+together.
+
+**Return minus flow is the heat actually moving.**
+
+| | What it means |
+|---|---|
+| return **warmer** than flow | the bed is putting heat into the water, so it wants cooling |
+| return **colder** than flow | the water is giving heat up to the bed |
+| return **equal** to flow | nothing is moving, the bed is at temperature |
+
+That difference is the signal the cooling-priority rule needs, and it is better
+than a pad probe would give because it does not depend on where anything was
+taped or whether someone is lying on it.
+
+It should also agree with the plug. A big difference between flow and return means
+the unit is working hard, which means a large draw. Two independent measurements
+of the same event, which is the most useful kind to have.
 
 ## When the Seeed board arrives
 
@@ -227,7 +257,7 @@ would be lost the next time it runs.
 
 ```sh
 ./scripts/probes.py --seeed \
-  --head 0x... --foot 0x... --room 0x...
+  --flow 0x... --return 0x... --room 0x...
 ```
 
 Reflash, and everything else carries over. The probes, their addresses and their
