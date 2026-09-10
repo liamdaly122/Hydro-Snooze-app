@@ -41,12 +41,23 @@ NAMES = (FLOW, RETURN, ROOM)
 
 #: How old a reading may be before it stops counting as current.
 #:
-#: The board reports flow and return every 30s and the room every 60s, so two
-#: minutes is several missed readings rather than one unlucky one. Past this the
-#: value is not wrong, it is simply not news, and the difference matters when
-#: something downstream is about to decide which mode to run on the strength of
-#: it.
-STALE_AFTER = timedelta(minutes=2)
+#: Past this the value is not wrong, it is simply not news, and the difference
+#: matters when something downstream is about to decide which mode to run on the
+#: strength of it.
+#:
+#: This has to be read against how often the board actually publishes, and that
+#: is the pair of numbers this constant got wrong for a fortnight. A sensor read
+#: every 30s through a median with send_every: 5 does not report every 30s, it
+#: reports every 150s, and the room probe reported every 180s. Both were longer
+#: than the two minutes this used to allow, so every reading expired before its
+#: replacement arrived and the probes flickered in and out all evening. The event
+#: log caught it within ten minutes of being added, which is the entire argument
+#: for saying things out loud rather than colouring a dot in.
+#:
+#: The board publishes on every read now: 30s for the hoses, 60s for the room. So
+#: three minutes is six missed reports on the hoses and three on the room, which
+#: is a real outage rather than one unlucky reading.
+STALE_AFTER = timedelta(minutes=3)
 
 #: How long to wait before trying the connection again after it drops.
 RECONNECT_AFTER = 30.0
@@ -60,10 +71,12 @@ RECONNECT_AFTER = 30.0
 #: transmitter survives that because every press is a real request that raises;
 #: here, silence is the only symptom there is.
 #:
-#: Three minutes is six missed reports on the fastest sensor and three on the
-#: slowest, so it cannot be one unlucky reading, and it is past STALE_AFTER, so
-#: the app has already stopped believing the numbers before anything is rebuilt.
-SILENT_TOO_LONG = timedelta(minutes=3)
+#: Five minutes is ten missed reports on the fastest sensor, so it cannot be one
+#: unlucky reading, and it is comfortably past STALE_AFTER, so the app has
+#: already stopped believing the numbers well before anything is torn down. That
+#: ordering is deliberate: rebuilding a link that is merely slow would turn a
+#: board that is coping into one that never finishes connecting.
+SILENT_TOO_LONG = timedelta(minutes=5)
 
 #: How often to check for that silence. Cheap, and nothing is waiting on it.
 CHECK_EVERY = 10.0

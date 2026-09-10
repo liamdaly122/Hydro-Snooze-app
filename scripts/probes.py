@@ -141,6 +141,21 @@ button:
 
 
 def sensor(address: str, name: str, every: str, window: int, note: str = "") -> str:
+    """One probe, read every `every` and published every time it is read.
+
+    `send_every: 1` is the important line and it was `window_size` here until the
+    logs said otherwise. The two numbers do completely different jobs and setting
+    them the same throws away four readings out of five: `window_size` is how many
+    values the median looks at, `send_every` is how many readings pass before one
+    is published. Set both to 5 on a 30s sensor and the board goes quiet for two
+    and a half minutes at a time, which is longer than the app is willing to call
+    a reading current, so every single value expired before its replacement
+    arrived and the probes flickered in and out all evening.
+
+    A sliding median gets the same noise rejection for none of that. It still
+    looks at the last five and still throws away a bad read silently. It just
+    answers every time it is asked.
+    """
     comment = f"      # {note}\n" if note else ""
     return f"""
   - platform: dallas_temp
@@ -152,9 +167,36 @@ def sensor(address: str, name: str, every: str, window: int, note: str = "") -> 
     filters:
 {comment}      - median:
           window_size: {window}
-          send_every: {window}
+          # Every reading, not every {window}th. See the note in scripts/probes.py.
+          send_every: 1
+          send_first_at: 1
       - filter_out: nan
 """
+
+
+def real_config(flow: str, back: str, room: str) -> str:
+    """The configuration the board actually runs. One function so a test can read
+    the same thing that gets flashed."""
+    return (
+        HEADER
+        + WEB
+        + BUS
+        + "\nsensor:"
+        + sensor(
+            flow,
+            "water_flow",
+            "30s",
+            5,
+            "Not decoration. A bad read on a long 1-Wire cable arrives as -127"
+            "\n      # or 85, and a median of five throws it away silently.",
+        )
+        # Named water_return rather than return, because ESPHome turns an id
+        # into a C++ variable and `return` is a keyword there.
+        + sensor(back, "water_return", "30s", 5)
+        + sensor(room, "room", "60s", 3)
+        + RSSI
+        + RESTART
+    )
 
 
 def die(*lines: str) -> None:
@@ -286,26 +328,7 @@ def main() -> int:
                 "Each is 0x followed by sixteen hex characters, and no two probes share one.",
             )
         flow, back, room = found
-        body = (
-            HEADER
-            + WEB
-            + BUS
-            + "\nsensor:"
-            + sensor(
-                flow,
-                "water_flow",
-                "30s",
-                5,
-                "Not decoration. A bad read on a long 1-Wire cable arrives as -127"
-                "\n      # or 85, and a median of five throws it away silently.",
-            )
-            # Named water_return rather than return, because ESPHome turns an id
-            # into a C++ variable and `return` is a keyword there.
-            + sensor(back, "water_return", "30s", 5)
-            + sensor(room, "room", "60s", 3)
-            + RSSI
-            + RESTART
-        )
+        body = real_config(flow, back, room)
         return write(
             body,
             "the real configuration",

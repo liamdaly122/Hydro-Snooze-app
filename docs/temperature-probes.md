@@ -390,6 +390,36 @@ software fixes. In order of how much effort each is worth:
 **What is not worth doing:** anything in the app. It already falls back cleanly,
 and there is nothing to tune on this side.
 
+### If it is flapping rather than dropping
+
+Quiet for twenty minutes and quiet for ninety seconds are different faults. A log
+full of short gaps, a minute or two each, looks alarming and usually is not a
+radio problem at all.
+
+It was mine for a fortnight. Two numbers that have to agree, written six days
+apart, in different files:
+
+```
+the board   update_interval: 30s, median send_every: 5   ->  a value every 150s
+the app     STALE_AFTER = 2 minutes                      ->  expires at 120s
+```
+
+`send_every` is not `window_size`. `window_size` is how many values the median
+looks at; `send_every` is how many readings pass before one is published. Setting
+both to five on a 30s sensor means the board goes quiet for two and a half minutes
+at a stretch, which is longer than the app is willing to call a reading current.
+So every value expired before its replacement arrived and the probes flickered in
+and out all evening, with the Wi-Fi and the board both perfectly healthy.
+
+Nothing threw. Nothing was logged. The event log found it within ten minutes of
+being added, which is the whole argument for saying things out loud rather than
+colouring a dot in.
+
+The fix is a sliding median: same noise rejection, published on every read.
+`backend/tests/test_probe_config.py` now reads the configuration that gets flashed
+and checks it against the app's own constant, so the two cannot quietly disagree
+again.
+
 ### What breaks while it is quiet
 
 Nothing that matters, which is the point.
