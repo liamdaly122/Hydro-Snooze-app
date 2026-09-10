@@ -325,3 +325,65 @@ Two decisions in it are about not lying:
 - **The axis never spans less than six degrees.** Fitting it to the data would be the obvious thing
   and it would make the best possible night, a bed holding 27.0 to 27.4, look like a rollercoaster
 
+---
+
+## Next: stopping the blaster wedging
+
+**Picked up from 11 September. Nothing below is built yet.**
+
+Twice in a few days the blaster answered the app, showed green, reported every press as
+sent, and put no infrared out at all. Only unplugging it cured it. Both times it had been
+powered up for days.
+
+What has already been done about it: the Wi-Fi power save fix (real, and confirmed by ping,
+but it explains the board *dropping off the network* rather than this), the blocking
+transmitter so a wedge is at least visible, a restart button on the board and in the app,
+an uptime sensor to tell a wedge from a reboot, and one automatic restart when a power
+command proves against the plug that nothing arrived.
+
+Two things left, and they are not the same kind of thing.
+
+### 1. Restart the blaster before every night
+
+The cheap one. Do this whichever way the other goes.
+
+A scheduled job like `precool`, `stage`, `power_off` and `report`, firing about thirty
+minutes before pre-conditioning, that presses the board's restart button. The board that has
+to work tonight then booted twenty minutes ago rather than three days ago, which is the
+state both failures were in.
+
+Everything needed already exists: `EsphomeTransmitter.reboot()`, `Service.reboot_blaster()`,
+and the job machinery in `scheduler.py` with its fired marks. It is a `JobKind`, a due()
+clause keyed off `plan.precool_at`, and a branch in `_run_job`.
+
+It is a workaround, not a fix. It reduces the chance rather than removing the cause.
+
+### 2. Let the board hear itself, which is the actual fix
+
+The blaster is a XIAO Smart IR Mate. GPIO3 transmits and **GPIO4 receives**, per Seeed's own
+configuration, and the receiver has never been used for anything.
+
+The root of every hard problem in this project is that infrared is one-way. It is why the
+device bar cannot promise a press landed, why the app can only self-heal on power commands,
+and why diagnosing this meant standing next to the bed watching for a reaction.
+
+A `remote_receiver` on GPIO4 changes that. A transmitter and a receiver a couple of
+centimetres apart on the same board will hear each other. Count what arrives, expose it, and
+"did the beam leave the LED" stops being unknowable:
+
+- the blaster chip means "the last press was heard leaving" instead of "the board is on the
+  network"
+- a wedged transmitter is caught on the first press rather than after a bad night
+- the automatic restart applies to every command, not only the two that the plug can verify
+- `scripts/press.py` answers its own question instead of asking someone to watch the bed
+
+**Open question, and the reason this is an experiment:** whether the receiver hears the
+transmitter at that range, or saturates. One flash answers it, and nothing is lost if the
+answer is no.
+
+### And one hardware thing, free to try
+
+Swap the blaster's USB supply. An IR LED pulls a sharp current spike, and a marginal charger
+sagging under it while the chip keeps running gives exactly this symptom, including being
+cured by a power cycle. It is the one candidate cause none of the above touches.
+
