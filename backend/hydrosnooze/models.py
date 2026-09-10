@@ -238,6 +238,16 @@ def mode_for_target(
 #: nothing left to do and should stop.
 QUIET_ARRIVED_C = 0.5
 
+#: The event kind a mode correction is logged under.
+#:
+#: Not "mode", which sequences.py has always used for every set_mode there is:
+#: every stage boundary, everything pressed by hand, every step of getting the
+#: bed ready. The morning report counts these to say how often a night swapped
+#: modes to stay quiet, and counting the rest as well had it reporting a number
+#: several times too big. Found in a journal where the two sat next to each
+#: other and could not be told apart, which was the real cost.
+QUIET_KIND = "quiet"
+
 #: And how far it has to fall back before warming is worth the noise again.
 #:
 #: Wider than the arrival margin on purpose, and the gap between the two is the

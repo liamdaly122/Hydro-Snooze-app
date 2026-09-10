@@ -187,6 +187,19 @@ async def post_power_on(request: Request) -> dict[str, object]:
     return state_json(service.state)
 
 
+@router.post("/power/press")
+async def post_power_press(request: Request) -> dict[str, object]:
+    """One press of power, which is what the button in the app sends.
+
+    Deliberately not power/on or power/off. Those are absolute, verified against
+    the plug, and right for the schedule. This is the remote's button, for
+    someone standing in front of the bed who can see the answer for themselves.
+    """
+    service = _service(request)
+    await service.press_power()
+    return state_json(service.state)
+
+
 @router.post("/power/off")
 async def post_power_off(request: Request) -> dict[str, object]:
     service = _service(request)

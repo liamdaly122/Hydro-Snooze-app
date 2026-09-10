@@ -56,6 +56,10 @@ export class HttpApiClient implements ApiClient {
   putSchedule = (patch: Partial<Schedule>) =>
     request<Schedule>('/api/schedule', { method: 'PUT', body: JSON.stringify(patch) })
 
+  pressPower = async () => {
+    await request<DeviceState>('/api/power/press', { method: 'POST' })
+  }
+
   powerOn = async () => {
     await request<DeviceState>('/api/power/on', { method: 'POST' })
   }

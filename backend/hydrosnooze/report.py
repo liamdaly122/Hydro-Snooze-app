@@ -23,7 +23,7 @@ from itertools import pairwise
 
 from .db import Sample
 from .events import Event, Level
-from .models import NightPlan
+from .models import QUIET_KIND, NightPlan
 
 #: Sampling interval, for turning watts into energy. Not read from settings on
 #: purpose: this works off what was recorded, and the gap between two rows is the
@@ -152,7 +152,10 @@ def build(
     landed, missed = _stages_landed(plan, fired)
     total = len(plan.steps)
     bad = [e for e in events if e.level in ("warning", "error")]
-    swaps = len([e for e in events if e.kind == "mode"])
+    # Deliberately not "mode". That kind covers every set_mode there is: stage
+    # boundaries, getting the bed ready, anything pressed by hand. Only the
+    # corrections belong in this count.
+    swaps = len([e for e in events if e.kind == QUIET_KIND])
 
     lines: list[str] = []
 

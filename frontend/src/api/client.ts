@@ -52,6 +52,9 @@ export interface ApiClient {
    */
   putSchedule(patch: Partial<Schedule>): Promise<Schedule>
 
+  /** One press of power, the way the remote's button works. */
+  pressPower(): Promise<void>
+  /** Absolute and verified against the plug. Used by the schedule, not the button. */
   powerOn(): Promise<void>
   powerOff(): Promise<void>
 

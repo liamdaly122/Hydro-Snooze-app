@@ -299,3 +299,55 @@ async def test_a_whole_night_never_touches_the_mute_button(rig):
 
     assert not any("mute" in line for line in rig.tx.lines)
     assert rig.unit.muted
+
+
+# --- The button in the app, which is not a sequence -----------------------------
+#
+# Everything else in sequences.py is built to be safe when nobody is watching:
+# read the plug, work out what is needed, send it, confirm it landed. That is
+# right at three in the morning and wrong for someone standing in front of the
+# bed, who wanted the button to do what the button on the remote does.
+
+
+async def test_the_app_button_sends_exactly_one_press(rig):
+    rig.unit_on(display_dark=True)
+    await rig.commands.press_power()
+    assert rig.tx.count(Button.POWER) == 1
+    assert rig.tx.presses_sent == 1, "no wake preamble either"
+
+
+async def test_it_does_not_ask_the_plug_first(rig):
+    """power_on and power_off both return early when the plug says there is
+    nothing to do. This one has no opinion about that: it was asked to send a
+    press, so it sends a press."""
+    rig.power.offline = True
+    await rig.commands.press_power()
+    assert rig.tx.count(Button.POWER) == 1
+
+
+async def test_it_does_not_check_afterwards_or_try_again(rig):
+    """A single press on a dark display does nothing at all, and that is the
+    correct outcome here rather than a problem to solve. Tapping twice is how you
+    switch the unit off, because that is what the unit wants."""
+    rig.unit_on(display_dark=True)
+    await rig.commands.press_power()
+    assert rig.unit.powered, "swallowed by the dark display, and left alone"
+    assert rig.tx.presses_sent == 1
+
+
+async def test_two_taps_switch_a_woken_unit_off(rig):
+    """Which is the whole reason a single press is a reasonable button."""
+    rig.unit_on(display_dark=False)
+    await rig.commands.press_power()
+    await rig.commands.press_power()
+    assert not rig.unit.powered
+
+
+async def test_the_scheduled_power_off_is_untouched_by_any_of_this(rig):
+    """Nobody is watching at the wake time, so that one keeps its preamble, its
+    pair and its confirmation against the plug."""
+    rig.unit_on(display_dark=True)
+    await rig.commands.power_off()
+    assert not rig.unit.powered
+    assert rig.tx.count(Button.POWER) == 2
+    assert rig.tx.count(Button.TEMP_DOWN) == 2, "the wake preamble"

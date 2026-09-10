@@ -35,6 +35,7 @@ from .models import (
     Schedule,
     Stage,
     StageStep,
+    QUIET_KIND,
     mode_for_target,
     quieter_mode,
     range_for,
@@ -998,19 +999,19 @@ class Service:
             except CommandFailed as exc:
                 # Never fatal. The stage carries on in whichever mode it was
                 # already in, which is the mode the schedule asked for.
-                self._fail("mode", exc)
+                self._fail(QUIET_KIND, exc)
                 return
 
         if wanted.is_cooling:
             self.events.info(
-                "mode",
+                QUIET_KIND,
                 f"The bed is at {bed:.1f}C against a {step.temp_c}C stage, so it has stopped "
                 f"warming and switched to {wanted.value}. Body heat holds it from here, and "
                 "this is the quiet half of the unit.",
             )
         else:
             self.events.info(
-                "mode",
+                QUIET_KIND,
                 f"The bed has dropped to {bed:.1f}C against a {step.temp_c}C stage, so it is "
                 "warming again. Cooling can take heat out of a bed and never put it back.",
             )
@@ -1252,6 +1253,22 @@ class Service:
                     assumed_target_c=None,
                     last_command_at=self.clock.now(),
                 )
+            except CommandFailed as exc:
+                self._fail("power", exc, power=Power.UNKNOWN)
+
+    async def press_power(self) -> None:
+        """What the app's power button does: send one press and stop.
+
+        The state goes to unknown rather than to a guess. A single press with
+        nothing verifying it means the unit is now in whichever state it decided
+        on, and this side genuinely does not know which. The plug settles it on
+        the next sample, within thirty seconds, and until then the app says so
+        rather than showing a value nothing confirmed.
+        """
+        async with self._lock:
+            try:
+                await self.commands.press_power()
+                self._set_state(power=Power.UNKNOWN, last_command_at=self.clock.now())
             except CommandFailed as exc:
                 self._fail("power", exc, power=Power.UNKNOWN)
 

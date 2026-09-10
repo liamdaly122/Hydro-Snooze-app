@@ -167,6 +167,28 @@ class Commands:
 
         raise CommandFailed("Pressed power twice and the plug still reads off")
 
+    async def press_power(self) -> None:
+        """One press of power. No wake, no check, no retry, no second thoughts.
+
+        Everything else in this file is a sequence built to be safe when nobody
+        is watching: it reads the plug first, decides whether there is anything
+        to do, sends what is needed and confirms it landed. That is right for
+        three in the morning and wrong for someone standing in front of the bed
+        with the app in their hand, who wants the button to do what the button on
+        the remote does.
+
+        So this is the remote's button. It sends one code and stops. What the
+        unit makes of it is the unit's business, and the person who pressed it is
+        looking straight at the answer.
+
+        The scheduled power off does not come through here. Nobody is watching at
+        the wake time, so that one keeps its wake preamble, its pair of presses
+        and its confirmation against the plug.
+        """
+        self._banner("press_power()")
+        await self._press(Button.POWER, "one press, by hand")
+        self.events.info("power", "Sent one press of power")
+
     async def power_off(self) -> None:
         """Two presses of power, on a display that is awake for both of them.
 

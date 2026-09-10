@@ -54,8 +54,7 @@ export function App({ client }: { client: ApiClient }) {
         {state && (
           <PowerButton
             power={state.power}
-            onOn={() => client.powerOn()}
-            onOff={() => client.powerOff()}
+            onPress={() => client.pressPower()}
             onError={setPowerError}
           />
         )}

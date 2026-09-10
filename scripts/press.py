@@ -34,6 +34,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
+#: Set before handing over to the virtual environment's python, so a second
+#: failure there is reported rather than becoming an endless loop of exec.
+TRIED_ALREADY = "HS_PRESS_SWITCHED_PYTHON"
+
 
 def _with_the_right_python() -> None:
     """Start again under the virtual environment if this one cannot do the job.
@@ -49,15 +53,41 @@ def _with_the_right_python() -> None:
         return
     except ImportError:
         pass
-    for candidate in (ROOT / "backend" / ".venv" / "bin" / "python",
-                      Path("/opt/hydrosnooze/backend/.venv/bin/python")):
-        if candidate.exists() and Path(sys.executable).resolve() != candidate.resolve():
-            os.execv(str(candidate), [str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+    # A sentinel rather than comparing interpreter paths. The obvious guard, "am
+    # I already the venv's python", compares sys.executable against the candidate
+    # with both resolved, and a venv's bin/python is a symlink chain ending at the
+    # base interpreter. On a machine where the venv was built from the same
+    # python that runs this script, those two resolve to the same file, the guard
+    # decides it has already arrived, and it never switches at all. Which is
+    # exactly what it did on Liam's Mac while telling him to do by hand the thing
+    # it was there to do for him.
+    if os.environ.get(TRIED_ALREADY):
+        print(
+            "Ran under the virtual environment and the ESPHome library still is\n"
+            "not there. Install it with:\n"
+            "\n"
+            "  backend/.venv/bin/pip install 'aioesphomeapi>=24.6'",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    for candidate in (
+        ROOT / "backend" / ".venv" / "bin" / "python",
+        Path("/opt/hydrosnooze/backend/.venv/bin/python"),
+    ):
+        if candidate.exists():
+            os.environ[TRIED_ALREADY] = "1"
+            os.execv(
+                str(candidate),
+                [str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]],
+            )
+
     print(
-        "This one needs the ESPHome library, which is in the project's virtual\n"
-        "environment. Either run ./scripts/dev.sh once to build it, or:\n"
+        "This one needs the ESPHome library, which lives in the project's virtual\n"
+        "environment, and there is no virtual environment here. Build it with:\n"
         "\n"
-        "  backend/.venv/bin/python scripts/press.py power",
+        "  ./scripts/dev.sh",
         file=sys.stderr,
     )
     raise SystemExit(1)

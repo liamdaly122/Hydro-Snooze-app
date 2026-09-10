@@ -114,6 +114,15 @@ export class MockApiClient implements ApiClient {
     return { ...this.schedule }
   }
 
+  async pressPower(): Promise<void> {
+    await sleep(400)
+    // Unknown, because a single press with nothing verifying it means exactly
+    // that. The pretend plug settles it a moment later, the same way the real
+    // one does.
+    this.patchState({ power: 'unknown', last_command_at: nowIso() })
+    this.log('info', 'power', 'Sent one press of power')
+  }
+
   async powerOn(): Promise<void> {
     await sleep(400)
     this.patchState({

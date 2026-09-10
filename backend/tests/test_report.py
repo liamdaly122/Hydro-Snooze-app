@@ -22,7 +22,7 @@ from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.db import PreconditionRow, Sample
 from hydrosnooze.events import Event
-from hydrosnooze.models import Schedule, SleepStage, Stage
+from hydrosnooze.models import QUIET_KIND, Schedule, SleepStage, Stage
 from hydrosnooze.scheduler import REPORT_AFTER, Job
 from hydrosnooze.service import Service
 
@@ -102,13 +102,26 @@ def test_a_bed_that_never_got_near_its_stages_says_so_plainly(plan):
 
 def test_mode_swaps_are_counted_the_way_a_person_would(plan):
     swaps = [
-        Event(i, plan.bedtime_at, "info", "mode", "switched") for i in range(1, 3)
+        Event(i, plan.bedtime_at, "info", QUIET_KIND, "switched") for i in range(1, 3)
     ]
     made = report.build(plan, night(plan), swaps, all_stages(plan))
     assert "Swapped mode twice to keep it quiet." in made.body
 
     one = report.build(plan, night(plan), swaps[:1], all_stages(plan))
     assert "Swapped mode once" in one.body
+
+
+def test_an_ordinary_mode_change_is_not_a_swap_to_keep_it_quiet(plan):
+    """The bug this replaces. sequences.py has always logged every set_mode under
+    "mode": every stage boundary, everything pressed by hand, every step of
+    getting the bed ready. Counting those as well had the report claiming a
+    night swapped modes to stay quiet several times more often than it had."""
+    ordinary = [
+        Event(1, plan.bedtime_at, "info", "mode", "Set mode to warming via warm then cool"),
+        Event(2, plan.bedtime_at, "info", "mode", "Set mode to quiet via warm then cool"),
+    ]
+    made = report.build(plan, night(plan), ordinary, all_stages(plan))
+    assert "Swapped mode" not in made.body
 
 
 # --- A night that did not -------------------------------------------------------
