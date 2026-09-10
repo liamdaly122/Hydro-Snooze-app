@@ -67,17 +67,25 @@ where there is light and a laptop.
 Each DS18B20 has a unique 64-bit serial burned in at the factory, and all three
 are needed before the real configuration can be written.
 
-First a **new** API key. Not the blaster's:
+First a **new** API key. Not the blaster's: one leaked string should not open two
+devices.
 
 ```sh
-openssl rand -base64 32
+./scripts/probe-key.py
 ```
 
-Into `docs/secrets.yaml`:
+That generates it, writes it into `docs/secrets.yaml` under the name the config
+below expects, and leaves everything already in that file alone. Running it twice
+never makes a second key.
 
-```yaml
-hydrosnooze_temp_api_key: "the new key"
-```
+It does not print the key, because there is nothing to do with it by hand. The
+config refers to it as `!secret hydrosnooze_temp_api_key` and flashing picks it up
+with no further steps. `--show` prints it in full if it is ever needed for
+`backend/.env`.
+
+The point of the script is not saving typing. It is that pasting 44 random
+characters into a hidden file by hand fails silently, and fails later, as an
+unhelpful "invalid encryption key" at flash time.
 
 Then flash the board with **no sensors defined at all**, as
 `docs/esphome-probes.yaml`:
