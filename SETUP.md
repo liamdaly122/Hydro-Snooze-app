@@ -1222,5 +1222,5 @@ file was not rewritten, and the `git pull` and `install.sh` above are what is ne
 | Presses sent, unit ignores them | The codes are wrong, or the blaster cannot see the unit. Back to step 4 |
 | A stage did not change | Check the event log for a missed stage warning, then the power chart for whether the draw changed |
 | A stage set the right number but the bed never moved | Check which mode it used. If a stage between 25 and 35°C is warming when the bed needed to come down, the assumption from step 1 was wrong |
-| The unit was still on in the morning | Check the event log for the power off entry. Then check the Shelly's daily schedule is still set |
+| The unit was still on in the morning | Check the event log for the power off entry. Power needs **two presses close together** and the display awake for both, so a single press in the log means half a gesture and a unit still running. Then check the Shelly's daily schedule is still set |
 | Anything else | `journalctl -u hydrosnooze -n 100` |

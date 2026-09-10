@@ -48,8 +48,9 @@ suits, while the software gets built in parallel. Realistically the app will be 
 
 Code that behaves like an HS1001. It knows the display goes dark after five minutes and swallows the
 first two presses. It knows the temperature buttons do nothing at all while the sleep schedule is
-running. It knows the three cooling modes cycle round and wrap. Next to it, a pretend plug that
-reports believable watts based on what the pretend unit is doing.
+running. It knows the three cooling modes cycle round and wrap. It knows power takes one press to
+switch on and two, close together, to switch off. Next to it, a pretend plug that reports believable
+watts based on what the pretend unit is doing.
 
 Everything it knows comes from the manual and my own testing. Where something is a guess rather than
 a fact, the code says so in a comment, so it can be corrected once I can test it for real.

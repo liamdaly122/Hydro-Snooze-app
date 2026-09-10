@@ -8,6 +8,8 @@ exact final state is asserted.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from hydrosnooze.models import Button, Mode, rail_count
@@ -167,20 +169,56 @@ async def test_power_on_is_a_no_op_when_already_on(rig):
     assert rig.tx.presses_sent == 0
 
 
-async def test_power_off_sends_two_presses_for_a_dark_display(rig):
+# --- Switching off, which took three presses and did not work -------------------
+#
+# Power is not the toggle it looks like. One press does nothing on its own: the
+# unit wants a second close behind it. So a press swallowed by a dark display
+# does not cost a press, it costs the whole gesture, and what was left behind was
+# a single press that did nothing at all.
+
+
+@pytest.mark.parametrize("display_dark", [True, False])
+async def test_power_off_lands_from_either_display_state(rig, display_dark):
+    rig.unit_on(display_dark=display_dark)
+    await rig.commands.power_off()
+    assert not rig.unit.powered
+
+
+@pytest.mark.parametrize("display_dark", [True, False])
+async def test_power_is_pressed_exactly_twice(rig, display_dark):
+    """Two presses is the gesture. A third is not a correction, it is the start
+    of another gesture that never finishes."""
+    rig.unit_on(display_dark=display_dark)
+    await rig.commands.power_off()
+    assert rig.tx.count(Button.POWER) == 2
+
+
+async def test_a_dark_display_no_longer_eats_half_the_gesture(rig):
+    """The bug, as it happened on a real night.
+
+    Sending the pair straight at a dark display leaves one press behind, and one
+    press of power does nothing. The wake preamble in front of it is what makes
+    both halves count.
+    """
     rig.unit_on(display_dark=True)
-    await rig.commands.power_off()
-    assert not rig.unit.powered
-    assert rig.tx.presses_sent == 2
+    await rig.tx.press(Button.POWER, "off 1/2")
+    await rig.tx.press(Button.POWER, "off 2/2")
+    assert rig.unit.powered, "the display ate the first, and the second was on its own"
 
 
-async def test_power_off_corrects_itself_when_the_two_presses_cancel_out(rig):
-    # Display already awake, so press one turns it off and press two turns it
-    # straight back on. The third press is the correction.
+async def test_two_presses_ten_seconds_apart_are_not_a_pair(rig):
+    """Why the old third press never rescued it. The unit is waiting for the
+    second press and does not wait through a plug check."""
     rig.unit_on(display_dark=False)
+    await rig.tx.press(Button.POWER, "one")
+    rig.clock.advance(timedelta(seconds=10))
+    await rig.tx.press(Button.POWER, "another one")
+    assert rig.unit.powered
+
+
+async def test_power_off_is_still_a_no_op_when_the_plug_says_it_is_off(rig):
     await rig.commands.power_off()
-    assert not rig.unit.powered
-    assert rig.tx.presses_sent == 3
+    assert rig.tx.presses_sent == 0
 
 
 async def test_an_unreachable_plug_fails_rather_than_guessing(rig):

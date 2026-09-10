@@ -97,7 +97,7 @@ def test_a_number_changing_does_not_make_it_a_new_problem(notifier):
 
 def test_two_different_problems_both_get_through(notifier):
     a = event("error", "stage", "Missed the Deep stage at 22:30")
-    b = event("error", "power_off", "Pressed power three times and the plug still reads on")
+    b = event("error", "power_off", "Pressed power twice, twice over, and the plug still reads on")
     key = lambda e: f"{e.kind}:{' '.join(e.message.split()[:6])}"
     assert key(a) != key(b)
 

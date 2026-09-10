@@ -37,11 +37,20 @@ class FakeTransmitter:
         self.echo = echo
         self.on_line = on_line
         self.lines: deque[str] = deque(maxlen=LOG_LINES)
-        self.presses_sent = 0
+        #: Every button sent, in order. Kept rather than only counted, because
+        #: some sequences care which buttons went out and not just how many.
+        self.sent: list[Button] = []
+
+    @property
+    def presses_sent(self) -> int:
+        return len(self.sent)
+
+    def count(self, button: Button) -> int:
+        return sum(1 for b in self.sent if b is button)
 
     async def press(self, button: Button, note: str = "") -> None:
         result = self.unit.press(button)
-        self.presses_sent += 1
+        self.sent.append(button)
         stamp = f"{self.clock.now():%H:%M:%S.%f}"[:-5]
         mark = "SWALLOWED" if result.swallowed else "         "
         self._emit(f"{stamp}  -> {button.value:<10} {note:<13} {mark}  {result.note}")

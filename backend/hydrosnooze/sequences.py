@@ -168,11 +168,23 @@ class Commands:
         raise CommandFailed("Pressed power twice and the plug still reads off")
 
     async def power_off(self) -> None:
-        """The display may be asleep, in which case the first press only wakes it.
+        """Two presses of power, on a display that is awake for both of them.
 
-        So send two. If the display was already awake those two cancel out and the
-        unit is still on, which the verification below catches and corrects with a
-        third.
+        Power is not the toggle it looks like. One press on its own does nothing:
+        the unit wants a second, close behind it, before it switches off. So the
+        two presses here are one gesture rather than two attempts, and the wake
+        preamble in front of them matters more here than anywhere else in this
+        file. A press swallowed by a dark display does not cost a press, it costs
+        the gesture, because what is left behind is a single press and a single
+        press is nothing.
+
+        That is what was going wrong. The display sleeps after five minutes and
+        the last stage change of a night is half an hour before the wake time, so
+        at 07:30 the display was always dark. The first press woke it, the second
+        was left standing on its own, and the correction ten seconds later was
+        another one on its own. Three presses and a bed still running at
+        breakfast. A rehearsal never showed it, because its stages are seconds
+        apart and the display is still lit when the power off arrives.
         """
         self._banner("power_off()")
         watts = await self.power.read_watts()
@@ -180,17 +192,30 @@ class Commands:
             self.events.info("power", f"Already off, plug reads {watts:.1f} W")
             return
 
+        await self._off_gesture()
+        if await self._settled_off():
+            return
+
+        # One retry, then stop, and a whole gesture rather than one more press.
+        # An odd press added to a pair that did not land is how this failed in
+        # the first place.
+        await self._off_gesture()
+        if await self._settled_off():
+            self.events.warning("power", "Powered off, but it took a second pair of presses")
+            return
+
+        raise CommandFailed("Pressed power twice, twice over, and the plug still reads on")
+
+    async def _off_gesture(self) -> None:
+        """Wake the display, then the two presses that switch the unit off.
+
+        The gap between the pair is short on purpose. The unit is waiting for the
+        second press and will not wait long, and the ten second check that comes
+        afterwards is far too late to be the other half of anything.
+        """
+        await self.wake()
         await self._press(Button.POWER, "off 1/2", gap=0.6)
         await self._press(Button.POWER, "off 2/2", gap=0)
-        if await self._settled_off():
-            return
-
-        await self._press(Button.POWER, "off, the two cancelled out", gap=0)
-        if await self._settled_off():
-            self.events.warning("power", "Powered off, but the first two presses cancelled out")
-            return
-
-        raise CommandFailed("Pressed power three times and the plug still reads on")
 
     async def mute(self) -> None:
         """Silence the button beep.

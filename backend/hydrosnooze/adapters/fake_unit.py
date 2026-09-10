@@ -45,6 +45,19 @@ AUTO_APPLY_SECONDS = 8.0
 #: The display blanks after five minutes of no input.
 DISPLAY_TIMEOUT = timedelta(minutes=5)
 
+#: How long the unit waits for the second press of a power off.
+#:
+#: The power button is not the toggle it looks like from the front. One press on
+#: its own does nothing; two, close together, switch the unit off. Liam confirmed
+#: that on the real unit after a night that ended with three presses sent and the
+#: bed still running in the morning.
+#:
+#: ASSUMPTION: the length of the window. The two presses are a confirmed fact,
+#: the three seconds is not. It only has to sit between the gap the pair is sent
+#: with and the ten seconds the app then waits before asking the plug, and it
+#: does. Worth narrowing if a power off ever fails with the display awake.
+POWER_OFF_WINDOW = timedelta(seconds=3)
+
 
 @dataclass
 class PressResult:
@@ -95,6 +108,9 @@ class FakeUnit:
     powered_at: datetime | None = None
     #: For the twelve hour inactivity cutoff, which cannot be disabled.
     last_press_at: datetime | None = None
+    #: When power was last pressed while running, for the two-press power off.
+    #: A press with nothing recent behind it arms this and does nothing else.
+    power_pressed_at: datetime | None = None
     #: The button beep. The unit REMEMBERS this, so the mute button is a toggle,
     #: not a command. Sending it on every power on would unmute every other night.
     muted: bool = False
@@ -193,6 +209,9 @@ class FakeUnit:
             if button is Button.POWER:
                 self.powered = True
                 self.powered_at = now
+                # On takes one press. Only off wants the pair, so nothing is
+                # carried across from before it was switched off.
+                self.power_pressed_at = None
                 self._wake(now)
                 return self._result(button, False, "unit powered on")
             return self._result(button, True, "unit is off, only power responds")
@@ -224,6 +243,15 @@ class FakeUnit:
             return self._result(button, False, f"target {self.target}C")
 
         if button is Button.POWER:
+            # Two presses, close together. A press on its own arms this and does
+            # nothing visible, which is exactly why a press swallowed by a dark
+            # display used to leave the unit running: it turned the pair into a
+            # single press, and a single press is nothing.
+            waiting = self.power_pressed_at
+            if waiting is None or now - waiting > POWER_OFF_WINDOW:
+                self.power_pressed_at = now
+                return self._result(button, False, "one press of power, waiting for the second")
+            self.power_pressed_at = None
             self.powered = False
             self.powered_at = None
             self.schedule_armed_at = None
