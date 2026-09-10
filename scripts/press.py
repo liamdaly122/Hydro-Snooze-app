@@ -81,6 +81,11 @@ BOLD, DIM, GREEN, RED, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\0
 GAP_S = 0.35
 
 
+#: What the blaster's key is called in each of the two places it can live.
+KEY_IN_ENV = "HS_ESPHOME_ENCRYPTION_KEY"
+KEY_IN_SECRETS = "hydrosnooze_api_key"
+
+
 def env(name: str, fallback: str = "") -> str:
     """Read a setting the way the service does, from .env if it is there."""
     if name in os.environ:
@@ -95,15 +100,73 @@ def env(name: str, fallback: str = "") -> str:
     return fallback
 
 
-async def run(host: str, key: str, buttons: list[str], repeat: int) -> int:
+def from_secrets() -> str:
+    """The key out of docs/secrets.yaml, which is what flashed the board.
+
+    Worth checking as well as .env, and on a laptop it is the more reliable of
+    the two. The service needs the key in .env because that is what the service
+    reads; this machine may never have run the service, but it did flash the
+    board, and the board's key came from here.
+    """
+    where = ROOT / "docs" / "secrets.yaml"
+    if not where.exists():
+        return ""
+    for line in where.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith(f"{KEY_IN_SECRETS}:") and not stripped.startswith("#"):
+            return stripped.split(":", 1)[1].strip().strip("\"'")
+    return ""
+
+
+def find_key(explicit: str | None) -> tuple[str, str]:
+    """The blaster's key and where it was found. Never the key itself, printed."""
+    if explicit:
+        return explicit, "--key"
+    if found := env(KEY_IN_ENV):
+        return found, "backend/.env"
+    if found := from_secrets():
+        return found, "docs/secrets.yaml"
+    return "", ""
+
+
+def looks_like_a_key_problem(exc: Exception) -> bool:
+    words = str(exc).lower()
+    return "encryption" in words or "invalid key" in words or "psk" in words
+
+
+async def run(host: str, key: str, source: str, buttons: list[str], repeat: int) -> int:
     tx = EsphomeTransmitter(host, 6053, key)
     print()
     print(f"{DIM}Blaster at {host}{RESET}")
+    # The source, never the key. This output gets pasted around.
+    print(f"{DIM}Key from {source or 'nowhere: none found'}{RESET}")
 
     try:
         missing = await tx.missing_buttons()
     except Exception as exc:  # noqa: BLE001
-        print(f"{RED}Nothing answered.{RESET} {DIM}{str(exc)[:120]}{RESET}", file=sys.stderr)
+        if looks_like_a_key_problem(exc):
+            # The board answered. It just would not talk without the right key,
+            # which says nothing at all about the unit or the infrared.
+            print(f"{RED}It answered, but would not talk without the right key.{RESET}")
+            print()
+            if not source:
+                print("No key was found. It lives in one of two places:")
+                print()
+                print(f"  {BOLD}backend/.env{RESET}          as {KEY_IN_ENV}")
+                print(f"  {BOLD}docs/secrets.yaml{RESET}     as {KEY_IN_SECRETS}")
+                print()
+                print("Both are gitignored, so a machine that has never run the")
+                print("service or flashed the board will not have either.")
+            else:
+                print(f"The key in {BOLD}{source}{RESET} is not the one the board was")
+                print("flashed with. Check it against the other place it lives, or")
+                print("pass the right one with --key.")
+            print()
+            print(f"{DIM}Either way the board is powered and on the network, which is{RESET}")
+            print(f"{DIM}more than this was able to tell you a minute ago.{RESET}")
+            return 1
+
+        print(f"{RED}Nothing answered.{RESET} {DIM}{str(exc)[:110]}{RESET}", file=sys.stderr)
         print()
         print("So this is a network problem rather than an infrared one, and it is")
         print("the opposite of what the app is showing. Check the board is powered")
@@ -166,6 +229,7 @@ def main() -> int:
         help=f"buttons to press, in order. One of: {', '.join(b.value for b in Button)}",
     )
     parser.add_argument("--host", help="the blaster, if not the configured one")
+    parser.add_argument("--key", help="its API key, if it is not in either usual place")
     parser.add_argument(
         "--repeat",
         type=int,
@@ -182,8 +246,8 @@ def main() -> int:
         return 1
 
     host = args.host or env("HS_ESPHOME_HOST", "hydrosnooze-ir.local")
-    key = env("HS_ESPHOME_ENCRYPTION_KEY")
-    return asyncio.run(run(host, key, args.buttons, max(1, args.repeat)))
+    key, source = find_key(args.key)
+    return asyncio.run(run(host, key, source, args.buttons, max(1, args.repeat)))
 
 
 if __name__ == "__main__":
