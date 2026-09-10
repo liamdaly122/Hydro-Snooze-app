@@ -116,6 +116,13 @@ class Scheduler:
     #: How long this bed has really taken, when there is enough history to say.
     #: Set by the service; the scheduler itself stays free of side effects.
     learned_lead: LearnedLead | None = None
+    #: What the hose probes read right now, or None when they are not reporting.
+    #:
+    #: A callable rather than a number, because the plan is worked out fresh on
+    #: every tick and the whole point of this one is that it moves. A cold room
+    #: means a longer job, and until this existed the head start was worked out
+    #: from an assumed 20C bedroom whatever the bed was actually doing.
+    bed_now: Callable[[], float | None] | None = None
 
     def plan_in_progress(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The night we are currently inside, or the next one.
@@ -129,11 +136,14 @@ class Scheduler:
             return self.rehearsal
         if not schedule.enabled or not schedule.days_of_week or not schedule.stages:
             return None
+        # Read once, so every night considered in the loop below is worked out
+        # from the same reading rather than from whatever arrived mid-loop.
+        bed = self.bed_now() if self.bed_now else None
         for offset in range(-1, 8):
             wake_on = (now + timedelta(days=offset)).date()
             if wake_on.weekday() not in schedule.days_of_week:
                 continue
-            plan = schedule.plan_for(wake_on, self.learned_lead)
+            plan = schedule.plan_for(wake_on, self.learned_lead, bed)
             if now < plan.wake_at + POWER_OFF_GRACE:
                 return plan
         return None

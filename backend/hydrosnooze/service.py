@@ -116,7 +116,7 @@ class Service:
         self.events = EventLog(self.clock)
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
-        self.scheduler = Scheduler(learned_lead=self._learned_lead)
+        self.scheduler = Scheduler(learned_lead=self._learned_lead, bed_now=self._bed_now)
         # Read back what already ran tonight before anything can ask. A restart is
         # a routine event now: systemd brings the service back after a crash and
         # the watchdog brings it back after a stall, so losing this in memory
@@ -469,9 +469,22 @@ class Service:
         )
 
     def _push_schedule(self) -> None:
+        self._broadcast({"schedule": self.schedule_as_shown()})
+
+    def schedule_as_shown(self) -> dict[str, Any]:
+        """The schedule the way the app should see it, measurements included.
+
+        Not `schedule_json(self.schedule)`. That card says when the bed starts
+        getting ready and how long it takes, and both depend on where the bed is
+        now and on what previous nights took. Serving the bare schedule showed
+        the assumptions on screen while the scheduler quietly ran on the real
+        numbers, which is the one kind of disagreement this project cannot have.
+        """
         from .api.schemas import schedule_json
 
-        self._broadcast({"schedule": schedule_json(self.schedule)})
+        return schedule_json(
+            self.schedule, bed_c=self.probes.bed_c, learned=self._learned_lead
+        )
 
     # --- Loops ----------------------------------------------------------------
 
@@ -744,6 +757,7 @@ class Service:
             self.schedule.cooling_speed,
             now=self.clock.now(),
             total_seconds=seconds,
+            bed_c=self._bed_now(),
         )
         # A fresh set of marks, so a second rehearsal is not skipped as one that
         # has already fired. This drops the real night's marks too, which is
@@ -883,6 +897,15 @@ class Service:
 
     def _learned_lead(self, mode: Mode, target_c: int) -> int | None:
         return self.db.learned_lead_minutes(mode.value, target_c)
+
+    def _bed_now(self) -> float | None:
+        """Where the bed is starting from, for working out the head start.
+
+        None when the probes are quiet, and then everything downstream falls back
+        to assuming a room-temperature bed, which is what it did before there was
+        anything to measure.
+        """
+        return self.probes.bed_c
 
     async def _run_job(self, job: Job) -> bool:
         if job.kind == "precool":

@@ -36,9 +36,10 @@ export const MAX_TEMPERATURE_C = 55
 
 /**
  * How the bed gets ready before the first stage starts. Worked out by the
- * service, never chosen: the bed starts at room temperature, the first stage
- * says where it has to be, and the gap decides both the mode and how long
- * before bedtime to switch on.
+ * service, never chosen: the bed starts wherever the hose probes say it is, the
+ * first stage says where it has to be, and the gap decides both the mode and
+ * how long before bedtime to switch on. With no probes reporting it assumes a
+ * room-temperature bed and `reason` says so.
  *
  * A null mode means there is nothing to do, and `reason` says why in words.
  */

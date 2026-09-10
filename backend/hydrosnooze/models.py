@@ -148,11 +148,13 @@ DEFAULT_LEAD_MINUTES: dict[Mode, int] = {
 #: to pull the bed down before bedtime.
 PRECOOL_MODE = Mode.TURBO
 
-#: What the bedroom sits at when nothing is running, and so what the bed sits at
-#: too. Pre-conditioning is the job of moving it from here to the first stage.
+#: Where to assume the bed starts from when nothing can measure it.
 #:
-#: ASSUMPTION: a UK bedroom overnight. Nothing in the house measures this, and it
-#: is the single number here most worth replacing with a real reading.
+#: ASSUMPTION: a UK bedroom overnight. This was the only answer there was until
+#: the hose probes went on, and it is still the answer whenever they are quiet.
+#: `preconditioning_for` takes the measured temperature when there is one and
+#: says which of the two it used, so the app never shows this number dressed up
+#: as a reading.
 ASSUMED_ROOM_C = 20
 
 #: Getting going costs time whatever the distance: the unit powers on, the water
@@ -277,50 +279,59 @@ LearnedLead = Callable[[Mode, int], "int | None"]
 def preconditioning_for(
     first_temp_c: int,
     cooling_speed: Mode,
-    room_c: int = ASSUMED_ROOM_C,
+    bed_c: float | None = None,
     learned: LearnedLead | None = None,
 ) -> Preconditioning:
     """Pick the mode and the head start, from the gap the bed has to close.
 
     This is `mode_for_target` again, with a different place to come from. A stage
-    comes from the stage before it; the first stage comes from the room. A cooler
-    cannot warm a bed and a heater cannot cool one, so the direction picks the
-    mode either way.
+    comes from the stage before it; the first stage comes from wherever the bed
+    is now. A cooler cannot warm a bed and a heater cannot cool one, so the
+    direction picks the mode either way.
 
-    The awkward case is a first stage above the room but below 25C. The bed has to
+    `bed_c` is that starting point, off the hose probes. None means they are not
+    reporting, and then this falls back to assuming a room-temperature bed, which
+    is what it did for months before there was anything to measure. The two are
+    never blurred together: the reason says which one it used, because a guess
+    printed as a reading is the one thing this project does not do.
+
+    The awkward case is a first stage above the bed but below 25C. The bed has to
     warm, warming mode cannot express a number that low, and running the cooler at
     a bed that needs heat would be worse than doing nothing. So it does nothing,
     and says so.
 
     The head start is a fixed cost plus the distance, at whatever rate that mode
-    manages across its own range. Every number in it is an assumption until the
-    plug has watched a few of these.
+    manages across its own range. That rate is still an assumption until a few of
+    these have been timed, and `learned` is how the timed answer gets back in.
     """
-    gap = first_temp_c - room_c
+    start = float(ASSUMED_ROOM_C) if bed_c is None else bed_c
+    # Two different claims, and they read differently on purpose.
+    said = f"about {ASSUMED_ROOM_C}C" if bed_c is None else f"{start:.1f}C on the hoses"
+    gap = first_temp_c - start
 
     if abs(gap) <= PRECONDITION_DEADBAND_C:
         return Preconditioning(
-            None, 0, f"The bed already sits at about {first_temp_c}C, so there is nothing to do."
+            None, 0, f"The bed is at {said} already, near enough to {first_temp_c}C to leave alone."
         )
 
     if gap < 0:
         mode = PRECOOL_MODE
-        reason = f"Cooling the bed from about {room_c}C down to {first_temp_c}C."
+        reason = f"Cooling the bed from {said} down to {first_temp_c}C."
     elif first_temp_c >= WARMING_FLOOR_C:
         mode = Mode.WARMING
-        reason = f"Warming the bed from about {room_c}C up to {first_temp_c}C."
+        reason = f"Warming the bed from {said} up to {first_temp_c}C."
     else:
         return Preconditioning(
             None,
             0,
-            f"The bed has to warm from about {room_c}C to {first_temp_c}C, and warming mode only "
+            f"The bed has to warm from {said} to {first_temp_c}C, and warming mode only "
             f"goes down to {WARMING_FLOOR_C}C, so the unit has no way to get it there. Body heat "
             f"does that job once you are in it.",
         )
 
-    # Measured beats estimated. The plug watches how long the unit runs before it
-    # settles at its setpoint, so after a few nights there is a real number for
-    # this bed in this room, rather than a rate I picked.
+    # Measured beats estimated. The probes watch the gap between the two hoses
+    # close, and the plug watches the draw fall, so after a few nights there is a
+    # real number for this bed in this room rather than a rate I picked.
     measured = learned(mode, first_temp_c) if learned else None
     if measured is not None:
         return Preconditioning(
@@ -335,7 +346,7 @@ def preconditioning_for(
     return Preconditioning(
         mode,
         min(round(lead), PRECONDITION_MAX_MINUTES),
-        f"{reason} Estimated, until the plug has watched a few of these.",
+        f"{reason} Estimated, until a few of these have been timed.",
     )
 
 
@@ -509,7 +520,7 @@ def plan_for_wake(
     stages: list[SleepStage],
     cooling_speed: Mode = Mode.QUIET,
     *,
-    room_c: int = ASSUMED_ROOM_C,
+    bed_c: float | None = None,
     learned: LearnedLead | None = None,
 ) -> NightPlan:
     """Work backwards from the morning you want to wake up.
@@ -538,8 +549,10 @@ def plan_for_wake(
         cursor = ends
 
     # Not a setting. Worked out from where the bed starts and where it has to be.
+    # With no stages there is no first temperature, so it is handed its own
+    # starting point and comes back with nothing to do, which is correct.
     pre = preconditioning_for(
-        stages[0].temp_c if stages else room_c, cooling_speed, room_c, learned
+        stages[0].temp_c if stages else ASSUMED_ROOM_C, cooling_speed, bed_c, learned
     )
     precool_at = bedtime_at - timedelta(minutes=pre.lead_minutes) if pre.runs else None
     return NightPlan(
@@ -571,6 +584,7 @@ def rehearsal_plan(
     *,
     now: datetime,
     total_seconds: int,
+    bed_c: float | None = None,
 ) -> NightPlan:
     """A whole night compressed into a few minutes, for testing on real hardware.
 
@@ -613,7 +627,7 @@ def rehearsal_plan(
 
     # Pre-conditioning is chosen the same way it is for a real night, so the
     # rehearsal exercises that decision too. Only its head start is shortened.
-    pre = preconditioning_for(stages[0].temp_c, cooling_speed)
+    pre = preconditioning_for(stages[0].temp_c, cooling_speed, bed_c)
     pre = replace(pre, lead_minutes=max(1, REHEARSAL_LEAD_S // 60))
     return NightPlan(
         preconditioning=pre,
@@ -679,14 +693,30 @@ class Schedule:
     def stage(self, stage: Stage) -> SleepStage | None:
         return next((s for s in self.stages if s.stage is stage), None)
 
-    @property
-    def preconditioning(self) -> Preconditioning:
-        """How the bed gets ready tonight. Decided from the schedule, not stored."""
-        return preconditioning_for(self.first_temp_c, self.cooling_speed)
+    def preconditioning(
+        self, bed_c: float | None = None, learned: LearnedLead | None = None
+    ) -> Preconditioning:
+        """How the bed gets ready tonight. Decided from the schedule, not stored.
 
-    def plan_for(self, wake_on: date, learned: LearnedLead | None = None) -> NightPlan:
+        Both arguments are measurements the schedule cannot reach on its own, so
+        they are passed in. Left out, this answers with the assumptions, which is
+        what a bare schedule with no service behind it can honestly say.
+        """
+        return preconditioning_for(self.first_temp_c, self.cooling_speed, bed_c, learned)
+
+    def plan_for(
+        self,
+        wake_on: date,
+        learned: LearnedLead | None = None,
+        bed_c: float | None = None,
+    ) -> NightPlan:
         return plan_for_wake(
-            wake_on, self.wake_time, self.stages, self.cooling_speed, learned=learned
+            wake_on,
+            self.wake_time,
+            self.stages,
+            self.cooling_speed,
+            bed_c=bed_c,
+            learned=learned,
         )
 
     def next_plan(self, now: datetime) -> NightPlan | None:

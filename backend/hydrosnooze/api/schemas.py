@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..models import DeviceHealth, DeviceState, Schedule, modes_for
+from ..models import DeviceHealth, DeviceState, LearnedLead, Schedule, modes_for
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -33,8 +33,20 @@ def state_json(state: DeviceState) -> dict[str, Any]:
     }
 
 
-def schedule_json(schedule: Schedule) -> dict[str, Any]:
-    pre = schedule.preconditioning
+def schedule_json(
+    schedule: Schedule,
+    *,
+    bed_c: float | None = None,
+    learned: LearnedLead | None = None,
+) -> dict[str, Any]:
+    """The schedule, plus the two things about tonight that are not stored in it.
+
+    `bed_c` is what the hose probes read now and `learned` is what previous
+    nights measured. Both change how the bed gets ready, and leaving them out
+    used to mean the card described the assumptions while the scheduler ran on
+    the real numbers.
+    """
+    pre = schedule.preconditioning(bed_c, learned)
     return {
         "id": schedule.id,
         "name": schedule.name,

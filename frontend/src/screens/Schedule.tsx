@@ -208,7 +208,7 @@ export function Schedule({
 
       {/*
         Never a control. A cooler cannot warm a bed and a heater cannot cool one,
-        so the direction from room temperature to the first stage picks the mode,
+        so the direction from where the bed is now to the first stage picks the mode,
         and the size of that gap picks how early to switch on.
       */}
       <Card label="Getting the bed ready">
@@ -225,8 +225,8 @@ export function Schedule({
         </div>
         <p className="footnote">{pre.reason}</p>
         <p className="footnote">
-          Worked out, not chosen. It assumes the room sits at about 20°C, which is the one number
-          here that a real thermometer would improve.
+          Worked out, not chosen. The direction the bed has to move picks the mode, and how far it
+          has to go picks how early to switch on.
         </p>
       </Card>
 

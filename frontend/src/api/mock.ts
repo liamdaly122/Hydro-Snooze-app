@@ -305,7 +305,7 @@ function fitStages(stages: SleepStage[], total: number): SleepStage[] {
 /**
  * Mirrors `preconditioning_for` in backend/hydrosnooze/models.py.
  *
- * The bed starts at room temperature and the first stage says where it has to
+ * The bed starts wherever the probes say it is and the first stage says where it has to
  * be. The direction picks the mode, the distance picks the head start, and a
  * gap nothing can close means nothing runs.
  */

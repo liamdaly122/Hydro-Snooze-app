@@ -16,6 +16,7 @@ from datetime import datetime, time, timedelta
 
 import pytest
 
+from hydrosnooze.adapters.probes import RETURN, Reading
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.models import Mode, Power, Schedule, SleepStage, Stage
@@ -46,6 +47,12 @@ def _schedule(**kwargs) -> Schedule:
     return Schedule(**base)  # type: ignore[arg-type]
 
 
+def hoses(service, bed_c: float) -> None:
+    """Put a current reading on the return probe, which is the one the bed
+    temperature is taken from."""
+    service.probes.readings[RETURN] = Reading(bed_c, service.clock.now())
+
+
 def _warm_first(**kwargs) -> Schedule:
     return _schedule(
         stages=[SleepStage(Stage.DEEP, 240, 26), SleepStage(Stage.WAKE, 30, 28)],
@@ -55,20 +62,22 @@ def _warm_first(**kwargs) -> Schedule:
 
 # --- Deciding how the bed gets ready ------------------------------------------
 #
-# Never a setting. The bed starts at room temperature, the first stage says where
-# it has to be, and the gap between them decides the mode and the head start.
+# Never a setting. The bed starts wherever the hose probes say it is, the first
+# stage says where it has to be, and the gap between them decides the mode and
+# the head start. With no probes reporting it assumes a room-temperature bed,
+# which is what it did for months before there was anything to measure.
 
 
 @pytest.mark.parametrize("temp", [15, 17, 18])
 def test_a_cold_first_stage_pre_cools_in_turbo(temp):
-    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning()
     assert pre.mode is Mode.TURBO
     assert "Cooling the bed" in pre.reason
 
 
 @pytest.mark.parametrize("temp", [25, 28, 30])
 def test_a_warm_first_stage_pre_heats(temp):
-    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning()
     assert pre.mode is Mode.WARMING
     assert "Warming the bed" in pre.reason
 
@@ -77,7 +86,7 @@ def test_a_warm_first_stage_pre_heats(temp):
 def test_warmer_than_the_room_but_below_warming_floor_does_nothing(temp):
     """The one gap nothing can close. The bed has to warm, warming mode cannot
     express a number that low, and running the cooler at it would be worse."""
-    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning()
     assert pre.mode is None
     assert not pre.runs
     assert "25C" in pre.reason
@@ -85,16 +94,16 @@ def test_warmer_than_the_room_but_below_warming_floor_does_nothing(temp):
 
 @pytest.mark.parametrize("temp", [19, 20, 21])
 def test_a_first_stage_at_room_temperature_does_nothing(temp):
-    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning
+    pre = _schedule(stages=[SleepStage(Stage.DEEP, 240, temp)]).preconditioning()
     assert pre.mode is None
-    assert "already sits" in pre.reason
+    assert "near enough" in pre.reason
 
 
 def test_the_head_start_grows_with_the_distance():
     """Not a fixed thirty minutes any more. Three degrees is a shorter job than
     ten, and starting an hour early for three degrees just wastes power."""
-    near = _schedule(stages=[SleepStage(Stage.DEEP, 240, 18)]).preconditioning
-    far = _schedule(stages=[SleepStage(Stage.DEEP, 240, 15)]).preconditioning
+    near = _schedule(stages=[SleepStage(Stage.DEEP, 240, 18)]).preconditioning()
+    far = _schedule(stages=[SleepStage(Stage.DEEP, 240, 15)]).preconditioning()
     assert far.lead_minutes > near.lead_minutes
     assert 10 <= near.lead_minutes <= 90
     assert 10 <= far.lead_minutes <= 90
@@ -110,7 +119,7 @@ def test_nothing_to_do_means_no_pre_conditioning_in_the_plan():
 def test_the_plan_starts_exactly_its_head_start_before_bedtime():
     schedule = _schedule()
     plan = schedule.plan_for(datetime(2026, 9, 8).date())
-    lead = timedelta(minutes=schedule.preconditioning.lead_minutes)
+    lead = timedelta(minutes=schedule.preconditioning().lead_minutes)
     assert plan.precool_at == plan.bedtime_at - lead
 
 
@@ -570,3 +579,85 @@ def test_a_fake_transmitter_with_a_real_plug_is_called_out(tmp_path):
         assert any("HS_POWER_MONITOR=fake" in m for m in messages)
     finally:
         asyncio.run(svc.stop())
+
+
+
+# --- Where the bed actually starts from ----------------------------------------
+#
+# This was an assumed 20C bedroom until the hose probes went on. The number was
+# close most nights and wrong on the nights it mattered, because a cold room is
+# exactly when the head start needs to be longer.
+
+
+def test_the_head_start_is_worked_out_from_the_measured_bed(service):
+    """A colder bed is a longer job. That is the whole point of measuring it."""
+    schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 28)])
+
+    assumed = schedule.preconditioning()
+    cold = schedule.preconditioning(15.5)
+    warm = schedule.preconditioning(23.0)
+
+    assert cold.lead_minutes > assumed.lead_minutes > warm.lead_minutes
+
+
+def test_a_measured_start_says_so_and_an_assumed_one_says_so_too(service):
+    """The project's oldest rule: never show a value that has not been confirmed.
+
+    Both of these are printed on the same card in the same place, so the words
+    are the only thing telling them apart.
+    """
+    schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 28)])
+
+    assert "on the hoses" in schedule.preconditioning(19.7).reason
+    assert "19.7C" in schedule.preconditioning(19.7).reason
+
+    assumed = schedule.preconditioning().reason
+    assert "about 20C" in assumed
+    assert "hoses" not in assumed
+
+
+def test_a_measured_bed_can_change_which_way_the_unit_has_to_go(service):
+    """Not just the timing. A first stage of 22C is warming from a 19C bed and
+    cooling from a 26C one, and assuming 20C gets the second of those wrong."""
+    schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 22)])
+
+    assert schedule.preconditioning(26.0).mode is Mode.TURBO
+    # Warming mode only goes down to 25C, so from below there is nothing it can
+    # do. It says so rather than running the cooler at a bed that needs heat.
+    assert schedule.preconditioning(19.0).mode is None
+
+
+def test_quiet_probes_leave_the_head_start_exactly_where_it_was(service):
+    """A probe board on a bedroom Wi-Fi link cannot be allowed to change a night
+    by going quiet. Without a reading this is the behaviour it has always had."""
+    schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 28)])
+    quiet = schedule.preconditioning(None)
+    assert quiet.mode is Mode.WARMING
+    assert quiet.lead_minutes == schedule.preconditioning(20.0).lead_minutes
+
+
+def test_the_scheduler_uses_the_reading_and_not_only_the_card(service):
+    """The number on screen and the moment the unit switches on are the same
+    calculation. Showing one and running the other is the one disagreement this
+    project cannot have."""
+    service.schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 28)])
+    now = service.clock.now()
+
+    warm = service.scheduler.plan_in_progress(service.schedule, now)
+    hoses(service, 15.0)
+    cold = service.scheduler.plan_in_progress(service.schedule, now)
+
+    assert cold.precool_at < warm.precool_at
+    assert cold.bedtime_at == warm.bedtime_at, "only the head start moves"
+
+
+def test_what_the_app_is_served_carries_the_measurement(service):
+    """The card reads this, so it has to be the answer the scheduler is using."""
+    service.schedule = _schedule(stages=[SleepStage(Stage.DEEP, 240, 28)])
+
+    assert "about 20C" in service.schedule_as_shown()["preconditioning"]["reason"]
+
+    hoses(service, 15.0)
+    shown = service.schedule_as_shown()["preconditioning"]
+    assert "15.0C on the hoses" in shown["reason"]
+    assert shown["lead_minutes"] == service.schedule.preconditioning(15.0).lead_minutes

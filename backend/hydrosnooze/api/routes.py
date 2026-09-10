@@ -19,7 +19,7 @@ from ..models import (
 )
 from ..sequences import CommandFailed
 from ..service import Service
-from .schemas import health_json, schedule_json, state_json
+from .schemas import health_json, state_json
 
 router = APIRouter(prefix="/api")
 
@@ -82,7 +82,7 @@ async def get_state(request: Request) -> dict[str, object]:
 
 @router.get("/schedule")
 async def get_schedule(request: Request) -> dict[str, object]:
-    return schedule_json(_service(request).schedule)
+    return _service(request).schedule_as_shown()
 
 
 @router.get("/events")
@@ -160,7 +160,8 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
     if "days_of_week" in data and any(d < 0 or d > 6 for d in data["days_of_week"]):
         raise HTTPException(422, "days_of_week must be 0 (Monday) to 6 (Sunday)")
 
-    return schedule_json(service.update_schedule(data))
+    service.update_schedule(data)
+    return service.schedule_as_shown()
 
 
 @router.post("/power/on")
