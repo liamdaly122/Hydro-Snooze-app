@@ -13,7 +13,7 @@ from datetime import timedelta
 import pytest
 
 from hydrosnooze.models import Button, Mode, rail_count
-from hydrosnooze.sequences import CommandFailed
+from hydrosnooze.sequences import CommandFailed, NotLanding
 
 pytestmark = pytest.mark.asyncio
 
@@ -351,3 +351,28 @@ async def test_the_scheduled_power_off_is_untouched_by_any_of_this(rig):
     assert not rig.unit.powered
     assert rig.tx.count(Button.POWER) == 2
     assert rig.tx.count(Button.TEMP_DOWN) == 2, "the wake preamble"
+
+
+# --- Curing the one failure that can be proved ----------------------------------
+#
+# A temperature press has no readback: one that vanished into a wedged board looks
+# exactly like one that worked, so there is nothing to react to. Power is the
+# exception, because the plug is watching. A unit that was off and stays off
+# through two presses of power did not receive them, and that is a fact rather
+# than a guess.
+
+
+async def test_a_press_that_provably_did_not_arrive_has_its_own_type(rig):
+    """So the one failure with a remedy can be told from the several without."""
+    rig.unit.deaf = True  # the board answers, the unit hears nothing
+    with pytest.raises(NotLanding):
+        await rig.commands.power_on()
+
+
+async def test_an_unreachable_plug_is_not_that_failure(rig):
+    """Not knowing is not the same as knowing it failed, and rebooting a board
+    because a plug went quiet would be answering the wrong question."""
+    rig.power.offline = True
+    with pytest.raises(CommandFailed) as caught:
+        await rig.commands.power_on()
+    assert not isinstance(caught.value, NotLanding)

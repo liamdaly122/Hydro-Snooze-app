@@ -111,6 +111,8 @@ class FakeUnit:
     #: When power was last pressed while running, for the two-press power off.
     #: A press with nothing recent behind it arms this and does nothing else.
     power_pressed_at: datetime | None = None
+    #: Set to model a blaster that answers but transmits nothing. See press().
+    deaf: bool = False
     #: The button beep. The unit REMEMBERS this, so the mute button is a toggle,
     #: not a command. Sending it on every power on would unmute every other night.
     muted: bool = False
@@ -198,6 +200,18 @@ class FakeUnit:
     def press(self, button: Button) -> PressResult:
         now = self.clock.now()
         self._settle(now)
+
+        # The failure that has no other signature. The board is on the network,
+        # the API answers, every button entity is there, every press reports
+        # success, and no infrared arrives. It happened on 10 September and the
+        # only cure was pulling the USB plug out.
+        #
+        # Modelled here so the recovery can be tested without unplugging
+        # anything. Note it does not even reset the inactivity clock: nothing
+        # reached the unit, so nothing about the unit changed.
+        if self.deaf:
+            return self._result(button, True, "nothing arrived: the unit heard no infrared")
+
         self.last_press_at = now
 
         # Inside the wizard presses act immediately. The wake preamble does not

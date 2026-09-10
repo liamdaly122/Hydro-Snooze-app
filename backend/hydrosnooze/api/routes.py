@@ -277,6 +277,22 @@ async def post_notify_test(request: Request) -> dict[str, object]:
     return {"sent": True}
 
 
+@router.post("/blaster/restart")
+async def post_blaster_restart(request: Request) -> dict[str, object]:
+    """Restart the blaster board, for when it is answering but not transmitting.
+
+    Infrared is one-way, so nothing here can tell a working transmitter from a
+    wedged one. This does not diagnose that, it just makes the cure reachable
+    from a phone instead of from behind the bed.
+    """
+    service = _service(request)
+    try:
+        await service.reboot_blaster()
+    except CommandFailed as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return state_json(service.state)
+
+
 @router.post("/mute")
 async def post_mute(request: Request) -> dict[str, object]:
     """Toggle the unit's button beep. A one-time setup action, never automatic.

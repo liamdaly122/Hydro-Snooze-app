@@ -293,3 +293,96 @@ async def test_a_correction_that_fails_backs_off_like_one_that_worked(service):
     bed(service, 27.1)
     await service._correct_mode(step, Power.ON, service.clock.now())
     assert tried == 2, "and does try again once the dwell has passed"
+
+
+# --- Curing a board that answers but transmits nothing ---------------------------
+#
+# Liam's complaint, 10 September: the blaster showed green, the app reported no
+# problem, and nothing reached the unit. Unplugging it and plugging it back in was
+# the only cure, and it had to be done by hand, behind a bed, at night.
+
+
+class Wedged:
+    """A blaster that answers everything and emits nothing until it is rebooted."""
+
+    def __init__(self, unit):
+        self.unit = unit
+        self.reboots = 0
+
+    async def reboot(self):
+        self.reboots += 1
+        self.unit.deaf = False
+
+
+@pytest.fixture
+def wedged(service):
+    service.unit.deaf = True
+    stub = Wedged(service.unit)
+    service.transmitter.reboot = stub.reboot
+    return stub
+
+
+@pytest.mark.asyncio
+async def test_a_power_command_that_proves_nothing_arrives_reboots_the_board(service, wedged):
+    """The whole point. Nobody is awake at seven in the morning to notice that
+    the bed did not switch off, so the app has to notice instead."""
+    await service.power_on()
+
+    assert wedged.reboots == 1
+    assert service.unit.powered, "and the retry after the reboot worked"
+    assert service.state.power is Power.ON
+
+
+@pytest.mark.asyncio
+async def test_it_says_what_it_did_rather_than_healing_in_silence(service, wedged):
+    """A board that needs rebooting nightly is a board on its way out, and that
+    is invisible if the recovery never leaves a mark."""
+    await service.power_on()
+    said = [e for e in service.events.recent(20) if "restarted" in e.message]
+    assert said and "nothing is reaching the unit" in said[0].message.lower()
+
+
+@pytest.mark.asyncio
+async def test_it_reboots_once_and_not_in_a_loop(service):
+    """A genuinely broken board must not be power cycled every thirty seconds."""
+    service.unit.deaf = True
+    reboots = 0
+
+    async def never_helps():
+        nonlocal reboots
+        reboots += 1
+
+    service.transmitter.reboot = never_helps
+    await service.power_on()
+
+    assert reboots == 1
+    assert service.state.power is Power.UNKNOWN, "and it ends up honest about it"
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_plug_does_not_reboot_anything(service):
+    """Not knowing is not the same as knowing it failed. Rebooting a board
+    because a plug went quiet answers a question nobody asked."""
+    service.power.offline = True
+    reboots = 0
+
+    async def count():
+        nonlocal reboots
+        reboots += 1
+
+    service.transmitter.reboot = count
+    await service.power_on()
+    assert reboots == 0
+
+
+@pytest.mark.asyncio
+async def test_the_nightly_switch_off_gets_the_same_treatment(service, wedged):
+    """The one that matters most: nothing else turns the bed off, and nobody is
+    awake to see that it did not."""
+    service.unit.powered = True
+    service.unit.deaf = True
+    plan = service.schedule.plan_for(service.clock.now().date())
+
+    assert await service._run_power_off(plan) is True
+    assert wedged.reboots == 1
+    assert not service.unit.powered

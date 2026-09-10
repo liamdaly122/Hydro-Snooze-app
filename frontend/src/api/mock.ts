@@ -191,6 +191,11 @@ export class MockApiClient implements ApiClient {
 
   private muted = false
 
+  async restartBlaster(): Promise<void> {
+    await sleep(400)
+    this.log('info', 'blaster', 'Asked the blaster to restart.')
+  }
+
   async mute(): Promise<void> {
     await sleep(400)
     // A toggle the unit remembers, which is exactly why it is never automatic.

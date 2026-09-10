@@ -78,6 +78,13 @@ export interface ApiClient {
    * every other night.
    */
   mute(): Promise<void>
+  /**
+   * Restart the blaster board.
+   *
+   * For the failure nothing here can see: the board answering, every press
+   * reporting success, and no infrared leaving the LED.
+   */
+  restartBlaster(): Promise<void>
   setMode(mode: Mode): Promise<void>
 
   /** How each device is doing. The service is not in here: see LiveUpdate.connected. */

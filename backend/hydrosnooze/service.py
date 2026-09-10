@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -33,9 +34,9 @@ from .models import (
     NightPlan,
     Power,
     Schedule,
+    QUIET_KIND,
     Stage,
     StageStep,
-    QUIET_KIND,
     mode_for_target,
     quieter_mode,
     range_for,
@@ -44,7 +45,7 @@ from .models import (
 from . import clocksync, pi, report, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
-from .sequences import CommandFailed, Commands
+from .sequences import CommandFailed, Commands, NotLanding
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +84,13 @@ MAX_PRECONDITION_SECONDS = 3 * 60 * 60
 #: the quiet mode straight away, not after half an hour of the noise that this
 #: whole feature exists to avoid.
 MODE_DWELL = timedelta(minutes=30)
+
+#: How long to give the blaster to reboot and rejoin the Wi-Fi before trying the
+#: command that failed again. An ESP32 is up in two or three seconds and on the
+#: network a few after that; this is generous rather than tight, because the cost
+#: of waiting is a few seconds and the cost of being early is the retry failing
+#: for a reason that has nothing to do with the fault.
+REBOOT_SECONDS = 15.0
 
 #: How far apart the two hose probes have to get before the unit counts as
 #: actually working, and how close they have to come back before the bed counts
@@ -1188,7 +1196,10 @@ class Service:
         self.events.info("power_off", f"Night finished at {plan.wake_at:%H:%M}, switching off")
         async with self._lock:
             try:
-                await self.commands.power_off()
+                # Through a reboot if the presses prove they are not arriving.
+                # This is the one that matters most: nothing else switches the
+                # bed off, and nobody is awake to notice that it did not.
+                await self._through_a_reboot(self.commands.power_off)
                 self._set_state(
                     power=Power.OFF, assumed_target_c=None, last_command_at=self.clock.now()
                 )
@@ -1235,10 +1246,45 @@ class Service:
 
     # --- Commands from the app ------------------------------------------------
 
+    async def _through_a_reboot(self, what: Callable[[], Awaitable[None]]) -> None:
+        """Run a verified command, and if it proves the infrared is not arriving,
+        restart the board and try once more.
+
+        This is the only place the app can do this honestly. A temperature press
+        has no readback, so one that vanished looks exactly like one that worked,
+        and there is nothing to react to. Power is different: the plug is
+        watching, and a unit that was off and stays off through two presses of
+        power did not receive them. That is a fact rather than a guess, and it is
+        the one that earns an automatic restart.
+
+        Once, and only on that specific failure. A board that is genuinely broken
+        must not be rebooted in a loop, and a failure that means something else
+        must not be answered by rebooting anything.
+        """
+        try:
+            await what()
+            return
+        except NotLanding as first:
+            self.events.warning(
+                "blaster",
+                f"{first} The board is answering but nothing is reaching the unit, "
+                "so it is being restarted and tried once more.",
+            )
+
+        try:
+            await self.transmitter.reboot()
+        except Exception as exc:  # noqa: BLE001
+            raise CommandFailed(f"Nothing is reaching the unit, and the board would not restart: {exc}") from exc
+
+        # It reboots and rejoins the Wi-Fi in a few seconds. Waiting here rather
+        # than failing immediately, because the whole point is the retry.
+        await self.clock.sleep(REBOOT_SECONDS)
+        await what()
+
     async def power_on(self) -> None:
         async with self._lock:
             try:
-                await self.commands.power_on()
+                await self._through_a_reboot(self.commands.power_on)
                 self._set_state(power=Power.ON, last_command_at=self.clock.now())
             except CommandFailed as exc:
                 self._fail("power", exc, power=Power.UNKNOWN)
@@ -1246,7 +1292,7 @@ class Service:
     async def power_off(self) -> None:
         async with self._lock:
             try:
-                await self.commands.power_off()
+                await self._through_a_reboot(self.commands.power_off)
                 self._set_state(
                     power=Power.OFF,
                     current_stage=None,
@@ -1271,6 +1317,31 @@ class Service:
                 self._set_state(power=Power.UNKNOWN, last_command_at=self.clock.now())
             except CommandFailed as exc:
                 self._fail("power", exc, power=Power.UNKNOWN)
+
+    async def reboot_blaster(self) -> None:
+        """Restart the blaster board.
+
+        For the failure the device bar cannot see: the board answering, every
+        press reporting success, and no infrared leaving the LED. Nothing on this
+        side can tell that apart from a working board, so there is no way to do
+        it automatically and be sure. What there is now is a way to do it without
+        walking round the bed.
+        """
+        async with self._lock:
+            try:
+                await self.transmitter.reboot()
+            except Exception as exc:  # noqa: BLE001
+                self.events.error("blaster", f"Could not restart the blaster: {exc}")
+                raise CommandFailed(str(exc)) from exc
+        self.events.info(
+            "blaster",
+            "Asked the blaster to restart. It will be off the network for a few "
+            "seconds and the dot will go red and come back.",
+        )
+        # It has gone. Say so now rather than letting the bar show green for
+        # however long it is until the next check.
+        self._blaster_ok = False
+        self._push_state()
 
     def mode_for_now(self, target_c: int) -> Mode:
         """Which mode a temperature set by hand should land in.

@@ -23,6 +23,10 @@ from ..models import Button
 log = logging.getLogger(__name__)
 
 
+#: The board's own restart button, which is not one of the remote's eight.
+RESTART_BUTTON = "restart"
+
+
 class TransmitterError(RuntimeError):
     pass
 
@@ -170,6 +174,37 @@ class EsphomeTransmitter:
         if inspect.isawaitable(result):
             await result
         log.debug("sent %s %s", button.value, note)
+
+    async def reboot(self) -> None:
+        """Restart the board, which is the only cure for a wedged one.
+
+        There is a failure this project cannot see any other way: the board on
+        the network, the API answering, every button entity present, every press
+        reporting success, and no infrared coming out of the LED at all. It
+        happened on 10 September and the fix was to reach behind a bed and pull
+        the USB plug out.
+
+        So the board has a restart button now and this presses it. Not a
+        diagnosis, a cure: it costs a few seconds of a board that does nothing
+        for hours at a time, and it turns the one failure with no remedy into one
+        with a remedy that can be reached from a phone.
+        """
+        async with self._lock:
+            await self._connect()
+            key = self._buttons.get(RESTART_BUTTON)
+            if key is None:
+                raise TransmitterError(
+                    f"No '{RESTART_BUTTON}' button on {self.host}. Reflash it with "
+                    "docs/esphome-hydrosnooze.yaml, which has one."
+                )
+            assert self._client is not None
+            result = self._client.button_command(key)
+            if inspect.isawaitable(result):
+                await result
+            log.info("asked the blaster at %s to restart", self.host)
+        # The board goes away for a few seconds. Drop the connection rather than
+        # leaving a dead socket for the next press to discover.
+        await self._drop()
 
     async def close(self) -> None:
         await self._drop()

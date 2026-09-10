@@ -38,6 +38,20 @@ class CommandFailed(RuntimeError):
     """A sequence could not be verified. State goes to unknown, no blind retry."""
 
 
+class NotLanding(CommandFailed):
+    """Presses went out, the plug answered, and nothing about the unit changed.
+
+    The one moment this project can prove infrared is not arriving. Everywhere
+    else a press is fire and forget: the temperature has no readback, so a press
+    that vanished looks exactly like one that worked. Power is different, because
+    the plug is watching, and a unit that was off and stays off through two
+    presses of power did not receive them.
+
+    Worth its own type rather than a message to match on, because it is the one
+    failure with a specific remedy: restart the board and try once more.
+    """
+
+
 class Commands:
     """Every sequence the app can run against the unit."""
 
@@ -165,7 +179,7 @@ class Commands:
             self.events.warning("power", "Powered on, but it took two presses")
             return
 
-        raise CommandFailed("Pressed power twice and the plug still reads off")
+        raise NotLanding("Pressed power twice and the plug still reads off")
 
     async def press_power(self) -> None:
         """One press of power. No wake, no check, no retry, no second thoughts.
@@ -226,7 +240,7 @@ class Commands:
             self.events.warning("power", "Powered off, but it took a second pair of presses")
             return
 
-        raise CommandFailed("Pressed power twice, twice over, and the plug still reads on")
+        raise NotLanding("Pressed power twice, twice over, and the plug still reads on")
 
     async def _off_gesture(self) -> None:
         """Wake the display, then the two presses that switch the unit off.

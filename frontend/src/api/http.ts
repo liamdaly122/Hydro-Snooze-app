@@ -86,6 +86,10 @@ export class HttpApiClient implements ApiClient {
     })
   }
 
+  restartBlaster = async () => {
+    await request<DeviceState>('/api/blaster/restart', { method: 'POST' })
+  }
+
   mute = async () => {
     await request<DeviceState>('/api/mute', { method: 'POST' })
   }

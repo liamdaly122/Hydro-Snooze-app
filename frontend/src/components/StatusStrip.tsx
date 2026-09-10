@@ -22,9 +22,11 @@ const POWER_LABEL: Record<DeviceState['power'], string> = {
 export function StatusStrip({
   state,
   onMute,
+  onRestartBlaster,
 }: {
   state: DeviceState
   onMute?: () => void
+  onRestartBlaster?: () => void
 }) {
   const watts = formatWatts(state.observed_power_w)
   const activity = state.inferred_activity === 'unknown' ? null : state.inferred_activity
@@ -97,6 +99,19 @@ export function StatusStrip({
           onClick={onMute}
         >
           Toggle the unit's beep
+        </button>
+      )}
+
+      {/*
+        For the failure nothing on this side can see: the board answering, every
+        press reporting success, and no infrared leaving the LED. Infrared is
+        one-way, so there is no reading that tells a working transmitter from a
+        wedged one. This does not diagnose it. It puts the cure, which until now
+        meant pulling a USB plug out from behind the bed, on a phone.
+      */}
+      {onRestartBlaster && (
+        <button type="button" className="status__link" onClick={onRestartBlaster}>
+          Restart the blaster
         </button>
       )}
     </Card>

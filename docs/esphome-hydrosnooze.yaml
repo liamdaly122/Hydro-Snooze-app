@@ -44,21 +44,43 @@ api:
   encryption:
     # Generate with: openssl rand -base64 32
     key: !secret hydrosnooze_api_key
+  # No client for fifteen minutes and it restarts itself. Nothing here holds
+  # state worth keeping, so a reboot costs nothing.
+  reboot_timeout: 15min
 ota:
   - platform: esphome
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
+  # The same three lines the probe board needed, and for the same reason. An
+  # ESP32 defaults to light power save: the radio naps between beacons to save a
+  # few milliamps, misses packets, and the access point eventually gives up on
+  # it. This board is on a USB charger. There is nothing to save.
+  #
+  # This board dropped off the network twice on 10 September before anyone
+  # thought to look here.
+  power_save_mode: none
+  fast_connect: true
+  reboot_timeout: 2min
+
 remote_transmitter:
   pin: GPIO3
   carrier_duty_percent: 50%
-  # Explicit because the default flipped in ESPHome 2025.11, and a warning about
-  # a changed default is worth answering rather than silencing. Non-blocking
-  # hands the burst to the RMT peripheral and returns, instead of stalling the
-  # main loop for the ~220ms a press takes. Presses fired back to back still come
-  # out whole and in order: a new transmit waits for the previous one to finish.
-  non_blocking: true
+  # Blocking, deliberately, after an evening where the app showed green, every
+  # press reported success, and nothing at all came out of the LED. A power cycle
+  # fixed it, which rules out the network and rules out line of sight and leaves
+  # the board itself.
+  #
+  # Non-blocking hands the burst to the RMT peripheral and returns immediately,
+  # so a press is fire and forget: if that peripheral is wedged, the button entity
+  # still reports success and the failure is completely silent. Blocking waits for
+  # the burst to actually go out, which costs about 220ms of main loop per press
+  # and buys the only chance this side has of noticing.
+  #
+  # 220ms is affordable here. The board does nothing else time critical, and the
+  # service already leaves 300ms between presses.
+  non_blocking: false
 
 # Eight buttons on a page at http://hydrosnooze-ir.local, so a press can be fired
 # from a phone while standing where the unit's display is visible. That matters
@@ -90,6 +112,12 @@ web_server:
 # single frames above rather than left to ESPHome's own 34.76ms spacing.
 
 button:
+  # So the app can restart the board, and so nobody has to reach behind a bed for
+  # a USB plug at eleven at night. That happened on 10 September and is why this
+  # is here.
+  - platform: restart
+    name: restart
+
   - platform: template
     name: power
     id: btn_power
@@ -181,6 +209,21 @@ button:
           repeat:
             times: ${ir_frames}
             wait_time: ${ir_gap}
+
+# --- Telling a wedged board from a rebooting one --------------------------------
+
+sensor:
+  # This board sits behind a bed and its antenna is the weak point.
+  - platform: wifi_signal
+    name: "wifi_rssi"
+    update_interval: 60s
+
+  # The number that separates the two failures. A board that has been up for days
+  # and is not transmitting is wedged. A board whose uptime keeps resetting has a
+  # power problem, and the fix for one is nothing like the fix for the other.
+  - platform: uptime
+    name: "uptime"
+    update_interval: 60s
 
 # --- Keeping the light working -------------------------------------------------
 #

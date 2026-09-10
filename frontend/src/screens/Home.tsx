@@ -67,6 +67,9 @@ export function Home({ client, state, schedule, maxC, onOpenSchedule }: Props) {
         onMute={() => {
           void client.mute().catch((e: Error) => setError(e.message))
         }}
+        onRestartBlaster={() => {
+          void client.restartBlaster().catch((e: Error) => setError(e.message))
+        }}
       />
 
       {error && (
