@@ -248,3 +248,32 @@ Whether to keep the Vercel copy. Once the real service exists, the Vercel versio
 invented data. It stays useful for looking at design changes on the phone without the Pi being on,
 but it does mean keeping the pretend data working. Not urgent, and not a decision I need to make
 now.
+
+---
+
+## Preferring the quiet half of the unit
+
+Warming mode on this unit sounds like a geiger counter, and it runs next to someone asleep. Cooling
+is silent. Between 25 and 35°C both modes can be set to the same number, so for most of a night
+there is a real choice, and until the probes went on there was no way to make it.
+
+`mode_for_target` decides at plan time, from the stage before it. That is a prediction, made hours
+early, about a bed with nobody in it, and it is wrong in the one case that matters: a stage that
+steps the temperature up is planned as warming, but with a body in the bed it is already at the
+number and warming has nothing to do except make a noise.
+
+So the question is asked again every thirty seconds, with a measurement in hand:
+
+| The bed | What runs |
+|---|---|
+| within 0.5°C of the setpoint | cooling, and body heat holds it there |
+| between 0.5 and 2°C below | whatever was already running |
+| more than 2°C below | warming, because nothing else can put heat back |
+
+The gap between the two thresholds is the design. A single line would swap modes on every half degree
+of probe wobble, thirty-five presses at a time, all night. Half an hour has to pass between one
+correction and the next, though never before the first one in a stage: waiting out the noise this
+feature exists to remove would be a strange way to start.
+
+Two degrees below the setpoint in silence is a better night than exactly the setpoint next to a
+geiger counter. That judgement is mine, not the software's, and the thresholds are where it lives.

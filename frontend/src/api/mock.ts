@@ -213,7 +213,17 @@ export class MockApiClient implements ApiClient {
       if (mins >= 21 * 60 + 30 && mins < 22 * 60) watts = 178
       else if (mins >= 22 * 60 || mins < 6 * 60 + 30) watts = 150 + Math.sin(t / 5_400_000) * 42
       else watts = 0.4
-      out.push({ at: d.toISOString(), watts: round1(Math.max(0.3, watts + (Math.random() - 0.5) * 8)) })
+      // The bed follows the unit rather than leading it, and the return hose runs
+      // a little above the flow while there is a body putting heat into it.
+      const running = watts > 5
+      const flow = running ? 26.5 + Math.sin(t / 7_200_000) * 1.4 : null
+      out.push({
+        at: d.toISOString(),
+        watts: round1(Math.max(0.3, watts + (Math.random() - 0.5) * 8)),
+        flow_c: flow === null ? null : round1(flow),
+        return_c: flow === null ? null : round1(flow + 0.6),
+        room_c: 19.7,
+      })
     }
     return out
   }

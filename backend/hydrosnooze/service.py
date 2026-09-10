@@ -36,6 +36,7 @@ from .models import (
     Stage,
     StageStep,
     mode_for_target,
+    quieter_mode,
     range_for,
     rehearsal_plan,
 )
@@ -69,6 +70,18 @@ MIN_PRECONDITION_SECONDS = 120
 #: Past this it is not arriving. The cap on a lead time is two hours, so a run
 #: still going after that has answered a different question.
 MAX_PRECONDITION_SECONDS = 3 * 60 * 60
+
+#: The least time between two mode corrections.
+#:
+#: A correction is about thirty-five presses, and the thing being measured is a
+#: bed, which moves in tens of minutes rather than seconds. The 1.5C between the
+#: two thresholds already makes a fast flip unlikely; this makes it impossible.
+#:
+#: Only a correction starts this clock, never a stage boundary. A stage that
+#: opens in warming on a bed that is already at the number should be handed to
+#: the quiet mode straight away, not after half an hour of the noise that this
+#: whole feature exists to avoid.
+MODE_DWELL = timedelta(minutes=30)
 
 #: How far apart the two hose probes have to get before the unit counts as
 #: actually working, and how close they have to come back before the bed counts
@@ -169,6 +182,9 @@ class Service:
         # None means never asked, which is not the same as not answering.
         self._probes_ok: bool | None = None
         self._probes_quiet_at: datetime | None = None
+
+        # When a mode was last changed by a correction rather than by a stage.
+        self._mode_changed_at: datetime | None = None
 
         # Whether the clock has been confirmed against the network yet, and when
         # this started waiting. A Pi has no clock of its own at boot; see
@@ -721,8 +737,11 @@ class Service:
             power=power,
             current_stage=step.stage if step and power is Power.ON else None,
         )
+        await self._correct_mode(step, power, now)
         if watts is not None:
-            self.db.add_power_sample(now, watts)
+            self.db.add_power_sample(
+                now, watts, flow_c=flow, return_c=back, room_c=room
+            )
             # Once an hour, on the hour. Both tables grow every night forever
             # otherwise, on an SD card that is already the likeliest thing in the
             # whole setup to fail. prune_events was written for this and then
@@ -918,6 +937,62 @@ class Service:
             room_c=self.probes.room_c,
             decided_by=decided_by,
         )
+
+    async def _correct_mode(self, step: StageStep | None, power: Power, now: datetime) -> None:
+        """Swap the running mode for the quieter one when the bed allows it.
+
+        The mode on the schedule card was decided at plan time from the stage
+        before it. That is a prediction about a bed with nobody in it, and it is
+        wrong in the one case that matters: a stage that steps the temperature up
+        is planned as warming, but with a body in the bed it is already at the
+        number, so warming has nothing to do except make a noise next to someone
+        asleep.
+
+        So the question gets asked again every thirty seconds, with a measurement
+        in hand, and the answer is allowed to differ from the plan.
+        """
+        if step is None or power is not Power.ON:
+            return
+        running = self.state.assumed_mode
+        if running is None:
+            return
+        if self._mode_changed_at is not None and now - self._mode_changed_at < MODE_DWELL:
+            return
+
+        bed = self.probes.bed_c
+        wanted = quieter_mode(
+            step.temp_c,
+            running,
+            bed,
+            self.schedule.cooling_speed,
+            cap_c=self.settings.max_temperature_c,
+        )
+        if wanted is None or wanted is running or bed is None:
+            return
+
+        async with self._lock:
+            try:
+                await self._apply(wanted, step.temp_c)
+            except CommandFailed as exc:
+                # Never fatal. The stage carries on in whichever mode it was
+                # already in, which is the mode the schedule asked for.
+                self._fail("stage", exc)
+                return
+
+        self._mode_changed_at = now
+        if wanted.is_cooling:
+            self.events.info(
+                "stage",
+                f"The bed is at {bed:.1f}C against a {step.temp_c}C stage, so it has stopped "
+                f"warming and switched to {wanted.value}. Body heat holds it from here, and "
+                "this is the quiet half of the unit.",
+            )
+        else:
+            self.events.info(
+                "stage",
+                f"The bed has dropped to {bed:.1f}C against a {step.temp_c}C stage, so it is "
+                "warming again. Cooling can take heat out of a bed and never put it back.",
+            )
 
     def _watch_probes(self, now: datetime) -> None:
         """Say out loud when the probes stop and start again.

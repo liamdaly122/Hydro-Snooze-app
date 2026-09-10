@@ -103,9 +103,25 @@ async def get_health(request: Request) -> list[dict[str, object]]:
 
 @router.get("/power")
 async def get_power(request: Request, hours: int = 24) -> list[dict[str, object]]:
+    """What the unit drew, and what the bed was doing while it drew it.
+
+    The degrees are null on any beat the probe board was quiet, and on every beat
+    recorded before the probes existed. Null rather than a carried-forward value,
+    because a chart that draws a flat line through a gap is a chart that lies
+    about the one thing it was built to show.
+    """
     service = _service(request)
     since = service.clock.now() - timedelta(hours=min(hours, 168))
-    return [{"at": at.isoformat(), "watts": watts} for at, watts in service.db.power_history(since)]
+    return [
+        {
+            "at": s.at.isoformat(),
+            "watts": s.watts,
+            "flow_c": s.flow_c,
+            "return_c": s.return_c,
+            "room_c": s.room_c,
+        }
+        for s in service.db.night_history(since)
+    ]
 
 
 # --- Writes -------------------------------------------------------------------

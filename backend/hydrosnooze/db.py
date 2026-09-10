@@ -29,6 +29,20 @@ from .models import (
 MIN_RUNS_TO_LEARN = 3
 
 
+class Sample(NamedTuple):
+    """One sampling beat: what the unit drew and what the bed was doing.
+
+    The degrees are None on any beat the probe board was quiet, and on every beat
+    recorded before the probes existed.
+    """
+
+    at: datetime
+    watts: float
+    flow_c: float | None = None
+    return_c: float | None = None
+    room_c: float | None = None
+
+
 class PreconditionRow(NamedTuple):
     """One finished pre-conditioning run, as it was stored.
 
@@ -70,9 +84,22 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_at ON events (at DESC);
 
+-- One row per sampling beat: what the unit drew, and what the bed was doing.
+--
+-- The temperatures share this table rather than getting their own, because they
+-- are read on the same beat for exactly this reason: a chart wants watts and
+-- degrees from the same moment, and two tables would have to be joined on a
+-- timestamp that was always going to be the same one.
+--
+-- Nullable, because they were not measurable until the probes went on and are
+-- not measurable whenever that board is quiet. A row with watts and no degrees
+-- is the truth about that moment.
 CREATE TABLE IF NOT EXISTS power_samples (
-    at    TEXT NOT NULL PRIMARY KEY,
-    watts REAL NOT NULL
+    at       TEXT NOT NULL PRIMARY KEY,
+    watts    REAL NOT NULL,
+    flow_c   REAL,
+    return_c REAL,
+    room_c   REAL
 );
 
 -- Which jobs have already run tonight, so a restart does not forget.
@@ -168,7 +195,7 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
-        self._pending_power: list[tuple[str, float]] = []
+        self._pending_power: list[tuple] = []
         self._tune_for_an_sd_card()
         self._db.executescript(SCHEMA)
         self._migrate()
@@ -207,6 +234,13 @@ class Database:
         any more, so on an upgraded database every single save failed with a
         constraint error while every read carried on working.
         """
+        # The temperatures on a sample. Older rows keep NULL, which is honest:
+        # nothing measured the bed on those nights.
+        cols = {r["name"] for r in self._db.execute("PRAGMA table_info(power_samples)")}
+        for name in ("flow_c", "return_c", "room_c"):
+            if name not in cols:
+                self._db.execute(f"ALTER TABLE power_samples ADD COLUMN {name} REAL")
+
         # The probe columns. Older rows keep NULL, which is honest: those runs
         # were decided off the plug and no temperature was measured.
         pre = {r["name"] for r in self._db.execute("PRAGMA table_info(precondition_runs)")}
@@ -363,8 +397,16 @@ class Database:
 
     # --- Power ----------------------------------------------------------------
 
-    def add_power_sample(self, at: datetime, watts: float) -> None:
-        self._pending_power.append((at.isoformat(), watts))
+    def add_power_sample(
+        self,
+        at: datetime,
+        watts: float,
+        *,
+        flow_c: float | None = None,
+        return_c: float | None = None,
+        room_c: float | None = None,
+    ) -> None:
+        self._pending_power.append((at.isoformat(), watts, flow_c, return_c, room_c))
         if len(self._pending_power) >= POWER_BATCH:
             self.flush_power()
 
@@ -375,7 +417,8 @@ class Database:
             return
         with self._db:
             self._db.executemany(
-                "INSERT OR REPLACE INTO power_samples (at, watts) VALUES (?, ?)",
+                "INSERT OR REPLACE INTO power_samples "
+                "(at, watts, flow_c, return_c, room_c) VALUES (?, ?, ?, ?, ?)",
                 self._pending_power,
             )
         self._pending_power.clear()
@@ -387,6 +430,31 @@ class Database:
             (since.isoformat(),),
         ).fetchall()
         return [(datetime.fromisoformat(r["at"]), r["watts"]) for r in rows]
+
+    def night_history(self, since: datetime) -> list[Sample]:
+        """Everything measured since a moment, watts and degrees together.
+
+        The whole night in one query, which is what a chart wants and what
+        answering "did the bed actually hold 27C" needs. Until this existed the
+        degrees were shown live and then thrown away, so the only question that
+        could be asked in the morning was about the machine.
+        """
+        self.flush_power()
+        rows = self._db.execute(
+            "SELECT at, watts, flow_c, return_c, room_c FROM power_samples "
+            "WHERE at >= ? ORDER BY at",
+            (since.isoformat(),),
+        ).fetchall()
+        return [
+            Sample(
+                datetime.fromisoformat(r["at"]),
+                r["watts"],
+                r["flow_c"],
+                r["return_c"],
+                r["room_c"],
+            )
+            for r in rows
+        ]
 
     # --- What the bed actually does -------------------------------------------
 

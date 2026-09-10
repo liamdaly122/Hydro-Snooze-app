@@ -129,3 +129,42 @@ def test_what_an_unclean_stop_actually_costs(tmp_path):
     assert len(again.power_history(START)) == POWER_BATCH
     assert again.load_schedule() is not None
     again.close()
+
+
+# --- The bed's own history, not just the machine's ------------------------------
+
+
+def test_the_degrees_are_kept_alongside_the_watts(tmp_path):
+    """They were shown live and then thrown away, so the only question that could
+    be asked in the morning was about the machine rather than the bed."""
+    db = Database(str(tmp_path / "s.db"))
+    db.add_power_sample(START, 172.5, flow_c=26.4, return_c=27.1, room_c=19.6)
+    db.flush_power()
+
+    row = db.night_history(START - timedelta(hours=1))[0]
+    assert (row.watts, row.flow_c, row.return_c, row.room_c) == (172.5, 26.4, 27.1, 19.6)
+    db.close()
+
+
+def test_a_beat_with_no_probes_keeps_its_watts_and_says_nothing_else(tmp_path):
+    """Null rather than the last value carried forward. A chart that draws a flat
+    line across a gap lies about the thing it is there to show."""
+    db = Database(str(tmp_path / "s.db"))
+    db.add_power_sample(START, 5.1)
+    db.flush_power()
+
+    row = db.night_history(START - timedelta(hours=1))[0]
+    assert row.watts == 5.1
+    assert (row.flow_c, row.return_c, row.room_c) == (None, None, None)
+    db.close()
+
+
+def test_they_ride_the_same_batch_rather_than_costing_the_card_more_writes(tmp_path):
+    """The SD card is the component most likely to end this project. Three more
+    columns on a row already being written costs it nothing; three more rows
+    would have tripled the heaviest writer in the database."""
+    db = Database(str(tmp_path / "s.db"))
+    for i in range(POWER_BATCH - 1):
+        db.add_power_sample(START + timedelta(seconds=30 * i), 170.0, flow_c=26.0)
+    assert db.night_history(START - timedelta(hours=1))  # a read flushes
+    db.close()

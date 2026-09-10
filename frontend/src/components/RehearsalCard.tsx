@@ -119,6 +119,12 @@ export function RehearsalCard({ state, schedule, onStart, onStop }: Props) {
             It takes over from the real schedule while it runs and hands back afterwards, and it
             always ends by switching the unit off. Do it when you are not about to go to bed.
           </p>
+          <p className="footnote">
+            The modes above are where each stage starts. Between 25 and 35° both modes reach the
+            number, so during the night the unit swaps to cooling whenever the bed is holding the
+            temperature on its own, and back to warming if it drops away. Cooling is the quiet half.
+            The Status card always shows what is actually running.
+          </p>
         </>
       )}
     </Card>

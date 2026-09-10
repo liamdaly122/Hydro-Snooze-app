@@ -146,6 +146,15 @@ export interface DeviceState {
 export interface PowerSample {
   at: string
   watts: number
+  /**
+   * What the bed was doing on the same beat. Null wherever the probe board was
+   * quiet, and on every sample recorded before the probes existed. Null rather
+   * than the last value carried forward, because a chart that draws a flat line
+   * across a gap lies about exactly the thing it is there to show.
+   */
+  flow_c: number | null
+  return_c: number | null
+  room_c: number | null
 }
 
 export type EventLevel = 'info' | 'warning' | 'error'

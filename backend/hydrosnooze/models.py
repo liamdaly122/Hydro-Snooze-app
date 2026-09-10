@@ -230,6 +230,73 @@ def mode_for_target(
     return Mode.WARMING
 
 
+#: How close to the setpoint the bed has to get before cooling can take over.
+#:
+#: The whole point of this is noise. Warming mode on this unit sounds, in Liam's
+#: words, like a geiger counter, and it runs next to someone trying to sleep.
+#: Cooling is quiet. So the moment the bed is at the number, the noisy mode has
+#: nothing left to do and should stop.
+QUIET_ARRIVED_C = 0.5
+
+#: And how far it has to fall back before warming is worth the noise again.
+#:
+#: Wider than the arrival margin on purpose, and the gap between the two is the
+#: whole design. A single threshold would have the unit swapping modes every time
+#: a probe wobbled half a degree; this way the bed has to genuinely lose ground
+#: before anything changes, and the 1.5C between them is a band where whatever is
+#: running carries on running.
+#:
+#: Deliberately generous, because of what it is trading. Two degrees below the
+#: setpoint in silence is a better night than exactly the setpoint next to a
+#: geiger counter, and that judgement is Liam's rather than mine.
+QUIET_FALLEN_C = 2.0
+
+
+def quieter_mode(
+    target_c: int,
+    running: Mode,
+    bed_c: float | None,
+    cooling_speed: Mode,
+    *,
+    cap_c: int,
+) -> Mode | None:
+    """The mode this stage should really be in, judged from the bed rather than
+    the schedule. None means leave it alone, which is most of the time.
+
+    `mode_for_target` decides at plan time, from the stage before it. That is a
+    prediction, made hours early, about a bed with nobody in it. This is the same
+    question asked again with the answer in hand, and the two disagree in exactly
+    the case worth catching: a stage that steps the temperature up is planned as
+    warming, but if there is a body in the bed it is already at the number, and
+    warming has nothing to do except make a noise.
+
+    Which mode can actually hold a bed is not symmetric. Warming adds heat and
+    cooling removes it, so at the same setpoint with a person in the bed, cooling
+    holds by taking away what the body puts in, and it is silent doing it. It
+    cannot put heat back. So the moment the bed genuinely drops away from the
+    number, only warming can bring it up, and the noise is worth it again.
+
+    Outside the 25 to 35 overlap there is no decision to make: below 25 only
+    cooling can express the number and above 35 only warming can.
+    """
+    if bed_c is None:
+        return None
+    if not (WARMING_FLOOR_C <= target_c <= COOLING_RANGE[1]):
+        return None
+
+    speed = cooling_speed if cooling_speed.is_cooling else Mode.QUIET
+
+    if running is Mode.WARMING:
+        # Arrived. Hand it to the quiet mode and let body heat do the rest.
+        return speed if bed_c >= target_c - QUIET_ARRIVED_C else None
+
+    # Cooling, and losing. Nothing but warming can put heat back into a bed, and
+    # it can only be asked for numbers it can reach.
+    if bed_c <= target_c - QUIET_FALLEN_C and target_c <= cap_c:
+        return Mode.WARMING
+    return None
+
+
 def modes_for(stages: list[SleepStage], cooling_speed: Mode) -> list[Mode]:
     """Every stage's mode, in the order they run.
 
