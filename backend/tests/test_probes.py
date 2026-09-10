@@ -12,6 +12,7 @@ history rather than news, is None rather than the last thing we saw.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 
 import pytest
@@ -31,9 +32,12 @@ def probes():
 
 
 def report(probes: Probes, flow=None, back=None, room=None, at=NOW):
+    """A reading arriving, the way _on_state records one: the value, and the fact
+    that the board said anything at all."""
     for name, value in ((FLOW, flow), (RETURN, back), (ROOM, room)):
         if value is not None:
             probes.readings[name] = Reading(value, at)
+            probes.last_reading_at = at
 
 
 # --- Never a stale number dressed as a current one ----------------------------
@@ -195,3 +199,116 @@ async def test_a_missing_probe_board_does_not_stop_a_power_sample(tmp_path):
     await service._sample_power()
     assert service.state.observed_power_w is not None
     assert service.state.observed_flow_c is None
+
+
+# --- Noticing that the board has gone quiet -------------------------------------
+#
+# This adapter never sends anything. It subscribes once and waits, so it has no
+# request that could fail and no exception to catch when the socket dies.
+# aioesphomeapi does not reconnect on its own and does not say it has stopped:
+# the client object carries on existing and looking healthy. The transmitter
+# survives that because every press is a real request that raises. Here, silence
+# is the only symptom there is, so silence has to be the signal.
+
+
+@pytest.mark.asyncio
+async def test_silence_tears_the_link_down_rather_than_waiting_forever(probes):
+    """The bug this replaces: a loop waiting on a flag nothing ever clears.
+
+    Without this the adapter sat on a dead socket at one wakeup a second, for as
+    long as the process ran, reporting a connection that had stopped delivering
+    hours earlier.
+    """
+    probes.connected = True
+    probes.last_reading_at = probes.clock.now()
+
+    with pytest.raises(TimeoutError, match="rebuilding"):
+        await probes._until_it_goes_quiet()
+
+    assert probes.rebuilds == 1
+
+
+@pytest.mark.asyncio
+async def test_a_board_that_keeps_reporting_is_left_alone(probes):
+    """A reading resets the clock, so a working link is never torn down."""
+    probes.connected = True
+    probes.last_reading_at = probes.clock.now()
+
+    async def keep_talking():
+        for _ in range(40):
+            await probes.clock.sleep(30)
+            probes.last_reading_at = probes.clock.now()
+        probes.connected = False
+
+    await asyncio.gather(probes._until_it_goes_quiet(), keep_talking())
+    assert probes.rebuilds == 0
+
+
+def test_how_long_it_has_been_quiet_is_asked_for_in_one_place(probes):
+    assert probes.quiet_for is None, "nothing has ever arrived"
+    report(probes, flow=20.0)
+    probes.last_reading_at = probes.clock.now()
+    probes.clock.advance(timedelta(minutes=7))
+    assert probes.quiet_for == timedelta(minutes=7)
+
+
+def test_the_red_dot_says_how_long_and_how_often(tmp_path):
+    """A red dot is not useful. How long it has been red, and how many times it
+    has gone red, are: one says the board has died and the other says the link is
+    flapping, and they want opposite fixes."""
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"), echo=False
+    )
+    service.probes.clock = VirtualClock(NOW)
+    service.probes.last_reading_at = NOW - timedelta(minutes=22)
+    service.probes.rebuilds = 4
+
+    verdict = next(d for d in service.health() if d.name == "probes")
+    assert verdict.health is Health.DOWN
+    assert "22 minutes" in verdict.detail
+    assert "4 reconnects" in verdict.detail
+
+
+@pytest.mark.asyncio
+async def test_going_quiet_and_coming_back_are_both_said_out_loud(tmp_path):
+    """The plug has always done this and the probes never did. A board that drops
+    out every night is a pattern, and a pattern is invisible if the only place it
+    shows is a dot that happens to be red when someone looks."""
+    # One clock for both. The probes read freshness off theirs and the service
+    # measures the gap off its own, and in the running app they are the same
+    # object.
+    clock = VirtualClock(NOW)
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"),
+        clock=clock,
+        echo=False,
+    )
+
+    report(service.probes, 20.0, 20.0, 19.0, at=NOW)
+    await service._sample_power()
+    assert not [e for e in service.events.recent(20) if e.kind == "probes"]
+
+    clock.advance(timedelta(minutes=25))
+    await service._sample_power()
+    gone = [e for e in service.events.recent(20) if e.kind == "probes"]
+    assert len(gone) == 1
+    assert "stopped reporting" in gone[0].message
+
+    report(service.probes, 20.0, 20.0, 19.0, at=clock.now())
+    await service._sample_power()
+    back = [e for e in service.events.recent(20) if e.kind == "probes"]
+    assert len(back) == 2
+    assert "reporting again" in back[0].message
+    assert "25 minutes" in back[0].message
+
+
+def test_the_probes_never_push_to_a_phone_at_three_in_the_morning(tmp_path):
+    """A night does not depend on these. A board on a bedroom Wi-Fi link losing
+    its connection must never be worth waking someone for."""
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"), echo=False
+    )
+    service._probes_ok = True
+    service._watch_probes(NOW)
+    said = [e for e in service.events.recent(20) if e.kind == "probes"]
+    assert said and all(e.level == "info" for e in said)

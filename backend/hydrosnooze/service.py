@@ -106,6 +106,17 @@ class PreconditionRun:
     worked: bool = False
 
 
+def _roughly(gap: timedelta) -> str:
+    """A duration a person reads rather than counts. Never seconds past a minute."""
+    seconds = int(gap.total_seconds())
+    if seconds < 90:
+        return f"{seconds}s"
+    minutes = round(seconds / 60)
+    if minutes < 90:
+        return f"{minutes} minutes"
+    return f"{round(minutes / 60, 1)} hours"
+
+
 class Service:
     def __init__(self, settings: Settings, *, clock: Clock | None = None, echo: bool = True) -> None:
         self.settings = settings
@@ -153,6 +164,11 @@ class Service:
 
         self._retrying: str | None = None
         self._retry_after: datetime | None = None
+
+        # Whether the probe board was last heard from, and when it went quiet.
+        # None means never asked, which is not the same as not answering.
+        self._probes_ok: bool | None = None
+        self._probes_quiet_at: datetime | None = None
 
         # Whether the clock has been confirmed against the network yet, and when
         # this started waiting. A Pi has no clock of its own at boot; see
@@ -262,11 +278,18 @@ class Service:
                 Health.DEGRADED,
                 f"{said}. Not hearing from {' or '.join(missing)}",
             )
-        return DeviceHealth(
-            "probes",
-            Health.DOWN,
-            f"No readings from the probe board at {self.settings.probes_host}",
-        )
+
+        # Nothing at all. The useful part of a red dot is not that it is red, it
+        # is how long it has been red and how often it has gone red, because
+        # those two say whether this is a board that has died or a link that is
+        # flapping, and they want opposite fixes.
+        quiet = self.probes.quiet_for
+        detail = f"No readings from the probe board at {self.settings.probes_host}"
+        if quiet is not None:
+            detail += f". Nothing for {_roughly(quiet)}"
+        if self.probes.rebuilds:
+            detail += f", {self.probes.rebuilds} reconnects since the service started"
+        return DeviceHealth("probes", Health.DOWN, detail)
 
     def _alerts_health(self) -> DeviceHealth:
         """Whether anything would actually tell you if this stopped working.
@@ -678,6 +701,7 @@ class Service:
         # Read on the same beat as the plug so the app gets one coherent picture
         # rather than temperatures and watts from different moments.
         flow, back, room = self.probes.flow_c, self.probes.return_c, self.probes.room_c
+        self._watch_probes(now)
 
         activity = self.settings.thresholds.classify(watts)
 
@@ -894,6 +918,43 @@ class Service:
             room_c=self.probes.room_c,
             decided_by=decided_by,
         )
+
+    def _watch_probes(self, now: datetime) -> None:
+        """Say out loud when the probes stop and start again.
+
+        Deliberately never a warning. The probes are the one thing here that a
+        night does not depend on, and a phone going off at 3am because a board
+        on a bedroom Wi-Fi link lost its connection would be worse than the thing
+        it was reporting. This is for the morning: a line in History saying how
+        long the gap was, so a board that drops out nightly is visible as a
+        pattern rather than as a red dot that happens to be red when looked at.
+        """
+        if not self.probes.enabled:
+            return
+        hearing = not self.probes.missing()
+        if self._probes_ok is None:
+            self._probes_ok = hearing
+            return
+        if hearing == self._probes_ok:
+            return
+
+        self._probes_ok = hearing
+        if hearing:
+            gap = "" if self._probes_quiet_at is None else f" after {_roughly(now - self._probes_quiet_at)}"
+            self._probes_quiet_at = None
+            self.events.info("probes", f"The probe board is reporting again{gap}.")
+        else:
+            # When it last actually said something, not when we noticed. The
+            # noticing lags by however long a reading stays current, and the
+            # number worth having in the morning is the real length of the gap.
+            self._probes_quiet_at = self.probes.last_reading_at or now
+            self.events.info(
+                "probes",
+                "The probe board has stopped reporting. Nothing about tonight changes: "
+                "the head start falls back to assuming a room-temperature bed and getting "
+                "the bed ready falls back to the plug.",
+            )
+        self._push_state()
 
     def _learned_lead(self, mode: Mode, target_c: int) -> int | None:
         return self.db.learned_lead_minutes(mode.value, target_c)

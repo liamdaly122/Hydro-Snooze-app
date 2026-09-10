@@ -68,11 +68,36 @@ logger:
 api:
   encryption:
     key: !secret hydrosnooze_temp_api_key
+  # No client for fifteen minutes and the board restarts itself. Nothing here
+  # holds state worth keeping, so a reboot costs nothing and clears the whole
+  # class of faults where the board is on the Wi-Fi and the API is wedged.
+  reboot_timeout: 15min
 ota:
   - platform: esphome
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+
+  # The three lines below are why this board stays on the network, and they are
+  # here because it did not. It went quiet for twenty minutes one evening and
+  # came back on its own, which is the signature of the radio dropping off and
+  # the default fifteen minute reboot timer eventually clearing it.
+
+  # The big one. An ESP32 defaults to light power save: the radio naps between
+  # beacons to save a few milliamps, misses packets, and eventually the access
+  # point gives up on it. This board is on a USB charger, not a battery, so
+  # there is nothing to save and a great deal to lose.
+  power_save_mode: none
+
+  # Skip the scan and go straight to the access point it knows. Faster to come
+  # back, and this board never moves. Take this line out if it ever ends up
+  # somewhere with two access points on the same name, because it will hold on
+  # to the first one it saw rather than the nearest.
+  fast_connect: true
+
+  # Two minutes of failing to connect and start again from scratch. The default
+  # is fifteen, which is most of an evening with no readings.
+  reboot_timeout: 2min
 """
 
 WEB = """
@@ -96,6 +121,22 @@ RSSI = """
   - platform: wifi_signal
     name: "wifi_rssi"
     update_interval: 60s
+
+  # How long since it last started. The one number that separates "the link
+  # dropped" from "the board rebooted", and they want different fixes. If this
+  # keeps resetting, the power supply or the Wi-Fi is the problem rather than
+  # anything in the app.
+  - platform: uptime
+    name: "uptime"
+    update_interval: 60s
+"""
+
+RESTART = """
+# So the board can be restarted from http://hydrosnooze-temp.local without
+# anyone reaching behind a bed for a USB plug.
+button:
+  - platform: restart
+    name: "restart"
 """
 
 
@@ -120,6 +161,30 @@ def die(*lines: str) -> None:
     for line in lines:
         print(f"{RED}{line}{RESET}" if line is lines[0] else line, file=sys.stderr)
     raise SystemExit(1)
+
+
+def already_written() -> dict[str, str]:
+    """The addresses in the file this script wrote last time, by role.
+
+    The point is not saving typing. It is that changing the template, which is
+    what a Wi-Fi fix means, should not cost an evening finding three sixteen
+    character serials again, or worse, a repeat of the squeezing in step 4.
+    """
+    if not CONFIG.exists():
+        return {}
+    found: dict[str, str] = {}
+    address = ""
+    for line in CONFIG.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("address:"):
+            match = ADDRESS.search(stripped)
+            address = match.group(1).lower() if match else ""
+        elif stripped.startswith("name:") and address:
+            role = stripped.split(":", 1)[1].strip().strip('"')
+            if role in ("water_flow", "water_return", "room"):
+                found[role] = address
+            address = ""
+    return found if len(found) == 3 else {}
 
 
 def clean(raw: list[str]) -> list[str]:
@@ -186,10 +251,29 @@ def main() -> int:
         action="store_true",
         help="build for the genuine Seeed XIAO ESP32C3 rather than the SuperMini",
     )
+    parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="rewrite with the addresses already in the file, for when this "
+        "script changes and the board needs reflashing",
+    )
     args = parser.parse_args()
     board = "seeed" if args.seeed else "supermini"
 
     roles = (args.flow, args.water_return, args.room)
+
+    if args.keep and not any(roles):
+        known = already_written()
+        if not known:
+            die(
+                f"No three named probes in {CONFIG.relative_to(ROOT)} to keep.",
+                "Give the addresses instead:",
+                "",
+                "  ./scripts/probes.py --flow 0x.. --return 0x.. --room 0x..",
+            )
+        roles = (known["water_flow"], known["water_return"], known["room"])
+        print()
+        print(f"{DIM}Keeping the three addresses already in the file.{RESET}")
 
     # --- Stage 3: the real thing ---------------------------------------------
     if any(roles):
@@ -220,6 +304,7 @@ def main() -> int:
             + sensor(back, "water_return", "30s", 5)
             + sensor(room, "room", "60s", 3)
             + RSSI
+            + RESTART
         )
         return write(
             body,
@@ -253,7 +338,7 @@ def main() -> int:
         body = HEADER + WEB + BUS + "\nsensor:"
         for i, address in enumerate(found, start=1):
             body += sensor(address, f"probe_{i}", "10s", 3)
-        body += RSSI
+        body += RSSI + RESTART
         return write(
             body,
             f"{len(found)} probes, named probe_1 to probe_{len(found)}",

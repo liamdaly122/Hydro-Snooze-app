@@ -302,14 +302,117 @@ does:
   swapped it shows the water going out rather than the water coming back. A
   degree or so, in the wrong direction
 
+## When it goes quiet
+
+It will. This board's antenna is its weak point and it sits behind a bed, which is
+the worst place in the house for a radio.
+
+### First, work out which of three things it is
+
+They look identical from the app and want completely different fixes. Two minutes
+with these, in order:
+
+**1. Is the board alive at all?**
+
+```sh
+ping -c 3 hydrosnooze-temp.local
+```
+
+No answer, then try the address directly, because mDNS fails on its own sometimes:
+
+```sh
+ping -c 3 192.168.1.212
+```
+
+**2. What does the board itself say?**
+
+Open **http://192.168.1.212** in a browser. That page is served by the board, so
+reaching it at all proves the board is powered and on the network. Read two
+numbers off it:
+
+| | What it means |
+|---|---|
+| **wifi_rssi** | better than -65 dBm is fine, worse than -70 dBm is the problem |
+| **uptime** | small and getting smaller each time you look means it is rebooting, not dropping |
+
+That second one is the whole diagnosis in one number. A board that has been up for
+days has a link problem. A board whose uptime keeps resetting has a power or a
+Wi-Fi problem, and the fix is a different one.
+
+**3. What does the service say?**
+
+```sh
+ssh liam@hydrosnooze.local "journalctl -u hydrosnooze --since '2 hours ago' | grep -i probe"
+```
+
+The app writes a line when the board stops reporting and another when it comes
+back, with the length of the gap. Those two lines are the record: a board that
+drops out every night at the same time is a pattern, and a pattern is invisible if
+the only place it shows is a dot that happens to be red when I look at it.
+
+The device bar says it too, and says how many times the link has been rebuilt
+since the service started. Several reconnects an hour is a Wi-Fi problem long
+before it becomes a missing reading.
+
+### Then fix it
+
+**Reflash with the current configuration.** The Wi-Fi settings changed after the
+first quiet evening, and the three lines that matter are `power_save_mode: none`,
+`fast_connect: true` and `reboot_timeout: 2min`. The first is the big one: an
+ESP32 naps its radio between beacons by default to save a few milliamps, misses
+packets, and eventually the access point gives up on it. This board is on a USB
+charger. There is nothing to save.
+
+No addresses to find again:
+
+```sh
+./scripts/probes.py --keep
+~/esphome/bin/esphome run docs/esphome-probes.yaml
+```
+
+`--keep` reuses the three addresses already in the file, so there is no repeat of
+the squeezing in step 4. It flashes over Wi-Fi, so nothing needs unplugging as
+long as the board is reachable at the time.
+
+**Then move it, if the RSSI says so.** Worse than -70 dBm is not something
+software fixes. In order of how much effort each is worth:
+
+1. **Turn the board so its aerial end points away from the wall.** The PCB
+   antenna on a SuperMini is directional and a metre of repositioning is worth
+   more than anything else here
+2. **Get it off the floor**, and out from behind the unit. Water and metal both
+   absorb 2.4GHz
+3. **Longer probe leads, board nearer the door.** The probes are on a 1-Wire bus
+   and do not care about a few extra metres. The radio cares a great deal
+4. **The Seeed board.** Same chip, a proper antenna, and the reason one was
+   ordered
+
+**What is not worth doing:** anything in the app. It already falls back cleanly,
+and there is nothing to tune on this side.
+
+### What breaks while it is quiet
+
+Nothing that matters, which is the point.
+
+| | While the probes are quiet |
+|---|---|
+| The schedule | Runs exactly as it did before the probes existed |
+| Getting the bed ready | Falls back to the plug, which is how it worked for months |
+| The head start | Falls back to assuming a room-temperature bed, and the card says so |
+| The bed temperature on screen | Goes back to showing nothing rather than a number from an hour ago |
+
+No alert is sent, on purpose. A phone going off at 3am because a board behind a
+bed lost its Wi-Fi would be worse than the thing it was reporting.
+
+---
+
 ## When the Seeed board arrives
 
 Add one flag. Do not edit the file: this script rewrites it, so a hand-edited line
 would be lost the next time it runs.
 
 ```sh
-./scripts/probes.py --seeed \
-  --flow 0x... --return 0x... --room 0x...
+./scripts/probes.py --seeed --keep
 ```
 
 Reflash, and everything else carries over. The probes, their addresses and their

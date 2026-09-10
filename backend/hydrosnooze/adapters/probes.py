@@ -51,6 +51,23 @@ STALE_AFTER = timedelta(minutes=2)
 #: How long to wait before trying the connection again after it drops.
 RECONNECT_AFTER = 30.0
 
+#: How long the board may say nothing at all before the link counts as dead.
+#:
+#: This adapter never sends anything. It subscribes once and waits, which means
+#: it has no request that could fail and no exception to catch when the socket
+#: quietly dies. aioesphomeapi does not reconnect on its own and does not tell us
+#: it has stopped: the client object carries on existing and looking healthy. The
+#: transmitter survives that because every press is a real request that raises;
+#: here, silence is the only symptom there is.
+#:
+#: Three minutes is six missed reports on the fastest sensor and three on the
+#: slowest, so it cannot be one unlucky reading, and it is past STALE_AFTER, so
+#: the app has already stopped believing the numbers before anything is rebuilt.
+SILENT_TOO_LONG = timedelta(minutes=3)
+
+#: How often to check for that silence. Cheap, and nothing is waiting on it.
+CHECK_EVERY = 10.0
+
 
 @dataclass
 class Reading:
@@ -77,6 +94,15 @@ class Probes:
         self.connect_timeout = connect_timeout
         self.readings: dict[str, Reading] = {}
         self.connected = False
+        #: When anything last arrived from the board, whichever sensor it was.
+        #: Separate from the readings themselves: a board reporting only the room
+        #: probe is a wiring problem, and a board reporting nothing at all is a
+        #: link problem, and the two want different answers.
+        self.last_reading_at: datetime | None = None
+        #: How many times the link has had to be built again since start. Shown
+        #: on the device bar, because a board that reconnects every few minutes
+        #: is a Wi-Fi problem long before it becomes a missing reading.
+        self.rebuilds = 0
         self._client = None
         self._keys: dict[int, str] = {}
         self._task: asyncio.Task[None] | None = None
@@ -148,6 +174,13 @@ class Probes:
         """Which probes are not reporting anything current."""
         return [name for name in NAMES if self.fresh(name) is None]
 
+    @property
+    def quiet_for(self) -> timedelta | None:
+        """How long since anything at all arrived, or None if nothing ever has."""
+        if self.last_reading_at is None:
+            return None
+        return self.clock.now() - self.last_reading_at
+
     # --- Staying connected ---------------------------------------------------
 
     async def start(self) -> None:
@@ -165,17 +198,36 @@ class Probes:
         while True:
             try:
                 await self._connect()
-                # _connect returns once subscribed. The library delivers states
-                # on its own task from here, so there is nothing to poll.
-                while self.connected:
-                    await asyncio.sleep(1)
+                await self._until_it_goes_quiet()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("probe board at %s: %s", self.host, exc)
             self.connected = False
             await self._drop()
-            await asyncio.sleep(RECONNECT_AFTER)
+            await self.clock.sleep(RECONNECT_AFTER)
+
+    async def _until_it_goes_quiet(self) -> None:
+        """Sit on a live subscription until it stops delivering, then say so.
+
+        `self.connected` is not the thing to watch. It is set when the subscribe
+        call returns and nothing ever clears it, because nothing here would
+        notice: the library pushes states on its own task and raises nothing when
+        that task's socket dies. Waiting on that flag is waiting forever, at one
+        wakeup a second, on a link that stopped working hours ago.
+
+        So the flag is not the signal. Silence is.
+        """
+        while self.connected:
+            # The clock rather than asyncio, so a test can drive three minutes of
+            # silence without spending three minutes on it.
+            await self.clock.sleep(CHECK_EVERY)
+            quiet = self.quiet_for
+            if quiet is not None and quiet > SILENT_TOO_LONG:
+                self.rebuilds += 1
+                raise TimeoutError(
+                    f"nothing for {int(quiet.total_seconds())}s, rebuilding the link"
+                )
 
     async def _connect(self) -> None:
         from aioesphomeapi import APIClient, SensorInfo
@@ -200,6 +252,10 @@ class Probes:
 
         client.subscribe_states(self._on_state)
         self.connected = True
+        # Start the silence clock here rather than leaving it wherever the last
+        # connection left it, so a fresh link gets a full window to deliver
+        # something before it is torn down again.
+        self.last_reading_at = self.clock.now()
         log.info("probe board at %s: %d sensors", self.host, len(self._keys))
 
     def _on_state(self, state: object) -> None:
@@ -216,7 +272,9 @@ class Probes:
             value = state.state  # type: ignore[attr-defined]
             if value is None or value != value:  # NaN fails this
                 return
-            self.readings[name] = Reading(round(float(value), 2), self.clock.now())
+            now = self.clock.now()
+            self.last_reading_at = now
+            self.readings[name] = Reading(round(float(value), 2), now)
         except Exception:  # noqa: BLE001  # pragma: no cover
             log.debug("could not read a probe state", exc_info=True)
 

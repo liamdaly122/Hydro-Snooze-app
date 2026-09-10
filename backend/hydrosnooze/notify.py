@@ -42,7 +42,10 @@ LOUD_WARNINGS = (
     "did not land",
     "not answering",
     "Unit was off",
-    "cancelled out",
+    # A power off that needed a second pair of presses. It worked, but only
+    # just, and the failure mode on the other side of it is a bed left running
+    # all day. Left here after the phrase it used to match stopped existing.
+    "second pair of presses",
     "The Pi is",
     "The Pi has",
 )
