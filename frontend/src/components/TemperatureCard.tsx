@@ -133,7 +133,12 @@ export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }:
         </button>
 
         {selected === null ? (
-          <span className="stage__value stage__value--unknown">unknown</span>
+          // "unknown" was accurate and useless: it named the problem without
+          // saying what to do about it. The probes mean the note underneath can
+          // now carry the measured temperature, so this can be the instruction.
+          <span className="stage__value stage__value--unknown stage__value--prompt">
+            Set bed temp
+          </span>
         ) : (
           <span className="stage__value">
             {selected}
@@ -164,6 +169,9 @@ export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }:
   )
 }
 
+/** Both halves when there are two, whichever there is when there is one. */
+const say = (...parts: (string | null)[]) => parts.filter(Boolean).join(' ') || null
+
 /**
  * The card never guesses. When a control is dead, or a temperature means
  * something other than it looks like, it says so.
@@ -186,15 +194,29 @@ function StageNote({
   let note: string | null = null
 
   if (tab === 'now') {
-    if (state.power === 'off') note = 'Unit is off. Only the power button responds.'
-    else if (state.power === 'unknown') note = 'Unit state unknown. Check the plug reading below.'
-    else if (value === null) note = 'No confirmed target. Press + or − to set one.'
+    // The water coming back from the bed, which is the closest thing to a bed
+    // temperature this system can measure. Flow is what the unit is producing;
+    // return is what the bed made of it, so return is the one to show. Falls
+    // back to flow if that probe is the one that has gone quiet.
+    //
+    // This is the first number on this card that was measured rather than
+    // decided. Everything else here is what the app last commanded.
+    const bed = state.observed_return_c ?? state.observed_flow_c
+    const measured = bed === null ? null : `Bed is around ${bed.toFixed(1)}° now.`
+
+    if (state.power === 'off') note = say(measured, 'Unit is off. Only the power button responds.')
+    else if (state.power === 'unknown')
+      note = say(measured, 'Unit state unknown. Check the plug reading below.')
+    else if (value === null) note = say(measured, 'Press + or − to set a target.')
     else if (state.current_stage !== null) {
       // Said before it happens rather than after. Reaching for the temperature
       // mid-stage is a correction, not a one-off, so it sticks; better to know
       // that while deciding than to find the schedule changed in the morning.
-      note = `${STAGE_LABEL[state.current_stage]} is running. Changing this sets ${STAGE_LABEL[state.current_stage]} to it from tomorrow too.`
-    }
+      note = say(
+        measured,
+        `${STAGE_LABEL[state.current_stage]} is running. Changing this sets ${STAGE_LABEL[state.current_stage]} to it from tomorrow too.`,
+      )
+    } else note = measured
   } else if (value !== null && value >= WARMING_FLOOR_C) {
     note = `Heats the bed to ${value}°C.`
   } else if (value !== null) {

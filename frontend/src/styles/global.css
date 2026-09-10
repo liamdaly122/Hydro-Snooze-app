@@ -290,6 +290,15 @@ button:disabled {
   letter-spacing: 0;
 }
 
+/* An instruction rather than a value, so it is words rather than digits and
+   needs the room for them. Without this it overflows its flex item and paints
+   straight over the plus and minus buttons, because the value never wraps. */
+.stage__value--prompt {
+  font-size: clamp(15px, 4.8vw, 19px);
+  white-space: normal;
+  line-height: 1.25;
+}
+
 .stage__unit {
   font-size: 0.46em;
   font-weight: 400;
