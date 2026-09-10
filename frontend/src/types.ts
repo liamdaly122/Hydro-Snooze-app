@@ -132,6 +132,11 @@ export interface DeviceState {
   assumed_target_c: number | null
   /** The one honestly observed value on this screen: it comes from the plug. */
   observed_power_w: number | null
+  /** Measured on the hoses, not believed. Null means no probe board, or a
+   *  reading too old to call current: never a guess and never a stale one. */
+  observed_flow_c: number | null
+  observed_return_c: number | null
+  observed_room_c: number | null
   inferred_activity: Activity
   last_command_at: string | null
   last_error: string | null

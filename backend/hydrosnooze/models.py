@@ -718,8 +718,9 @@ class DeviceState:
     """What the app believes about the unit.
 
     Almost all of it is belief rather than knowledge. The unit cannot be read over
-    infrared, so the only genuinely observed value here is `observed_power_w`, which
-    comes from the plug. Everything prefixed `assumed_` was set by us and never
+    infrared, so the only genuinely observed values here are the ones prefixed
+    `observed_`: the watts from the plug, and the three temperatures from the
+    probe board. Everything prefixed `assumed_` was set by us and never
     confirmed. When we lose track, these go to None or UNKNOWN and the app says so
     rather than guessing.
     """
@@ -738,6 +739,16 @@ class DeviceState:
     #: honest candidate: the last value the app itself sent.
     assumed_target_c: int | None = None
     observed_power_w: float | None = None
+    #: Measured, not believed. On the hoses rather than in the bed: flow is the
+    #: water the unit is circulating, return is that same water after the bed has
+    #: had it, and the difference between them is the heat actually moving.
+    #:
+    #: None means no probe board, or a reading too old to call current. Never a
+    #: guess and never the last one we saw, for the same reason the plug returns
+    #: None rather than zero when it cannot be reached.
+    observed_flow_c: float | None = None
+    observed_return_c: float | None = None
+    observed_room_c: float | None = None
     inferred_activity: Activity = Activity.UNKNOWN
     last_command_at: datetime | None = None
     last_error: str | None = None

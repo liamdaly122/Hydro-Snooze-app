@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from .adapters import build_adapters
 from .adapters.fake_transmitter import FakeTransmitter
+from .adapters.probes import NAMES, Probes
 from .clock import Clock, RealClock, SimClock, VirtualClock
 from .config import Settings
 from .db import Database
@@ -87,6 +88,12 @@ class Service:
         # meant a good night reporting itself as a failed one afterwards.
         self.scheduler.fired.done = self.db.fired_marks()
         self.scheduler.fired.store = self.db.set_fired_marks
+        self.probes = Probes(
+            self.clock,
+            settings.probes_host,
+            settings.probes_port,
+            settings.probes_encryption_key,
+        )
         self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
 
@@ -175,7 +182,55 @@ class Service:
             if real_blaster
             else DeviceHealth("blaster", Health.SIMULATED, "No blaster. Presses are printed")
         )
-        return [plug, blaster, self._alerts_health()]
+        return [plug, blaster, self._probes_health(), self._alerts_health()]
+
+    def _probes_health(self) -> DeviceHealth:
+        """The three temperatures, and whether any of them are current.
+
+        Partial failure needs saying rather than rounding to fine or broken. Two
+        probes out of three still leaves the flow-to-return difference, or not,
+        depending on which two, and that difference is the only thing here that
+        cannot be inferred from anything else.
+
+        A probe board that has gone is not a reason to stop: the schedule ran for
+        weeks before these existed. It is a reason to know less, and to say so.
+        """
+        if not self.probes.enabled:
+            return DeviceHealth(
+                "probes", Health.SIMULATED, "No probes. Temperatures are not measured"
+            )
+
+        missing = self.probes.missing()
+        readings = {
+            "flow": self.probes.flow_c,
+            "return": self.probes.return_c,
+            "room": self.probes.room_c,
+        }
+        said = ", ".join(f"{k} {v}C" for k, v in readings.items() if v is not None)
+
+        if not missing:
+            moving = self.probes.moving_c
+            # The sign is the interesting part, so it is spelled out rather than
+            # left as a number to interpret at 3am.
+            if moving is None or abs(moving) < 0.3:
+                what = "nothing moving"
+            elif moving > 0:
+                what = f"bed shedding {abs(moving)}C into the water"
+            else:
+                what = f"water giving {abs(moving)}C to the bed"
+            return DeviceHealth("probes", Health.OK, f"{said}. {what}")
+
+        if len(missing) < len(NAMES):
+            return DeviceHealth(
+                "probes",
+                Health.DEGRADED,
+                f"{said}. Not hearing from {' or '.join(missing)}",
+            )
+        return DeviceHealth(
+            "probes",
+            Health.DOWN,
+            f"No readings from the probe board at {self.settings.probes_host}",
+        )
 
     def _alerts_health(self) -> DeviceHealth:
         """Whether anything would actually tell you if this stopped working.
@@ -296,6 +351,7 @@ class Service:
                 "unit from the one being driven. Set HS_POWER_MONITOR=fake to simulate a whole "
                 "night, or HS_TRANSMITTER=esphome once the blaster is captured.",
             )
+        await self.probes.start()
         await self._sample_power()
         self._last_tick_at = self.clock.now()
         self._tasks = [
@@ -336,6 +392,7 @@ class Service:
         self._tasks.clear()
         if self._unsubscribe_events:
             self._unsubscribe_events()
+        await self.probes.close()
         await self.notifier.close()
         await self.transmitter.close()
         await self.power.close()
@@ -569,6 +626,10 @@ class Service:
                     "watts is the only real reading here and the rest is belief.",
                 )
             self._push_state()
+        # Read on the same beat as the plug so the app gets one coherent picture
+        # rather than temperatures and watts from different moments.
+        flow, back, room = self.probes.flow_c, self.probes.return_c, self.probes.room_c
+
         activity = self.settings.thresholds.classify(watts)
 
         # The plug is the only thing here that is actually observed, so it
@@ -580,6 +641,9 @@ class Service:
         step = self.scheduler.stage_now(self.schedule, now)
         self._set_state(
             observed_power_w=watts,
+            observed_flow_c=flow,
+            observed_return_c=back,
+            observed_room_c=room,
             inferred_activity=activity,
             power=power,
             current_stage=step.stage if step and power is Power.ON else None,

@@ -1,4 +1,8 @@
 import { Card } from './Card'
+
+/** One decimal, or a dash. Never a stale value dressed up as a current one. */
+const temp = (c: number | null) => (c === null ? '--' : `${c.toFixed(1)}°`)
+
 import { formatWatts } from '../domain'
 import type { DeviceState } from '../types'
 
@@ -25,6 +29,28 @@ export function StatusStrip({
   const watts = formatWatts(state.observed_power_w)
   const activity = state.inferred_activity === 'unknown' ? null : state.inferred_activity
 
+  const flow = state.observed_flow_c
+  const back = state.observed_return_c
+  const hasProbes =
+    flow !== null || back !== null || state.observed_room_c !== null
+
+  // What the water is measurably doing to the bed, from the difference between
+  // the two readings above. One word, because the numbers are right there and
+  // the gap between them is the size: what cannot be read off them is the
+  // direction, and that is what this says.
+  //
+  // Worth having next to the mode, which is a belief. This is the same claim
+  // arrived at by measurement, so the two disagreeing is a finding rather than
+  // a display bug.
+  const moving =
+    flow === null || back === null
+      ? null
+      : Math.abs(back - flow) < 0.3
+        ? 'holding'
+        : back > flow
+          ? 'cooling'
+          : 'warming'
+
   return (
     <Card label="Status">
       <div className="status">
@@ -41,6 +67,22 @@ export function StatusStrip({
           unknown={state.observed_power_w === null}
         />
       </div>
+
+      {/*
+        The water, measured. Everything above this except the draw is something
+        the app decided rather than something it read, because infrared is
+        one-way. These three are read off the hoses.
+
+        Shown only when there are probes, rather than as three permanent blanks
+        on a setup that has none.
+      */}
+      {hasProbes && (
+        <div className="status">
+          <Cell label="Flow" value={temp(state.observed_flow_c)} sub="out" unknown={state.observed_flow_c === null} />
+          <Cell label="Return" value={temp(state.observed_return_c)} sub={moving} unknown={state.observed_return_c === null} />
+          <Cell label="Room" value={temp(state.observed_room_c)} unknown={state.observed_room_c === null} />
+        </div>
+      )}
       {state.last_error && <p className="status__error">{state.last_error}</p>}
 
       {/*

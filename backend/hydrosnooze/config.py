@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     esphome_button_service: str = "send_ir"
     shelly_host: str = "hydrosnooze-plug.local"
 
+    #: The temperature probe board. Empty host means no probes, which is what
+    #: every setup was until they arrived and is still what the tests get.
+    #:
+    #: Its own key rather than the blaster's: two devices in two parts of the
+    #: room doing two jobs should not both open to one leaked string.
+    probes_host: str = ""
+    probes_port: int = 6053
+    probes_encryption_key: str = ""
+
     # --- Telling someone ------------------------------------------------------
     #: An ntfy.sh topic. Empty means no notifications, which is the default.
     #: The topic name is the only secret there is, so make it long and random:

@@ -32,6 +32,7 @@ SECRETS = ROOT / "docs" / "secrets.yaml"
 #: the router ever hands out something different.
 DEFAULT_ESPHOME_HOST = "192.168.1.178"
 DEFAULT_SHELLY_HOST = "192.168.1.194"
+DEFAULT_PROBES_HOST = "hydrosnooze-temp.local"
 
 #: Everything this script owns. Any of these already in the file get replaced,
 #: so running it twice does not leave two of anything.
@@ -41,7 +42,26 @@ OWNED = (
     "HS_ESPHOME_ENCRYPTION_KEY",
     "HS_POWER_MONITOR",
     "HS_SHELLY_HOST",
+    "HS_PROBES_HOST",
+    "HS_PROBES_ENCRYPTION_KEY",
 )
+
+
+def read_key(name: str, required: bool = True) -> str:
+    """One key out of docs/secrets.yaml, never printed."""
+    if not SECRETS.exists():
+        if not required:
+            return ""
+        die(
+            f"{SECRETS.relative_to(ROOT)} is missing.",
+            "Copy docs/secrets.yaml.example to docs/secrets.yaml and fill it in.",
+        )
+    match = re.search(rf"^\s*{name}\s*:\s*[\"']?([^\"'\s]+)", SECRETS.read_text(), re.M)
+    if match is None:
+        if not required:
+            return ""
+        die(f"No {name} in docs/secrets.yaml.")
+    return match.group(1)
 
 
 def read_api_key() -> str:
@@ -84,6 +104,7 @@ def main() -> int:
     parser.add_argument("--fake", action="store_true", help="go back to the simulator")
     parser.add_argument("--esphome-host", default=DEFAULT_ESPHOME_HOST)
     parser.add_argument("--shelly-host", default=DEFAULT_SHELLY_HOST)
+    parser.add_argument("--probes-host", default=DEFAULT_PROBES_HOST)
     parser.add_argument(
         "--env",
         default=None,
@@ -129,11 +150,24 @@ def main() -> int:
             "HS_POWER_MONITOR=shelly",
             f"HS_SHELLY_HOST={args.shelly_host}",
         ]
+        # Optional, and quietly skipped when there is no probe board yet, so
+        # this script keeps working on a setup that predates them.
+        probe_key = read_key("hydrosnooze_temp_api_key", required=False)
+        if probe_key:
+            block += [
+                f"HS_PROBES_HOST={args.probes_host}",
+                f"HS_PROBES_ENCRYPTION_KEY={probe_key}",
+            ]
         masked = key[:4] + "..." + key[-4:] if len(key) > 12 else "set"
         summary = [
             "Now driving the REAL HydroSnooze.",
             f"  blaster   {args.esphome_host}   key {masked}",
             f"  plug      {args.shelly_host}",
+        ] + (
+            [f"  probes    {args.probes_host}   key {probe_key[:4]}...{probe_key[-4:]}"]
+            if probe_key
+            else ["  probes    none set up yet"]
+        ) + [
             "",
             "Presses will land on the actual unit. Nothing is simulated any more.",
         ]

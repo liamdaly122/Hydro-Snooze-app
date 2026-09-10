@@ -39,6 +39,11 @@ export class MockApiClient implements ApiClient {
     assumed_mode: 'quiet',
     assumed_target_c: 19,
     observed_power_w: 168,
+    // Cooling, so the water comes back warmer than it went out: the bed is
+    // shedding heat into it. The sign is what the Status card reads out.
+    observed_flow_c: 19.4,
+    observed_return_c: 22.1,
+    observed_room_c: 18.2,
     inferred_activity: 'cooling',
     last_command_at: nowIso(),
     last_error: null,

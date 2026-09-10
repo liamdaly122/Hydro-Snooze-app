@@ -11,6 +11,7 @@ const LABEL: Record<string, string> = {
   plug: 'Plug',
   blaster: 'Blaster',
   service: 'Service',
+  probes: 'Probes',
   alerts: 'Alerts',
 }
 
@@ -18,10 +19,11 @@ const WHAT: Record<string, string> = {
   plug: 'Shelly Plug S',
   blaster: 'XIAO Smart IR Mate',
   service: 'The Pi, or whatever is running this',
+  probes: 'Three thermometers on the hoses',
   alerts: 'Whether anything is watching',
 }
 
-const ORDER = ['service', 'blaster', 'plug', 'alerts']
+const ORDER = ['service', 'blaster', 'plug', 'probes', 'alerts']
 
 /**
  * Three things can stop working independently, and two of them fail silently.
