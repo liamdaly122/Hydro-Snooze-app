@@ -1,10 +1,19 @@
 """Learning how long this bed really takes, instead of estimating it.
 
 The lead time before bedtime was a fixed cost plus a rate per degree, from an
-assumed room temperature. Every number in it was a guess. The plug can answer it
-properly: a unit working towards a setpoint draws 170 W cooling or 300 W heating,
-and when it arrives the draw falls into the idle band. The time to that fall is
-the real answer for this bed in this room.
+assumed room temperature. Every number in it was a guess. Two sensors can answer
+it properly, and they answer it differently.
+
+The plug answers it about the machine: a unit working towards a setpoint draws
+170 W cooling or 300 W heating, and when it arrives the draw falls into the idle
+band. That was the whole answer for months.
+
+The hose probes answer it about the bed, which is the better question. While the
+bed is still taking heat the water comes back at a different temperature from the
+way it went out, and when that gap closes the exchange has finished.
+
+The probes lead and the plug backs them up, so a probe board that has fallen off
+the Wi-Fi costs accuracy and never costs a night.
 """
 
 from __future__ import annotations
@@ -13,11 +22,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from hydrosnooze.adapters.probes import FLOW, RETURN, ROOM, Reading
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.db import MIN_RUNS_TO_LEARN, Database
 from hydrosnooze.models import Mode, preconditioning_for
-from hydrosnooze.service import MIN_PRECONDITION_SECONDS, Service
+from hydrosnooze.service import MIN_PRECONDITION_SECONDS, PreconditionRun, Service
 
 NOW = datetime(2026, 9, 8, 21, 0)
 
@@ -107,29 +117,56 @@ def service():
     return Service(Settings(db_path=":memory:"), clock=clock, echo=False)
 
 
+def start(service, target=17, mode=Mode.TURBO, start_c=None):
+    service._precondition = PreconditionRun(
+        started=service.clock.now(), mode=mode, target_c=target, start_c=start_c
+    )
+
+
 def settle(service, watts: float, after: timedelta):
     service.clock.advance(after)
     service._watch_precondition(watts, service.clock.now())
 
 
+def hoses(service, flow: float, back: float, room: float | None = None):
+    """Put a reading on each hose probe, timestamped now so it counts as current."""
+    at = service.clock.now()
+    for name, value in ((FLOW, flow), (RETURN, back), (ROOM, room)):
+        if value is not None:
+            service.probes.readings[name] = Reading(value, at)
+
+
+def step(service, after: timedelta, *, watts=None, flow=None, back=None, room=None):
+    """One beat of the sampling loop, with whatever each sensor is saying.
+
+    Readings are stamped after the clock moves, because a probe reading goes
+    stale in two minutes and these steps are longer than that. Leaving flow out
+    is a probe board that is not reporting.
+    """
+    service.clock.advance(after)
+    if flow is not None:
+        hoses(service, flow, back, room)
+    service._watch_precondition(watts, service.clock.now())
+
+
 def test_the_draw_falling_to_idle_is_what_records_the_run(service):
-    service._precondition = (NOW, Mode.TURBO, 17)
+    start(service)
     settle(service, 170.0, timedelta(minutes=10))
     assert service.db.precondition_runs() == [], "still working, nothing to record yet"
 
     settle(service, 7.0, timedelta(minutes=15))
     runs = service.db.precondition_runs()
     assert len(runs) == 1
-    _at, mode, target, seconds, reached = runs[0]
-    assert (mode, target, reached) == ("turbo", 17, True)
-    assert seconds == 25 * 60
+    assert (runs[0].mode, runs[0].target_c, runs[0].reached) == ("turbo", 17, True)
+    assert runs[0].seconds == 25 * 60
+    assert runs[0].decided_by == "plug", "no probes reporting, so the plug decided"
 
 
 def test_an_early_idle_reading_is_the_unit_not_started_yet(service):
     """Power on, mode change and rail-and-count take about thirty seconds of
     infrared before the compressor does anything, and the plug reads idle
     throughout. Believing that would learn a lead time of zero."""
-    service._precondition = (NOW, Mode.TURBO, 17)
+    start(service)
     settle(service, 6.0, timedelta(seconds=MIN_PRECONDITION_SECONDS - 10))
     assert service.db.precondition_runs() == []
 
@@ -137,10 +174,10 @@ def test_an_early_idle_reading_is_the_unit_not_started_yet(service):
 def test_a_run_that_never_settles_is_recorded_as_not_reached(service):
     """More useful than the timing would have been: it means the target is not
     achievable in this room."""
-    service._precondition = (NOW, Mode.TURBO, 15)
+    start(service, target=15)
     settle(service, 180.0, timedelta(hours=4))
     runs = service.db.precondition_runs()
-    assert len(runs) == 1 and runs[0][4] is False
+    assert len(runs) == 1 and runs[0].reached is False
     assert any("not be reachable" in e.message for e in service.events.recent(20))
 
 
@@ -151,7 +188,121 @@ def test_nothing_is_recorded_when_no_run_is_in_flight(service):
 
 def test_an_unreachable_plug_does_not_end_a_run(service):
     """None is "we could not ask", not "it arrived"."""
-    service._precondition = (NOW, Mode.TURBO, 17)
+    start(service)
     settle(service, None, timedelta(minutes=30))
+    assert service.db.precondition_runs() == []
+    assert service._precondition is not None
+
+
+# --- The probes leading, and the plug behind them --------------------------------
+
+# The numbers below are the ones the hoses really read on the evening the probes
+# went on. Heating hard: 34.56C out, 33.00C back. An hour later, sat at
+# temperature: 41.31C out, 41.06C back.
+
+
+def test_the_gap_on_the_hoses_closing_is_what_records_the_run(service):
+    """The bed itself saying it is ready, rather than the machine saying it stopped."""
+    start(service, start_c=19.2)
+    step(service, timedelta(minutes=10), watts=305.0, flow=34.56, back=33.00, room=19.7)
+    assert service.db.precondition_runs() == [], "the water is still coming back changed"
+
+    step(service, timedelta(minutes=15), watts=305.0, flow=41.31, back=41.06, room=19.7)
+    runs = service.db.precondition_runs()
+    assert len(runs) == 1
+    assert runs[0].decided_by == "probes"
+    assert runs[0].reached is True
+    assert runs[0].seconds == 25 * 60
+
+
+def test_the_probes_decide_even_while_the_unit_is_still_drawing(service):
+    """This is the whole reason they lead.
+
+    The plug can only see the unit stop. The bed is ready before that, and on a
+    warm night the unit may never fall to idle at all.
+    """
+    start(service)
+    step(service, timedelta(minutes=10), watts=305.0, flow=34.56, back=33.00)
+    step(service, timedelta(minutes=10), watts=305.0, flow=41.31, back=41.06)
+    runs = service.db.precondition_runs()
+    assert len(runs) == 1 and runs[0].decided_by == "probes"
+
+
+def test_a_gap_that_was_never_open_is_the_unit_not_started_yet(service):
+    """The guard the probe rule needs, and the one the plug rule got for free.
+
+    Before circulation starts, the two hoses sit at the same temperature and read
+    exactly like a bed that has finished. Believing that would record a run of two
+    minutes and learn a lead time of nothing.
+    """
+    start(service)
+    for _ in range(6):
+        step(service, timedelta(minutes=5), watts=305.0, flow=30.0, back=30.0)
+    assert service.db.precondition_runs() == []
+
+
+def test_the_plug_still_decides_when_the_probes_are_quiet(service):
+    """The board is new and on a bedroom Wi-Fi link. A night cannot depend on it."""
+    start(service)
+    step(service, timedelta(minutes=10), watts=305.0)
+    step(service, timedelta(minutes=15), watts=7.0)
+    runs = service.db.precondition_runs()
+    assert len(runs) == 1 and runs[0].decided_by == "plug"
+
+
+def test_a_probe_board_that_missed_the_working_phase_hands_back_to_the_plug(service):
+    """The probes came back to a closed gap they never saw open.
+
+    That is indistinguishable from a unit which never started, so they say
+    nothing and the plug answers instead. This is what having two sensors is for:
+    the answer is less precise, and there still is one.
+    """
+    start(service)
+    step(service, timedelta(minutes=5), watts=305.0)  # board off the Wi-Fi
+    step(service, timedelta(minutes=20), watts=7.0, flow=41.31, back=41.06)
+    runs = service.db.precondition_runs()
+    assert len(runs) == 1 and runs[0].decided_by == "plug"
+
+
+def test_a_bed_already_at_temperature_falls_back_to_the_plug(service):
+    """Probes reporting, but nothing to report: the gap never opens because there
+    is no work to do. The plug is the one that can tell the difference between
+    that and a unit that has not started."""
+    start(service)
+    step(service, timedelta(minutes=5), watts=6.0, flow=24.0, back=24.0)
+    runs = service.db.precondition_runs()
+    assert len(runs) == 1 and runs[0].decided_by == "plug"
+
+
+def test_which_probe_is_on_which_hose_does_not_change_the_answer(service):
+    """Cooling puts the warmer water on the return; heating puts it on the flow.
+
+    Which of the two a given probe ended up on was decided with a roll of tape
+    behind a bed, so the rule reads the size of the gap and never its sign.
+    """
+    start(service, mode=Mode.QUIET, target=24)
+    step(service, timedelta(minutes=10), watts=175.0, flow=22.0, back=23.6)
+    assert service.db.precondition_runs() == []
+
+    step(service, timedelta(minutes=10), watts=175.0, flow=23.9, back=24.1)
+    runs = service.db.precondition_runs()
+    assert len(runs) == 1 and runs[0].decided_by == "probes"
+
+
+def test_what_the_bed_was_and_what_it_became_are_both_recorded(service):
+    """The timing alone never said how far it had to go."""
+    start(service, start_c=19.2)
+    step(service, timedelta(minutes=10), watts=305.0, flow=34.56, back=33.00, room=19.7)
+    step(service, timedelta(minutes=15), watts=305.0, flow=41.31, back=41.06, room=19.6)
+    row = service.db.precondition_runs()[0]
+    assert row.start_c == 19.2
+    assert row.end_c == 41.06, "the return hose, because that water has been through the bed"
+    assert row.room_c == 19.6
+
+
+def test_neither_sensor_answering_records_nothing_at_all(service):
+    """Not a failure. A guess in this table becomes a wrong lead time for weeks."""
+    start(service)
+    step(service, timedelta(hours=4), watts=None)
     assert service.db.precondition_runs() == []
     assert service._precondition is not None

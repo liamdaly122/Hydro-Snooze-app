@@ -250,6 +250,58 @@ It should also agree with the plug. A big difference between flow and return mea
 the unit is working hard, which means a large draw. Two independent measurements
 of the same event, which is the most useful kind to have.
 
+## If they turn out to be the wrong way round
+
+Which probe went on which hose was decided with a roll of tape behind a bed, so
+this is worth checking rather than assuming. It is the one thing about this
+install that cannot be checked from the readings alone.
+
+**What proves nothing.** A reversed pair while the unit is off, idle, or cooling.
+With no water moving, both hoses drift towards room temperature and whichever one
+is nearer a radiator wins, so the sign means nothing. And cooling is *supposed* to
+send the warmer water back: return above flow is correct then.
+
+**What proves it.** Put the unit on heating, give it five minutes to circulate,
+then read both numbers.
+
+| While heating | Verdict |
+|---|---|
+| flow warmer than return | the right way round, nothing to do |
+| return warmer than flow | swapped |
+
+The first two readings taken after the probes went on were 34.56 out against
+33.00 back, and 41.31 against 41.06. Both heating, both flow-warmer, both right.
+So a reversal seen later is new information about a different moment, not proof
+the tape went on wrong.
+
+**The fix, if it is swapped.** One command, with the two water addresses traded:
+
+```sh
+./scripts/probes.py --flow $OLD_RETURN --return $OLD_FLOW --room $ROOM
+~/esphome/bin/esphome run docs/esphome-probes.yaml
+```
+
+That reflashes over Wi-Fi. Nothing needs unplugging and nothing needs moving.
+
+**Not in the app.** A swap in the code would be a line nobody remembers, and the
+next person to re-tape a probe would flip the real thing and find the sign wrong
+again for a reason they cannot see. The board should say what is true.
+
+**What is affected in the meantime.** Not the schedule, and not getting the bed
+ready. That rule reads the *size* of the gap between the two hoses and never its
+sign, so it works either way round.
+
+What a swap does affect is three things I read rather than three things the app
+does:
+
+- the **Flow** and **Return** cells in the status strip have each other's numbers
+- the **word** next to them, and the same word on the probes chip, points the
+  wrong way. "Bed shedding heat into the water" would really be the water giving
+  heat up to the bed
+- the **bed temperature** on the Temperature card prefers the return probe, so
+  swapped it shows the water going out rather than the water coming back. A
+  degree or so, in the wrong direction
+
 ## When the Seeed board arrives
 
 Add one flag. Do not edit the file: this script rewrites it, so a hand-edited line

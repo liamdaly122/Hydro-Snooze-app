@@ -11,6 +11,7 @@ import json
 import sqlite3
 from datetime import datetime, time
 from pathlib import Path
+from typing import NamedTuple
 
 from .events import Event, Level
 from .models import (
@@ -26,6 +27,26 @@ from .models import (
 #: Nights needed before the measured figure replaces the estimate. One night is
 #: an anecdote, and the estimate it would replace is at least consistent.
 MIN_RUNS_TO_LEARN = 3
+
+
+class PreconditionRow(NamedTuple):
+    """One finished pre-conditioning run, as it was stored.
+
+    Named rather than a bare tuple because the temperatures arrived later than
+    the timings did, and `row[6]` is a poor way to ask which one is the end
+    temperature. Everything after `reached` is None on a run decided off the plug
+    alone, which is every run recorded before the probes went on.
+    """
+
+    at: datetime
+    mode: str
+    target_c: int
+    seconds: int
+    reached: bool
+    start_c: float | None = None
+    end_c: float | None = None
+    room_c: float | None = None
+    decided_by: str | None = None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule (
@@ -54,16 +75,6 @@ CREATE TABLE IF NOT EXISTS power_samples (
     watts REAL NOT NULL
 );
 
--- How long the bed really took to reach a temperature, measured off the plug.
---
--- The lead time before bedtime used to be an estimate: a fixed cost plus a rate
--- per degree, from an assumed room temperature. The plug can answer it properly.
--- When the unit reaches its setpoint the draw falls out of the cooling band into
--- the idle one, and the time to that fall is the answer.
---
--- `reached` is false when it never got there, which is worth keeping rather than
--- discarding: a run that never idled means the target was not achievable that
--- night, and that is the more useful thing to know.
 -- Which jobs have already run tonight, so a restart does not forget.
 --
 -- This lived only in memory until 9 September, which was harmless while a
@@ -81,13 +92,37 @@ CREATE TABLE IF NOT EXISTS fired_jobs (
     wake_at TEXT NOT NULL
 );
 
+-- How long the bed really took to reach a temperature.
+--
+-- The lead time before bedtime used to be an estimate: a fixed cost plus a rate
+-- per degree, from an assumed room temperature. It can be answered properly now,
+-- by two sensors that answer it differently.
+--
+-- The plug answers it about the machine. When the unit reaches its setpoint the
+-- draw falls out of the working band into the idle one, and the time to that
+-- fall is how long the machine worked for.
+--
+-- The hose probes answer it about the bed. While the bed is still taking heat
+-- the water comes back at a different temperature from the way it went out, and
+-- when that gap closes the exchange has finished.
+--
+-- `decided_by` records which of the two made the call, because they are not the
+-- same measurement and averaging them together would quietly hide that.
+--
+-- `reached` is false when it never got there, which is worth keeping rather than
+-- discarding: a run that never settled means the target was not achievable that
+-- night, and that is the more useful thing to know.
 CREATE TABLE IF NOT EXISTS precondition_runs (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    at       TEXT    NOT NULL,
-    mode     TEXT    NOT NULL,
-    target_c INTEGER NOT NULL,
-    seconds  INTEGER NOT NULL,
-    reached  INTEGER NOT NULL
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT    NOT NULL,
+    mode        TEXT    NOT NULL,
+    target_c    INTEGER NOT NULL,
+    seconds     INTEGER NOT NULL,
+    reached     INTEGER NOT NULL,
+    start_c     REAL,
+    end_c       REAL,
+    room_c      REAL,
+    decided_by  TEXT
 );
 """
 
@@ -172,6 +207,18 @@ class Database:
         any more, so on an upgraded database every single save failed with a
         constraint error while every read carried on working.
         """
+        # The probe columns. Older rows keep NULL, which is honest: those runs
+        # were decided off the plug and no temperature was measured.
+        pre = {r["name"] for r in self._db.execute("PRAGMA table_info(precondition_runs)")}
+        for name, kind in (
+            ("start_c", "REAL"),
+            ("end_c", "REAL"),
+            ("room_c", "REAL"),
+            ("decided_by", "TEXT"),
+        ):
+            if name not in pre:
+                self._db.execute(f"ALTER TABLE precondition_runs ADD COLUMN {name} {kind}")
+
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
             # Empty rather than a real time: a row written before bedtime was a
@@ -344,12 +391,40 @@ class Database:
     # --- What the bed actually does -------------------------------------------
 
     def record_precondition(
-        self, at: datetime, mode: str, target_c: int, seconds: int, reached: bool
+        self,
+        at: datetime,
+        mode: str,
+        target_c: int,
+        seconds: int,
+        reached: bool,
+        *,
+        start_c: float | None = None,
+        end_c: float | None = None,
+        room_c: float | None = None,
+        decided_by: str | None = None,
     ) -> None:
+        """One pre-conditioning run, and what it took.
+
+        The temperatures are optional because they were not measurable until the
+        probes went on, and because a probe board that has gone quiet must not
+        stop the run being recorded. A row with the timing and no temperatures is
+        worth more than no row.
+        """
         self._db.execute(
-            "INSERT INTO precondition_runs (at, mode, target_c, seconds, reached) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (at.isoformat(), mode, target_c, seconds, int(reached)),
+            "INSERT INTO precondition_runs "
+            "(at, mode, target_c, seconds, reached, start_c, end_c, room_c, decided_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                at.isoformat(),
+                mode,
+                target_c,
+                seconds,
+                int(reached),
+                start_c,
+                end_c,
+                room_c,
+                decided_by,
+            ),
         )
         self._db.commit()
 
@@ -371,12 +446,22 @@ class Database:
             return None
         return max(1, round(sum(r["seconds"] for r in rows) / len(rows) / 60))
 
-    def precondition_runs(self, limit: int = 20) -> list[tuple[datetime, str, int, int, bool]]:
+    def precondition_runs(self, limit: int = 20) -> list[PreconditionRow]:
         rows = self._db.execute(
             "SELECT * FROM precondition_runs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [
-            (datetime.fromisoformat(r["at"]), r["mode"], r["target_c"], r["seconds"], bool(r["reached"]))
+            PreconditionRow(
+                datetime.fromisoformat(r["at"]),
+                r["mode"],
+                r["target_c"],
+                r["seconds"],
+                bool(r["reached"]),
+                r["start_c"],
+                r["end_c"],
+                r["room_c"],
+                r["decided_by"],
+            )
             for r in rows
         ]
 

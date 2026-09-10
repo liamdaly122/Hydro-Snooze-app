@@ -119,11 +119,30 @@ class Probes:
         This is the number a probe taped under a sheet could never give, because
         it does not depend on where anything was placed or whether someone is
         lying on it. It is the exchange itself.
+
+        The sign depends on which probe went on which hose, and that is decided
+        with a roll of tape behind a bed. Anything reading the sign should check
+        it against a known mode first: heating with the return warmer than the
+        flow means the two are the wrong way round, not that the physics is. The
+        size is safe either way, which is why the pre-conditioning rule uses only
+        the size.
         """
         flow, back = self.flow_c, self.return_c
         if flow is None or back is None:
             return None
         return round(back - flow, 2)
+
+    @property
+    def bed_c(self) -> float | None:
+        """The closest thing to the bed's own temperature.
+
+        The return hose, because that water has just been through the bed and
+        carries whatever the bed did to it. The flow hose if the return probe is
+        not reporting: that is the unit's own water rather than the bed's, and a
+        degree or two off, but it is a great deal better than nothing.
+        """
+        back = self.return_c
+        return back if back is not None else self.flow_c
 
     def missing(self) -> list[str]:
         """Which probes are not reporting anything current."""

@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -70,6 +70,41 @@ MIN_PRECONDITION_SECONDS = 120
 #: still going after that has answered a different question.
 MAX_PRECONDITION_SECONDS = 3 * 60 * 60
 
+#: How far apart the two hose probes have to get before the unit counts as
+#: actually working, and how close they have to come back before the bed counts
+#: as arrived.
+#:
+#: Both are measured, not guessed. On the evening the probes went on, a unit
+#: heating hard read 34.56C going out and 33.00C coming back, a gap of 1.56C.
+#: The same unit an hour later, sat at temperature, read 41.31C and 41.06C: a
+#: gap of 0.25C. So a degree is comfortably inside working and comfortably
+#: outside settled, and there is a band between the two that neither claims,
+#: which is what stops a run flickering between the two answers.
+#:
+#: Sign is deliberately not part of this. Which probe ended up on which hose was
+#: decided with a roll of tape behind a bed, and the size of the gap is the same
+#: either way.
+WORKING_DELTA_C = 1.0
+SETTLED_DELTA_C = 0.4
+
+
+@dataclass
+class PreconditionRun:
+    """A pre-conditioning run in flight.
+
+    `worked` is the guard that makes the probe rule safe. A bed that has arrived
+    and a bed whose unit has not started yet look identical on the hoses: in both
+    cases the water comes back the way it went out. So the probes may not call a
+    run finished until they have seen the gap open at least once themselves.
+    """
+
+    started: datetime
+    mode: Mode
+    target_c: int
+    #: What the bed read when the presses landed. None if the probes were quiet.
+    start_c: float | None = None
+    worked: bool = False
+
 
 class Service:
     def __init__(self, settings: Settings, *, clock: Clock | None = None, echo: bool = True) -> None:
@@ -106,9 +141,10 @@ class Service:
         # Which job is being retried, and the earliest another attempt is worth
         # making. Keyed by the job rather than a flag so a different step
         # arriving clears it by itself.
-        # A pre-conditioning run in flight: when it started, and what it was
-        # aiming at. The plug says when it got there.
-        self._precondition: tuple[datetime, Mode, int] | None = None
+        # A pre-conditioning run in flight: when it started, what it was aiming
+        # at, and what the bed read at the time. The probes say when it got
+        # there, and the plug says so when the probes cannot.
+        self._precondition: PreconditionRun | None = None
 
         # When the scheduler last completed a tick. The watchdog pings systemd
         # only while this keeps moving, so a loop that is running but stuck stops
@@ -742,26 +778,69 @@ class Service:
             await self.power_off()
 
     def _watch_precondition(self, watts: float | None, now: datetime) -> None:
-        """Time how long the bed really takes, using the only honest sensor here.
+        """Time how long the bed really takes to get ready, off two sensors.
 
-        A unit working towards a setpoint draws 170 W cooling or 300 W heating.
-        When it gets there it settles into the idle band. That fall is the answer
-        to the question the lead time has always been guessing at, and it costs
-        nothing to watch because the plug is already being read every thirty
-        seconds for other reasons.
+        The probes lead, because they are about the bed. While the bed is still
+        taking heat, the water comes back at a different temperature from the way
+        it went out; when that gap closes the exchange has finished. That is the
+        bed itself saying it is ready.
+
+        The plug is the fallback, and it answers a slightly different question:
+        it knows when the *unit* stopped working. A unit driving towards a
+        setpoint draws 170 W cooling or 300 W heating and falls into the idle
+        band when it gets there. That was the whole answer until the probes went
+        on and it is still the answer whenever they are quiet, which matters:
+        the probe board is new, it is on a bedroom Wi-Fi link, and a night must
+        not depend on it.
+
+        So the two work together rather than one replacing the other. Neither
+        being available is not a failure either. It means nothing can be
+        measured, so nothing is recorded, rather than a guess going into the
+        table the lead times are learned from.
         """
-        if self._precondition is None or watts is None:
+        run = self._precondition
+        if run is None:
             return
-        started, mode, target = self._precondition
-        elapsed = int((now - started).total_seconds())
-        activity = self.settings.thresholds.classify(watts)
 
-        if activity is Activity.IDLE and elapsed >= MIN_PRECONDITION_SECONDS:
-            self._precondition = None
-            self.db.record_precondition(started, mode.value, target, elapsed, True)
+        moving = self.probes.moving_c
+        activity = None if watts is None else self.settings.thresholds.classify(watts)
+        if moving is None and activity is None:
+            return
+
+        elapsed = int((now - run.started).total_seconds())
+
+        # Only the probes set this, deliberately. The plug seeing the unit draw
+        # is not the same as the probes seeing heat move: right after the presses
+        # land the unit is drawing 300 W and the water has not gone anywhere yet,
+        # so both hoses still read the room. Letting the plug vouch for that
+        # would hand the probes a closed gap they had never seen open, which is
+        # the exact thing this flag exists to stop.
+        if moving is not None and abs(moving) >= WORKING_DELTA_C:
+            run.worked = True
+
+        if moving is not None and run.worked:
+            # The probes have seen the gap open, so they are the ones who can say
+            # it has closed.
+            if abs(moving) <= SETTLED_DELTA_C and elapsed >= MIN_PRECONDITION_SECONDS:
+                self._end_precondition(run, elapsed, reached=True, decided_by="probes")
+                bed = self.probes.bed_c
+                where = f" The bed is at {bed:.1f}C." if bed is not None else ""
+                self.events.info(
+                    "precool",
+                    f"The bed reached {run.target_c}C in {elapsed // 60}m {elapsed % 60}s. "
+                    f"Measured on the hoses: the water is coming back within "
+                    f"{SETTLED_DELTA_C}C of the way it went out, so the bed has stopped "
+                    f"taking heat.{where}",
+                )
+                return
+        elif activity is Activity.IDLE and elapsed >= MIN_PRECONDITION_SECONDS:
+            # No probes, or the probes have not seen the unit do anything yet.
+            # The second case is a bed that was already at temperature, and the
+            # plug is the one that can tell.
+            self._end_precondition(run, elapsed, reached=True, decided_by="plug")
             self.events.info(
                 "precool",
-                f"The bed reached {target}C in {elapsed // 60}m {elapsed % 60}s. "
+                f"The bed reached {run.target_c}C in {elapsed // 60}m {elapsed % 60}s. "
                 "Measured off the plug, and used to time the next one.",
             )
             return
@@ -770,14 +849,37 @@ class Service:
         # means the target was not reachable that night, which is worth more than
         # the timing would have been.
         if elapsed > MAX_PRECONDITION_SECONDS:
-            self._precondition = None
-            self.db.record_precondition(started, mode.value, target, elapsed, False)
+            in_charge = "probes" if moving is not None and run.worked else "plug"
+            self._end_precondition(run, elapsed, reached=False, decided_by=in_charge)
+            bed = self.probes.bed_c
+            where = f" The bed got to {bed:.1f}C." if bed is not None else ""
             self.events.warning(
                 "precool",
-                f"Ran for {elapsed // 60} minutes without settling at {target}C. The unit is "
-                "working flat out and not getting there, so that target may not be reachable "
-                "in this room.",
+                f"Ran for {elapsed // 60} minutes without settling at {run.target_c}C, so that "
+                f"target may not be reachable in this room.{where}",
             )
+
+    def _end_precondition(
+        self, run: PreconditionRun, elapsed: int, *, reached: bool, decided_by: str
+    ) -> None:
+        """Clear the run and write it down, with whatever was measured.
+
+        The temperatures go in as they are, None included. A row with the timing
+        and no temperatures is a run decided off the plug, and saying so is worth
+        more than filling the columns in with something plausible.
+        """
+        self._precondition = None
+        self.db.record_precondition(
+            run.started,
+            run.mode.value,
+            run.target_c,
+            elapsed,
+            reached,
+            start_c=run.start_c,
+            end_c=self.probes.bed_c,
+            room_c=self.probes.room_c,
+            decided_by=decided_by,
+        )
 
     def _learned_lead(self, mode: Mode, target_c: int) -> int | None:
         return self.db.learned_lead_minutes(mode.value, target_c)
@@ -823,7 +925,12 @@ class Service:
                 # From here the plug is timing it. The clock starts once the
                 # presses have landed, not when the job fired, because the thirty
                 # seconds of infrared is not the bed cooling.
-                self._precondition = (self.clock.now(), mode, target)
+                self._precondition = PreconditionRun(
+                    started=self.clock.now(),
+                    mode=mode,
+                    target_c=target,
+                    start_c=self.probes.bed_c,
+                )
                 return True
             except CommandFailed as exc:
                 self._fail("precool", exc)
