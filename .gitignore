@@ -30,3 +30,9 @@ data/
 
 # OS
 .DS_Store
+
+# Written by scripts/probes.py from what the board actually reported, so it is
+# per-machine rather than shared. Once it holds real addresses it is worth
+# keeping: `git add -f docs/esphome-probes.yaml` saves redoing the identify step
+# if this Mac ever dies.
+docs/esphome-probes.yaml

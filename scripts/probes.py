@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""Write the probe configuration, at whichever stage of setup this is.
+
+    ./scripts/probes.py                                  # stage 1: find the probes
+    ./scripts/probes.py --label                          # stage 2: name them probe_1..3
+    ./scripts/probes.py --head A --foot B --room C       # stage 3: the real one
+
+Setting up three probes means writing the same file three times: once with no
+sensors to discover what is on the wire, once with neutral names so each one can
+be identified by warming it, and once for real. Each version differs from the last
+by a few lines in the middle of eighty.
+
+Hand-editing that three times, with sixteen-character hex addresses that have to
+be exact, is a good way to spend an evening on a typo. So this writes it instead,
+and validates it with ESPHome before saying it is done.
+
+Addresses can be given in any shape. Paste the whole log block if that is easier:
+
+    ./scripts/probes.py --label < the-log-i-copied.txt
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ROOT / "docs" / "esphome-probes.yaml"
+ESPHOME = Path.home() / "esphome" / "bin" / "esphome"
+
+#: The 1-Wire data pin. GPIO2, 8 and 9 are strapping pins on the ESP32-C3 and 8
+#: also carries the onboard LED, so a probe on any of them stops the board
+#: booting for reasons that look nothing like the cause.
+PIN = "GPIO4"
+
+#: The SuperMini and the genuine Seeed board are the same chip with different
+#: antennas, so the configuration differs by this one line. Kept here rather than
+#: as something to edit afterwards, because this script rewrites the file.
+BOARDS = {"supermini": "esp32-c3-devkitm-1", "seeed": "seeed_xiao_esp32c3"}
+
+#: A DS18B20 address as ESPHome writes it: 0x then sixteen hex characters.
+ADDRESS = re.compile(r"(?:0x)?([0-9a-fA-F]{16})")
+
+BOLD, DIM, GREEN, RED, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[0m"
+
+HEADER = """\
+# The temperature probes. Written by scripts/probes.py, so the addresses below
+# are the ones this board actually reported rather than the ones I typed.
+#
+#   ~/esphome/bin/esphome run docs/esphome-probes.yaml
+#
+# Full guide: docs/temperature-probes.md
+
+esphome:
+  name: hydrosnooze-temp
+  friendly_name: HydroSnooze probes
+
+esp32:
+  board: __BOARD__
+  framework:
+    type: esp-idf
+
+logger:
+api:
+  encryption:
+    key: !secret hydrosnooze_temp_api_key
+ota:
+  - platform: esphome
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+"""
+
+WEB = """
+# A page at http://hydrosnooze-temp.local showing every reading, so a probe can
+# be checked while standing next to the bed. The service talks over the API
+# rather than this, so nothing in the running system depends on it.
+web_server:
+  version: 3
+  port: 80
+"""
+
+BUS = f"""
+one_wire:
+  - platform: gpio
+    pin: {PIN}
+"""
+
+RSSI = """
+  # This board's antenna is its weak point. Worth watching from day one rather
+  # than discovering it during a bad night.
+  - platform: wifi_signal
+    name: "wifi_rssi"
+    update_interval: 60s
+"""
+
+
+def sensor(address: str, name: str, every: str, window: int, note: str = "") -> str:
+    comment = f"      # {note}\n" if note else ""
+    return f"""
+  - platform: dallas_temp
+    address: 0x{address}
+    name: "{name}"
+    id: {name}
+    update_interval: {every}
+    accuracy_decimals: 1
+    filters:
+{comment}      - median:
+          window_size: {window}
+          send_every: {window}
+      - filter_out: nan
+"""
+
+
+def die(*lines: str) -> None:
+    for line in lines:
+        print(f"{RED}{line}{RESET}" if line is lines[0] else line, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def clean(raw: list[str]) -> list[str]:
+    """Pull addresses out of whatever was given: bare, prefixed, or a whole log."""
+    found: list[str] = []
+    for chunk in raw:
+        for match in ADDRESS.finditer(chunk):
+            value = match.group(1).lower()
+            if value not in found:
+                found.append(value)
+    return found
+
+
+def validate(path: Path) -> bool:
+    """Ask ESPHome, rather than hoping. Skipped if it is not installed here."""
+    if not ESPHOME.exists():
+        return True
+    done = subprocess.run(
+        [str(ESPHOME), "config", str(path)], capture_output=True, text=True
+    )
+    if done.returncode == 0:
+        print(f"{DIM}  ESPHome says the configuration is valid.{RESET}")
+        return True
+    print(f"{RED}ESPHome rejected it:{RESET}", file=sys.stderr)
+    print(done.stderr.strip()[-1200:] or done.stdout.strip()[-1200:], file=sys.stderr)
+    return False
+
+
+def write(body: str, what: str, then: list[str], board: str = "supermini") -> int:
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG.write_text(body.replace("__BOARD__", BOARDS[board]))
+    print()
+    print(f"{GREEN}Wrote {CONFIG.relative_to(ROOT)}{RESET}  {DIM}({what}){RESET}")
+    if not validate(CONFIG):
+        return 1
+    print()
+    for line in then:
+        print(line)
+    print()
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--label",
+        action="store_true",
+        help="stage 2: name the found probes probe_1, probe_2, probe_3 so each "
+        "can be identified by warming it",
+    )
+    parser.add_argument("addresses", nargs="*", help="addresses, or a pasted log")
+    parser.add_argument("--head", help="stage 3: the probe at torso height")
+    parser.add_argument("--foot", help="stage 3: the probe at the far end")
+    parser.add_argument("--room", help="stage 3: the ambient probe")
+    parser.add_argument(
+        "--seeed",
+        action="store_true",
+        help="build for the genuine Seeed XIAO ESP32C3 rather than the SuperMini",
+    )
+    args = parser.parse_args()
+    board = "seeed" if args.seeed else "supermini"
+
+    roles = (args.head, args.foot, args.room)
+
+    # --- Stage 3: the real thing ---------------------------------------------
+    if any(roles):
+        if not all(roles):
+            die("Stage 3 needs all three: --head, --foot and --room.")
+        found = clean(list(roles))
+        if len(found) != 3:
+            die(
+                "Those are not three different addresses.",
+                "Each is 0x followed by sixteen hex characters, and no two probes share one.",
+            )
+        head, foot, room = found
+        body = (
+            HEADER
+            + WEB
+            + BUS
+            + "\nsensor:"
+            + sensor(
+                head,
+                "bed_head",
+                "30s",
+                5,
+                "Not decoration. A bad read on a long 1-Wire cable arrives as -127"
+                "\n      # or 85, and a median of five throws it away silently.",
+            )
+            + sensor(foot, "bed_foot", "30s", 5)
+            + sensor(room, "room", "60s", 3)
+            + RSSI
+        )
+        return write(
+            body,
+            "the real configuration",
+            [
+                f"{BOLD}~/esphome/bin/esphome run docs/esphome-probes.yaml{RESET}",
+                "",
+                f"{DIM}Then watch for ten minutes. All three should read within about a{RESET}",
+                f"{DIM}degree of each other and of the room. Two reading identically to{RESET}",
+                f"{DIM}two decimal places would mean the same address twice, and this{RESET}",
+                f"{DIM}script refuses that, so it should not happen.{RESET}",
+            ],
+            board,
+        )
+
+    # --- Stage 2: neutral names, so each can be identified --------------------
+    if args.label:
+        raw = args.addresses or ([sys.stdin.read()] if not sys.stdin.isatty() else [])
+        if not raw:
+            die(
+                "No addresses given.",
+                "Paste the three from the flash log, in any form:",
+                "",
+                "  ./scripts/probes.py --label 0x1c00... 0x3a00... 0x9b00...",
+            )
+        found = clean(raw)
+        if len(found) < 2:
+            die(
+                f"Only found {len(found)} address in that.",
+                "Each is 0x followed by sixteen hex characters.",
+            )
+        body = HEADER + WEB + BUS + "\nsensor:"
+        for i, address in enumerate(found, start=1):
+            body += sensor(address, f"probe_{i}", "10s", 3)
+        body += RSSI
+        return write(
+            body,
+            f"{len(found)} probes, named probe_1 to probe_{len(found)}",
+            [
+                f"{BOLD}~/esphome/bin/esphome run docs/esphome-probes.yaml{RESET}",
+                "",
+                "Then, watching the log:",
+                "",
+                f"  1. {BOLD}Squeeze one probe in a fist.{RESET} Within a few seconds one",
+                "     reading climbs. That is the one being held.",
+                "  2. Put tape on that lead and write probe_1, or whichever it was.",
+                "  3. Let it cool, then do the next.",
+                "",
+                f"{DIM}Reading every 10s here rather than 30s, so a warming probe shows up{RESET}",
+                f"{DIM}while the hand is still on it.{RESET}",
+                "",
+                "Then stage 3:",
+                "",
+                f"  {BOLD}./scripts/probes.py --head 0x.. --foot 0x.. --room 0x..{RESET}",
+            ],
+            board,
+        )
+
+    # --- Stage 1: find out what is on the wire --------------------------------
+    body = HEADER + BUS
+    return write(
+        body,
+        "discovery, no sensors",
+        [
+            f"{BOLD}~/esphome/bin/esphome run docs/esphome-probes.yaml{RESET}",
+            "",
+            f"{DIM}If it will not flash: hold BOOT, tap RST, release BOOT.{RESET}",
+            "",
+            "Within thirty seconds of it starting, the log prints:",
+            "",
+            f"{DIM}  [one_wire] Found devices:{RESET}",
+            f"{DIM}    0x1c0000031edd2828{RESET}",
+            f"{DIM}    0x3a00000320f18b28{RESET}",
+            f"{DIM}    0x9b000003215c4f28{RESET}",
+            "",
+            "Three means the wiring is right. Fewer means a loose joint. None at",
+            f"all means the data wire is not on {PIN}, or the pull-up is missing.",
+            "",
+            "Then, pasting those three straight in:",
+            "",
+            f"  {BOLD}./scripts/probes.py --label 0x1c00... 0x3a00... 0x9b00...{RESET}",
+        ],
+        board,
+    )
+
+
+if __name__ == "__main__":
+    if not shutil.which("python3"):  # pragma: no cover
+        pass
+    raise SystemExit(main())

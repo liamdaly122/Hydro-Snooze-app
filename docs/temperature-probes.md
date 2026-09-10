@@ -7,8 +7,10 @@ among a family of fields named `assumed_`.
 Three probes on one wire change that. They are the second real measurement in the
 project, and the first one that is about the bed rather than about the machine.
 
-**Both configurations below were validated against real ESPHome before this was
-written**, so nothing here is a guess about YAML.
+**No YAML is edited by hand anywhere below.** `scripts/probes.py` writes the
+configuration at each of the three stages and asks ESPHome whether it is valid
+before saying it is done, because a mistyped sixteen-character address fails long
+after it is typed and names neither the file nor the cause.
 
 ---
 
@@ -87,39 +89,16 @@ The point of the script is not saving typing. It is that pasting 44 random
 characters into a hidden file by hand fails silently, and fails later, as an
 unhelpful "invalid encryption key" at flash time.
 
-Then flash the board with **no sensors defined at all**, as
-`docs/esphome-probes.yaml`:
-
-```yaml
-esphome:
-  name: hydrosnooze-temp
-  friendly_name: HydroSnooze probes
-
-esp32:
-  board: esp32-c3-devkitm-1
-  framework:
-    type: esp-idf
-
-logger:
-api:
-  encryption:
-    key: !secret hydrosnooze_temp_api_key
-ota:
-  - platform: esphome
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-
-one_wire:
-  - platform: gpio
-    pin: GPIO4
-```
-
-With the board on USB:
+Then write the discovery configuration and flash it:
 
 ```sh
+./scripts/probes.py
 ~/esphome/bin/esphome run docs/esphome-probes.yaml
 ```
+
+The first command writes `docs/esphome-probes.yaml` with the 1-Wire bus on GPIO4
+and **no sensors at all**, then asks ESPHome whether it is valid before saying it
+is done. Its only job is to look at the wire and report what is there.
 
 **Getting it into flash mode**, if it will not take: hold **BOOT**, tap **RST**,
 release **BOOT**. That is this board's quirk and it will be needed at least once.
@@ -134,106 +113,63 @@ The log prints what it found:
 ```
 
 **Three addresses means the wiring is right.** Fewer means a bad joint or a
-missing resistor. None at all means the data wire is on the wrong pin.
+missing resistor. None at all means the data wire is not on GPIO4.
 
 ## Step 4: work out which is which
 
-The addresses come in no useful order, so identify them by hand.
+The addresses come in no useful order, so identify them physically. Feed the three
+straight back in, pasted however they come:
 
-**Squeeze one probe in a fist** and watch the log. The one that climbs is the one
-being held. Let it cool, then the next. **Label each lead with tape while doing
-it**, because ten minutes later it is guesswork again.
+```sh
+./scripts/probes.py --label 0x1c0000031edd2828 0x3a00000320f18b28 0x9b000003215c4f28
+~/esphome/bin/esphome run docs/esphome-probes.yaml
+```
 
-Decide the roles now:
+That names them `probe_1`, `probe_2` and `probe_3` and reads every **10 seconds**
+rather than 30, so a warming probe shows up while the hand is still on it.
 
-- **bed_head**, at torso height
-- **bed_foot**, the far end or the other side
-- **room**, the ambient one
+The whole log block can be pasted instead, timestamps and all, if that is easier:
+
+```sh
+./scripts/probes.py --label < what-i-copied.txt
+```
+
+Now, watching the log:
+
+1. **Squeeze one probe in a fist.** Within a few seconds one reading climbs. That
+   is the one being held
+2. **Put tape on that lead** and write `probe_1`, or whichever it turned out to be
+3. Let it cool, then do the next
+
+**Do not skip the tape.** Ten minutes later all three look identical and it is
+guesswork again.
 
 ## Step 5: the real configuration
 
-```yaml
-esphome:
-  name: hydrosnooze-temp
-  friendly_name: HydroSnooze probes
+One command, with each address against the job it is doing:
 
-esp32:
-  board: esp32-c3-devkitm-1
-  framework:
-    type: esp-idf
+```sh
+./scripts/probes.py \
+  --head 0x1c0000031edd2828 \
+  --foot 0x3a00000320f18b28 \
+  --room 0x9b000003215c4f28
 
-logger:
-api:
-  encryption:
-    key: !secret hydrosnooze_temp_api_key
-ota:
-  - platform: esphome
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-
-# A page at http://hydrosnooze-temp.local showing all three, so a probe can be
-# checked while standing next to the bed. The service talks over the API rather
-# than this, so nothing in the running system depends on it.
-web_server:
-  version: 3
-  port: 80
-
-one_wire:
-  - platform: gpio
-    pin: GPIO4
-
-sensor:
-  - platform: dallas_temp
-    address: 0x1c0000031edd2828      # mine, from step 3
-    name: "bed_head"
-    id: bed_head
-    update_interval: 30s
-    accuracy_decimals: 1
-    filters:
-      # Not decoration. A bad read on a long 1-Wire cable arrives as -127 or 85,
-      # and a median of five throws it away without anyone having to notice.
-      - median:
-          window_size: 5
-          send_every: 5
-      - filter_out: nan
-
-  - platform: dallas_temp
-    address: 0x3a00000320f18b28
-    name: "bed_foot"
-    id: bed_foot
-    update_interval: 30s
-    accuracy_decimals: 1
-    filters:
-      - median:
-          window_size: 5
-          send_every: 5
-      - filter_out: nan
-
-  - platform: dallas_temp
-    address: 0x9b000003215c4f28
-    name: "room"
-    id: room
-    update_interval: 60s
-    accuracy_decimals: 1
-    filters:
-      - median:
-          window_size: 3
-          send_every: 3
-      - filter_out: nan
-
-  # This board's antenna is its weak point. Worth watching from day one rather
-  # than discovering it during a bad night.
-  - platform: wifi_signal
-    name: "wifi_rssi"
-    update_interval: 60s
+~/esphome/bin/esphome run docs/esphome-probes.yaml
 ```
 
-Reflash, then watch it on the desk for ten minutes. All three should read within
-about a degree of each other and of the room.
+It refuses two roles sharing an address, refuses anything that is not sixteen hex
+characters, and validates the result with ESPHome before saying it is written. So
+the failure modes of hand-editing this are all gone.
 
-**Two probes reading identically to two decimal places** means the same address
-got pasted twice.
+Watch it for ten minutes. All three should read within about a degree of each
+other and of the room.
+
+**Worth keeping.** The generated file is gitignored because it is per-machine, but
+once it holds real addresses it saves redoing the squeezing:
+
+```sh
+git add -f docs/esphome-probes.yaml
+```
 
 ## Step 6: check the signal before anything is permanent
 
@@ -286,12 +222,14 @@ never a fault.
 
 ## When the Seeed board arrives
 
-Change one line:
+Add one flag. Do not edit the file: this script rewrites it, so a hand-edited line
+would be lost the next time it runs.
 
-```yaml
-esp32:
-  board: seeed_xiao_esp32c3      # was esp32-c3-devkitm-1
+```sh
+./scripts/probes.py --seeed \
+  --head 0x... --foot 0x... --room 0x...
 ```
 
-Reflash, and everything else carries over. Nothing done here is wasted, and the
-spare SuperMini becomes the bench board.
+Reflash, and everything else carries over. The probes, their addresses and their
+roles are all unchanged, because none of that belongs to the board. Nothing done
+here is wasted, and the spare SuperMini becomes the bench board.
