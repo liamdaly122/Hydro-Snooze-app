@@ -72,6 +72,10 @@ async def get_info(request: Request) -> dict[str, object]:
         "fake_power_monitor": service.settings.power_monitor == "fake",
         "max_temperature_c": service.settings.max_temperature_c,
         "notifications": service.notifier.enabled,
+        # Changes whenever the built frontend does. The app watches it and
+        # reloads itself rather than carrying on with the code it loaded days
+        # ago against a service that has moved on.
+        "build": getattr(request.app.state, "build", "dev"),
     }
 
 

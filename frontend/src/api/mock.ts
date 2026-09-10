@@ -90,7 +90,14 @@ export class MockApiClient implements ApiClient {
   }
 
   async info(): Promise<ServiceInfo> {
-    return { fake_transmitter: true, fake_power_monitor: true, max_temperature_c: MAX_TEMPERATURE_C }
+    return {
+      fake_transmitter: true,
+      fake_power_monitor: true,
+      max_temperature_c: MAX_TEMPERATURE_C,
+      // Fixed, so the seed build never decides it is out of date and reloads
+      // itself in a loop.
+      build: 'seed',
+    }
   }
 
   async getState(): Promise<DeviceState> {

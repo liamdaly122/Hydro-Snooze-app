@@ -172,4 +172,9 @@ export interface ServiceInfo {
   fake_transmitter: boolean
   fake_power_monitor: boolean
   max_temperature_c: number
+  /**
+   * Changes whenever the built frontend does. The app remembers the one it
+   * started with and reloads itself when the service reports a different one.
+   */
+  build: string
 }

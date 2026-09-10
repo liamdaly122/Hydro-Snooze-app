@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -56,6 +57,27 @@ logging.getLogger("aioesphomeapi.connection").addFilter(QuietExpectedDisconnects
 log = logging.getLogger("hydrosnooze")
 
 
+def build_id() -> str:
+    """Something that changes whenever the built frontend does.
+
+    The app compares this against the one it started with and reloads itself
+    when they differ. Without it a phone with the app already open keeps running
+    the JavaScript it loaded days ago: a deploy replaces the files and restarts
+    the service, and the page in front of you carries on calling endpoints that
+    changed underneath it. That cost an evening twice, once looking for a bug in
+    a power button that had already been fixed.
+
+    Hashed from index.html rather than from a version number, because index.html
+    names the hashed asset bundles and so changes on every build that changes
+    anything, and never on one that does not.
+    """
+    static = static_dir()
+    index = static / "index.html" if static else None
+    if index is None or not index.exists():
+        return "dev"
+    return hashlib.sha256(index.read_bytes()).hexdigest()[:12]
+
+
 def static_dir() -> Path | None:
     """Where the built frontend lives.
 
@@ -73,6 +95,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     service = Service(settings)
     app.state.service = service
+    # Read once here rather than per request: a deploy replaces these files and
+    # restarts the service, so startup is exactly when it changes.
+    app.state.build = build_id()
     await service.start()
     # Naming the address, not just the mode. "power=shelly" looks like success
     # whether or not the host was ever set, and a missing host falls back to a

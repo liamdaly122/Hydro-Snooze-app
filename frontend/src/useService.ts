@@ -9,6 +9,36 @@ import type {
   ServiceInfo,
 } from './types'
 
+/** The build this page was loaded with, learned the first time we ask. */
+let loadedBuild: string | null = null
+
+/**
+ * Reload when the service is serving a newer frontend than this one.
+ *
+ * A phone with the app already open keeps running the JavaScript it loaded days
+ * ago. A deploy replaces the files and restarts the service, the socket drops
+ * and comes back, and the page in front of you carries on calling endpoints that
+ * changed underneath it. That cost two evenings, one of them spent looking for a
+ * bug in a power button that had already been fixed.
+ *
+ * A reconnect is exactly the right moment to check, because a deploy is the
+ * usual reason for one.
+ */
+async function reloadIfTheServiceMovedOn(client: ApiClient): Promise<void> {
+  try {
+    const { build } = await client.info()
+    if (!build) return
+    if (loadedBuild === null) {
+      loadedBuild = build
+      return
+    }
+    if (build !== loadedBuild) window.location.reload()
+  } catch {
+    // A failed check is not worth reporting. The socket has only just come back
+    // and there will be another reconnect along.
+  }
+}
+
 /**
  * Holds everything the service knows and keeps it fresh off the live feed.
  *
@@ -39,6 +69,8 @@ export function useService(client: ApiClient) {
     ]).then(([i, s, sch, ev, pw, hp]) => {
       if (!live) return
       setInfo(i)
+      // The build this page is running, for the reconnect check above.
+      if (loadedBuild === null) loadedBuild = i.build
       setState(s)
       setSchedule(sch)
       setEvents(ev)
@@ -57,7 +89,10 @@ export function useService(client: ApiClient) {
         if (update.schedule) setSchedule(update.schedule)
         if (update.event) setEvents((prev) => [update.event!, ...prev].slice(0, 200))
         if (update.health) setHealth(update.health)
-        if (update.connected !== undefined) setConnected(update.connected)
+        if (update.connected !== undefined) {
+          setConnected(update.connected)
+          if (update.connected) void reloadIfTheServiceMovedOn(client)
+        }
       }),
     [client],
   )
