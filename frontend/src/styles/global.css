@@ -1323,3 +1323,388 @@ button:disabled {
   color: var(--red);
 }
 
+
+/* --- Autopilot --------------------------------------------------------------
+ *
+ * The one screen in this app that is not near-black. Everything else is a card
+ * on a black ground because everything else is read in a dark room at 2am. This
+ * is read over breakfast with the curtains open, and it is the only screen whose
+ * job is to feel like a result rather than a control.
+ *
+ * The gradient is the whole idea: deep indigo rising to the top right, dark
+ * enough at the bottom left that the count sits on near-black. Two layers rather
+ * than one, so the corner glow can be soft while the base stays flat.
+ */
+
+.ap-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  padding: 22px 20px 20px;
+  background:
+    radial-gradient(120% 95% at 100% 0%, #3d5cf0 0%, #2039c4 34%, rgb(16 24 84 / 0.55) 62%, transparent 100%),
+    linear-gradient(160deg, #0b0b12 0%, #0e1234 48%, #14205e 100%);
+  isolation: isolate;
+}
+
+/* A faint starfield, so the corner glow has something in it rather than being a
+   clean sweep of colour. Two radial gradients, no image. */
+.ap-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.2px 1.2px at 18% 22%, rgb(255 255 255 / 0.5), transparent),
+    radial-gradient(1px 1px at 62% 12%, rgb(255 255 255 / 0.35), transparent),
+    radial-gradient(1.4px 1.4px at 84% 38%, rgb(255 255 255 / 0.3), transparent),
+    radial-gradient(1px 1px at 40% 8%, rgb(255 255 255 / 0.25), transparent),
+    radial-gradient(1px 1px at 92% 16%, rgb(255 255 255 / 0.4), transparent);
+  pointer-events: none;
+}
+
+.ap-hero > * {
+  position: relative;
+}
+
+.ap-hero__mark {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  filter: drop-shadow(0 0 14px rgb(140 176 255 / 0.65));
+}
+
+.ap-hero__count {
+  margin: 0;
+  font-size: 64px;
+  line-height: 0.95;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.ap-hero__title {
+  margin: 8px 0 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.ap-hero__date {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.62);
+}
+
+/* --- The invented three ---------------------------------------------------- */
+
+.ap-boosts {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Translucent rather than a solid fill, so they sit *in* the gradient instead of
+   punching three holes through it. The reference does the same thing and it is
+   most of why that screen reads as one object. */
+.ap-boost {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.09);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(8px);
+}
+
+.ap-boost__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.ap-boost__value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* --- Adjustments and breakdown --------------------------------------------- */
+
+.ap-sublabel {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.ap-split {
+  display: flex;
+  gap: 20px;
+  padding-top: 16px;
+}
+
+.ap-split__total {
+  flex: none;
+  min-width: 88px;
+}
+
+.ap-split__breakdown {
+  flex: 1;
+  min-width: 0;
+}
+
+.ap-total {
+  margin: 0;
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.ap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 7px;
+  font-size: 13px;
+  color: var(--text-mid);
+}
+
+.ap-row:last-child { margin-bottom: 0; }
+
+.ap-row__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.ap-row__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ap-row__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* --- The chart -------------------------------------------------------------- */
+
+.apchart {
+  margin-top: 18px;
+}
+
+/* The dots and the axis labels are absolutely positioned against this, so the
+   circles stay circles: the svg inside is drawn 1000 units wide and squeezed to
+   the width of a phone, and anything round drawn in there comes out an egg. */
+.apchart__plot {
+  position: relative;
+  height: 190px;
+  padding-right: 26px;
+}
+
+.apchart__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.apchart__dots {
+  position: absolute;
+  inset: 0 26px 0 0;
+  pointer-events: none;
+}
+
+.apchart__dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  border: 1.6px solid currentColor;
+  background: #000;
+}
+
+/* Filled rather than hollow for the two that are rare, hollow for the one there
+   are dozens of. Forty filled white dots would be a solid band. */
+.apchart__dot--phase,
+.apchart__dot--precool {
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.apchart__scale {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 26px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.apchart__scale span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.apchart__axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 8px 26px 0 0;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ap-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ap-key__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ap-key__ring {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.6px solid currentColor;
+  flex: none;
+}
+
+.ap-key__dash {
+  width: 12px;
+  height: 0;
+  border-top: 1px dashed rgb(255 255 255 / 0.45);
+  flex: none;
+}
+
+/* --- The measured half ------------------------------------------------------ */
+
+/* A grid rather than flex. Three flex children with nowrap values will happily
+   overlap when one of them is "18.6-26.4" and the box is 354px wide, which is
+   exactly what it did. Equal columns and a value allowed to shrink instead. */
+.ap-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px 0 16px;
+}
+
+.ap-fact {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ap-fact__value {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ap-fact__label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ap-verdict {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.ap-verdict:last-child { margin-bottom: 0; }
+.ap-verdict--dim { color: var(--text-dim); font-size: 13px; }
+.ap-verdict--warn { color: var(--amber); }
+
+.ap-notes {
+  margin: 14px 0 0;
+  padding: 0 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-mid);
+}
+
+.ap-notes li { margin-bottom: 8px; }
+.ap-notes li:last-child { margin-bottom: 0; }
+
+/* --- The way in, on the home screen ----------------------------------------- */
+
+.ap-teaser {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 0;
+  border-radius: var(--radius-card);
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  background:
+    radial-gradient(130% 130% at 100% 0%, #354fe0 0%, #1b2a9e 40%, transparent 100%),
+    linear-gradient(150deg, #0c0c14 0%, #101540 100%);
+}
+
+.ap-teaser:active { opacity: 0.85; }
+
+.ap-teaser__mark { flex: none; filter: drop-shadow(0 0 10px rgb(140 176 255 / 0.6)); }
+
+.ap-teaser__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ap-teaser__title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ap-teaser__sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.6);
+}
+
+.ap-teaser__chevron { flex: none; color: rgb(255 255 255 / 0.5); }

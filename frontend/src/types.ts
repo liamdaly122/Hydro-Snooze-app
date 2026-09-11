@@ -201,3 +201,78 @@ export interface Profile {
   active: boolean
   created_at: string | null
 }
+
+/* --- Autopilot ---------------------------------------------------------------
+ *
+ * Last night, as the Autopilot screen draws it.
+ *
+ * Everything here except `boosts` is something that was written down while the
+ * night happened: a count of what the service did, the moments it did it, and
+ * how far the bed sat from what it was being asked for at the time.
+ *
+ * `boosts` is the exception and carries `for_fun` so the screen cannot forget
+ * it. Nothing in this project measures sleep. Those three figures are worked
+ * out from how tightly the bed held its setpoints, which makes them stable and
+ * makes them respond to a real night, and they are still invented.
+ */
+
+/**
+ * Why an adjustment happened: the three reasons the service ever changes
+ * anything, plus the one that is not the service at all.
+ */
+export type AdjustmentKind = 'phase' | 'precool' | 'quiet' | 'manual'
+
+export interface AutopilotMark {
+  at: string
+  kind: AdjustmentKind
+  label: string
+  detail: string
+  /** Bed minus setpoint at that moment, or null if the probes were quiet. */
+  offset_c: number | null
+}
+
+export interface AutopilotPoint {
+  at: string
+  offset_c: number
+}
+
+export interface AutopilotBand {
+  label: string
+  starts_at: string
+  ends_at: string
+  temp_c: number
+}
+
+export interface AutopilotBoost {
+  key: string
+  label: string
+  percent: number
+  /** Always true. See the note at the top of this block. */
+  for_fun: boolean
+}
+
+export interface AutopilotNight {
+  wake_at: string
+  starts_at: string
+  adjustments: number
+  /** Whether the probes said anything at all. False means a count and no chart. */
+  measured: boolean
+  breakdown: { kind: AdjustmentKind; label: string; count: number }[]
+  marks: AutopilotMark[]
+  track: AutopilotPoint[]
+  bands: AutopilotBand[]
+  boosts: AutopilotBoost[]
+  stages: { landed: number; total: number; missed: string[] }
+  /** Share of the night the bed sat within half a degree of its setpoint. */
+  on_target: number | null
+  bed: { low_c: number | null; high_c: number | null; typical_off_c: number | null }
+  ready: {
+    minutes: number
+    reached: boolean
+    target_c: number
+    start_c: number | null
+    end_c: number | null
+  } | null
+  energy_kwh: number
+  notes: string[]
+}

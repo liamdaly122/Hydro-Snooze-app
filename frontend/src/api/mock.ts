@@ -13,13 +13,14 @@
 
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
+  AutopilotNight,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
   Mode,
   PowerSample,
-  Profile,
   Preconditioning,
+  Profile,
   Schedule,
   ServiceInfo,
   SleepStage,
@@ -240,6 +241,11 @@ export class MockApiClient implements ApiClient {
     })
   }
 
+  async getAutopilot(): Promise<AutopilotNight> {
+    await sleep(120)
+    return seedNight()
+  }
+
   async getProfiles(): Promise<Profile[]> {
     await sleep(120)
     return this.profiles.map((p) => ({ ...p, active: this.isRunning(p) }))
@@ -395,6 +401,123 @@ export class MockApiClient implements ApiClient {
       kind,
       message,
     }))
+  }
+}
+
+
+/**
+ * A plausible night for the Autopilot screen.
+ *
+ * Shaped off a real one. An eight and a half hour night driven through the real
+ * scheduler and the real sequences produces five adjustments, not forty: this
+ * system sets a stage and holds it, where the design it borrows from is a closed
+ * loop nudging itself every few minutes. So the seed shows five, because a seed
+ * that flatters the screen is a seed that hides what the screen will look like
+ * on the morning it matters.
+ *
+ * The bed chases whatever the unit was last told, with a lag, which is what puts
+ * the shape in the line: a long climb to each new stage and then a flat stretch
+ * holding it.
+ */
+function seedNight(): AutopilotNight {
+  const wake = new Date()
+  wake.setHours(7, 30, 0, 0)
+  if (wake.getTime() > Date.now()) wake.setDate(wake.getDate() - 1)
+
+  const at = (h: number, m: number) => {
+    const d = new Date(wake)
+    d.setHours(h, m, 0, 0)
+    if (h > 12) d.setDate(d.getDate() - 1)
+    return d
+  }
+
+  const bands = [
+    { label: 'Deep', starts_at: at(22, 30), ends_at: at(2, 44), temp_c: 19 },
+    { label: 'REM', starts_at: at(2, 44), ends_at: at(6, 26), temp_c: 22 },
+    { label: 'Wake', starts_at: at(6, 26), ends_at: at(7, 30), temp_c: 26 },
+  ]
+
+  // The bed, chasing the setpoint at the rate the real one does.
+  const from = at(21, 30).getTime()
+  const to = at(7, 29).getTime()
+  const track: AutopilotNight['track'] = []
+  let bed = 21.8
+  let on = false
+  for (let ms = from, i = 0; ms <= to; ms += 60_000, i++) {
+    if (ms >= at(22, 12).getTime()) on = true
+    const band = bands.find((b) => ms >= b.starts_at.getTime() && ms < b.ends_at.getTime())
+    const target = band ? band.temp_c : bands[0]!.temp_c
+    bed += on ? (target - bed) * 0.06 : (20.5 - bed) * 0.01
+    const shown = bed + Math.sin(i / 37) * 0.28
+    track.push({ at: new Date(ms).toISOString(), offset_c: Math.round((shown - target) * 100) / 100 })
+  }
+
+  const offsetAt = (ms: number) =>
+    track.reduce((best, p) =>
+      Math.abs(new Date(p.at).getTime() - ms) < Math.abs(new Date(best.at).getTime() - ms) ? p : best,
+    ).offset_c
+
+  // The nine a real night produces: a mode press and a rail-and-count at each
+  // boundary, two for getting the bed ready, two for the one drift correction.
+  const marks: AutopilotNight['marks'] = (
+    [
+      [at(22, 12), 'precool', 'Set mode to turbo via warm then cool'],
+      [at(22, 13), 'precool', 'Railed to 15° then counted up to 19° (25 + 4)'],
+      [at(22, 30), 'phase', 'Set mode to quiet via warm then cool'],
+      [at(22, 30), 'phase', 'Railed to 15° then counted up to 19° (25 + 4)'],
+      [at(2, 44), 'phase', 'Railed to 15° then counted up to 22° (25 + 7)'],
+      [at(6, 26), 'phase', 'Set mode to warming via warm then cool'],
+      [at(6, 26), 'phase', 'Railed to 25° then counted up to 26° (35 + 1)'],
+      [at(7, 12), 'quiet', 'Set mode to quiet via warm then cool'],
+      [at(7, 12), 'quiet', 'Railed to 15° then counted up to 26° (25 + 11)'],
+    ] as const
+  ).map(([when, kind, detail]) => ({
+    at: when.toISOString(),
+    kind,
+    label: { phase: 'Phase & mode change', precool: 'Getting the bed ready', quiet: 'Drift response', manual: 'Set by hand' }[kind],
+    detail,
+    offset_c: offsetAt(when.getTime()),
+  }))
+
+  const off = track.map((p) => Math.abs(p.offset_c))
+  return {
+    wake_at: wake.toISOString(),
+    starts_at: at(21, 30).toISOString(),
+    adjustments: marks.length,
+    measured: true,
+    breakdown: (['phase', 'precool', 'quiet', 'manual'] as const).map((kind) => ({
+      kind,
+      label: {
+        phase: 'Phase & mode change',
+        precool: 'Getting the bed ready',
+        quiet: 'Drift response',
+        manual: 'Set by hand',
+      }[kind],
+      count: marks.filter((m) => m.kind === kind).length,
+    })),
+    marks,
+    track,
+    bands: bands.map((b) => ({
+      label: b.label,
+      starts_at: b.starts_at.toISOString(),
+      ends_at: b.ends_at.toISOString(),
+      temp_c: b.temp_c,
+    })),
+    boosts: [
+      { key: 'deep', label: 'Increased deep sleep', percent: 30, for_fun: true },
+      { key: 'rem', label: 'Increased REM sleep', percent: 27, for_fun: true },
+      { key: 'ready', label: 'Fell asleep faster', percent: 6, for_fun: true },
+    ],
+    stages: { landed: 3, total: 3, missed: [] },
+    on_target: Math.round((100 * off.filter((o) => o <= 0.5).length) / off.length),
+    bed: {
+      low_c: 18.7,
+      high_c: 25.7,
+      typical_off_c: Math.round((off.reduce((a, b) => a + b, 0) / off.length) * 10) / 10,
+    },
+    ready: { minutes: 29, reached: true, target_c: 19, start_c: 21.1, end_c: 19.2 },
+    energy_kwh: 1.21,
+    notes: [],
   }
 }
 

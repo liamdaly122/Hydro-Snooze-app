@@ -125,3 +125,74 @@ def profile_json(profile: Profile, schedule: Schedule) -> dict[str, Any]:
         "active": profile.matches(schedule),
         "created_at": _iso(profile.created_at),
     }
+
+
+def autopilot_json(night) -> dict[str, object]:
+    """Last night, as the Autopilot screen draws it.
+
+    Flat and already rounded, so the app renders what it is given rather than
+    doing arithmetic on the way to a pixel. The one thing worth pointing at is
+    `boosts`, which carries `for_fun: true`: those three figures are the only
+    numbers this project has ever shown that nothing measured, and the flag is
+    there so the screen cannot forget to say so.
+    """
+    from ..autopilot import LABELS
+
+    return {
+        "wake_at": night.wake_at.isoformat(),
+        "starts_at": night.starts_at.isoformat(),
+        "adjustments": night.adjustments,
+        "measured": night.measured,
+        "breakdown": [
+            {"kind": kind, "label": label, "count": night.counted(kind)}
+            for kind, label in LABELS.items()
+        ],
+        "marks": [
+            {
+                "at": m.at.isoformat(),
+                "kind": m.kind,
+                "label": m.label,
+                "detail": m.detail,
+                "offset_c": m.offset_c,
+            }
+            for m in night.marks
+        ],
+        "track": [{"at": p.at.isoformat(), "offset_c": p.offset_c} for p in night.track],
+        "bands": [
+            {
+                "label": b.label,
+                "starts_at": b.starts_at.isoformat(),
+                "ends_at": b.ends_at.isoformat(),
+                "temp_c": b.temp_c,
+            }
+            for b in night.bands
+        ],
+        "boosts": [
+            {"key": b.key, "label": b.label, "percent": b.percent, "for_fun": True}
+            for b in night.boosts
+        ],
+        "stages": {
+            "landed": night.stages_landed,
+            "total": night.stages_total,
+            "missed": night.missed,
+        },
+        "on_target": night.on_target,
+        "bed": {
+            "low_c": night.low_c,
+            "high_c": night.high_c,
+            "typical_off_c": night.typical_off_c,
+        },
+        "ready": (
+            None
+            if night.ready is None
+            else {
+                "minutes": night.ready.seconds // 60,
+                "reached": night.ready.reached,
+                "target_c": night.ready.target_c,
+                "start_c": night.ready.start_c,
+                "end_c": night.ready.end_c,
+            }
+        ),
+        "energy_kwh": night.energy_kwh,
+        "notes": night.notes,
+    }

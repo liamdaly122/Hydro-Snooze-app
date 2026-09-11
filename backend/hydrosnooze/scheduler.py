@@ -177,6 +177,27 @@ class Scheduler:
                 return plan
         return None
 
+    def last_finished(self, schedule: Schedule, now: datetime) -> NightPlan | None:
+        """The most recent night that is over, for the morning report to describe.
+
+        plan_in_progress answers "which night are we inside", and inside a night
+        is exactly when there is nothing to report yet. This walks back instead,
+        past a night still running, to the last wake time that has been and gone.
+
+        A fortnight of lookback rather than a couple of days, so a schedule set to
+        weekdays only still has something to show on a Sunday.
+        """
+        if not schedule.days_of_week or not schedule.stages:
+            return None
+        for back in range(0, 15):
+            wake_on = (now - timedelta(days=back)).date()
+            if wake_on.weekday() not in schedule.days_of_week:
+                continue
+            plan = schedule.plan_for(wake_on, self.learned_lead)
+            if plan.wake_at < now:
+                return plan
+        return None
+
     def due(self, schedule: Schedule, now: datetime) -> Job | None:
         """The one job that should run right now, if any."""
         plan = self.plan_in_progress(schedule, now)

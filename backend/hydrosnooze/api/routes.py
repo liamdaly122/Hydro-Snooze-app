@@ -19,7 +19,7 @@ from ..models import (
 )
 from ..sequences import CommandFailed
 from ..service import Service
-from .schemas import health_json, profile_json, state_json
+from .schemas import autopilot_json, health_json, profile_json, state_json
 
 router = APIRouter(prefix="/api")
 
@@ -131,6 +131,25 @@ async def get_power(request: Request, hours: int = 24) -> list[dict[str, object]
         }
         for s in service.db.night_history(since)
     ]
+
+
+@router.get("/autopilot")
+async def get_autopilot(request: Request) -> dict[str, object]:
+    """Last night, for the Autopilot screen.
+
+    Rebuilt on request rather than stored. Everything it reads was written down
+    while the night happened, so there is nothing a saved copy would know that
+    this does not, and a stored report is one more thing to migrate the day the
+    shape of it changes.
+
+    404 rather than an empty shape when there is no finished night behind us.
+    A screen with a way to say "nothing yet" is better than one drawing zeroes.
+    """
+    service = _service(request)
+    plan = service.scheduler.last_finished(service.schedule, service.clock.now())
+    if plan is None:
+        raise HTTPException(404, "No finished night to report on yet.")
+    return autopilot_json(service.night_report(plan))
 
 
 # --- Writes -------------------------------------------------------------------

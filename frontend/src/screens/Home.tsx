@@ -3,6 +3,7 @@ import { TemperatureCard } from '../components/TemperatureCard'
 import { WakeCard } from '../components/WakeCard'
 import { ModeSelector } from '../components/ModeSelector'
 import { StatusStrip } from '../components/StatusStrip'
+import { AutopilotTeaser } from '../components/AutopilotTeaser'
 import type { ApiClient } from '../api/client'
 import type { DeviceState, Mode, Schedule, Stage } from '../types'
 
@@ -13,6 +14,7 @@ interface Props {
   maxC: number
   onOpenSchedule: () => void
   onOpenProfiles: () => void
+  onOpenAutopilot: () => void
 }
 
 /**
@@ -23,7 +25,15 @@ interface Props {
  * service drives every stage itself now, so a change is just a change: it saves,
  * and the next stage boundary uses it.
  */
-export function Home({ client, state, schedule, maxC, onOpenSchedule, onOpenProfiles }: Props) {
+export function Home({
+  client,
+  state,
+  schedule,
+  maxC,
+  onOpenSchedule,
+  onOpenProfiles,
+  onOpenAutopilot,
+}: Props) {
   const [draft, setDraft] = useState<Schedule>(schedule)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,6 +52,13 @@ export function Home({ client, state, schedule, maxC, onOpenSchedule, onOpenProf
 
   return (
     <>
+      {/*
+        Top of the screen, above the controls, because in the morning it is the
+        only thing anyone opens this for. It collapses to nothing on a morning
+        with no finished night behind it rather than showing an empty shell.
+      */}
+      <AutopilotTeaser client={client} onOpen={onOpenAutopilot} />
+
       <TemperatureCard
         state={state}
         draft={draft}

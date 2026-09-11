@@ -11,6 +11,7 @@
  */
 
 import type {
+  AutopilotNight,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -38,6 +39,13 @@ export interface LiveUpdate {
 }
 
 export interface ApiClient {
+  /**
+   * Last night, for the Autopilot screen. Rejects with a 404 message when there
+   * is no finished night behind us yet, which is the first morning and any
+   * morning after a day the schedule was off.
+   */
+  getAutopilot(): Promise<AutopilotNight>
+
   /** Whether we are talking to a simulated unit, and the safety cap in force. */
   info(): Promise<ServiceInfo>
 

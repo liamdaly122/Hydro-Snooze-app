@@ -42,7 +42,7 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import clocksync, pi, report, watchdog
+from . import autopilot, clocksync, pi, report, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
@@ -946,7 +946,7 @@ class Service:
                 bed = self.probes.bed_c
                 where = f" The bed is at {bed:.1f}C." if bed is not None else ""
                 self.events.info(
-                    "precool",
+                    autopilot.READY_KIND,
                     f"The bed reached {run.target_c}C in {elapsed // 60}m {elapsed % 60}s. "
                     f"Measured on the hoses: the water is coming back within "
                     f"{SETTLED_DELTA_C}C of the way it went out, so the bed has stopped "
@@ -959,7 +959,11 @@ class Service:
             # plug is the one that can tell.
             self._end_precondition(run, elapsed, reached=True, decided_by="plug")
             self.events.info(
-                "precool",
+                # READY_KIND, not "precool". This reports the result of getting
+                # the bed ready; the "precool" line half an hour earlier is the
+                # thing that started it. Autopilot counts what it did, and
+                # counting the outcome as well made one action read as two.
+                autopilot.READY_KIND,
                 f"The bed reached {run.target_c}C in {elapsed // 60}m {elapsed % 60}s. "
                 "Measured off the plug, and used to time the next one.",
             )
@@ -1224,6 +1228,22 @@ class Service:
         )
         return True
 
+    def night_report(self, plan: NightPlan):
+        """Last night, as the Autopilot screen draws it.
+
+        The same four sources the morning message is built from, so the screen and
+        the notification can never disagree about how many times anything
+        happened.
+        """
+        start, end = report.window(plan)
+        return autopilot.build(
+            plan,
+            self.db.night_history(start),
+            self.db.events_between(start, end),
+            self.scheduler.fired.keys_for(plan),
+            self.db.precondition_since(start),
+        )
+
     def _send_report(self, plan: NightPlan) -> bool:
         """One message about the night that has just finished.
 
@@ -1250,8 +1270,12 @@ class Service:
         return True
 
     async def _run_stage(self, plan: NightPlan, step: StageStep) -> bool:
+        # PHASE_KIND rather than "stage", which still carries the warnings and the
+        # retries. Autopilot counts adjustments by kind, and the alternative was
+        # matching words in a message, which is the sort of thing that quietly
+        # stops working the day someone rewrites a sentence.
         self.events.info(
-            "stage",
+            autopilot.PHASE_KIND,
             f"{step.label}: {step.temp_c}C in {step.mode.value} until {step.ends_at:%H:%M}",
         )
         async with self._lock:

@@ -10,6 +10,7 @@
 
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
+  AutopilotNight,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -86,6 +87,8 @@ export class HttpApiClient implements ApiClient {
       body: JSON.stringify({ target_c: targetC }),
     })
   }
+
+  getAutopilot = () => request<AutopilotNight>('/api/autopilot')
 
   getProfiles = () => request<Profile[]>('/api/profiles')
 

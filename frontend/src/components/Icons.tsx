@@ -126,3 +126,59 @@ export function WrenchIcon({ size = 24 }: IconProps) {
     </svg>
   )
 }
+
+/**
+ * The Autopilot mark: a four pointed star with concave sides.
+ *
+ * Drawn rather than fetched, and drawn with cubic curves rather than straight
+ * edges, because the straight-edged version reads as a compass rose and the
+ * curved one reads as a glint. `currentColor` by default so it takes the tint of
+ * whatever it sits on, and a gradient when `glow` is set, which is what the hero
+ * uses.
+ */
+export function Sparkle({ size = 24, className, glow = false }: IconProps & { glow?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
+      {glow && (
+        <defs>
+          <linearGradient id="sparkle-glow" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#dbe6ff" />
+            <stop offset="55%" stopColor="#8fb2ff" />
+            <stop offset="100%" stopColor="#5d84f5" />
+          </linearGradient>
+        </defs>
+      )}
+      <path
+        d="M12 1.2c.55 5.3 5.5 10.25 10.8 10.8-5.3.55-10.25 5.5-10.8 10.8-.55-5.3-5.5-10.25-10.8-10.8C6.5 11.45 11.45 6.5 12 1.2Z"
+        fill={glow ? 'url(#sparkle-glow)' : 'currentColor'}
+      />
+    </svg>
+  )
+}
+
+/** Beside a boost. The one place in this app that talks about sleep. */
+export function Moon({ size = 15 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M20.5 14.6A8.8 8.8 0 0 1 9.4 3.5a8.8 8.8 0 1 0 11.1 11.1Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
+/** Closes a pushed screen. */
+export function Close({ size = 20, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path
+        d="M5 5l14 14M19 5L5 19"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
+  )
+}

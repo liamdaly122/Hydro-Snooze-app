@@ -181,7 +181,9 @@ def build(
         lines.append(f"{_things(len(bad))} worth a look. First: {bad[0].message}")
 
     level: Level = "warning" if (missed or bad) else "info"
-    title = "HydroSnooze: last night" if level == "info" else "HydroSnooze: last night, with notes"
+    # Named for the screen it belongs to. The push is the trailer and Autopilot
+    # is the film: four lines on a lock screen, and the whole night a tap away.
+    title = "Autopilot: last night" if level == "info" else "Autopilot: last night, with notes"
     return Report(title=title, body="\n".join(lines), level=level)
 
 
