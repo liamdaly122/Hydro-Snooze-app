@@ -292,3 +292,72 @@ def test_the_night_carries_both_of_its_dates(plan):
     night = build(plan, [])
     assert night.starts_at.date() != night.wake_at.date()
     assert night.starts_at < night.wake_at
+
+
+# --- The evening of 10 September ---------------------------------------------------
+
+
+def test_one_reason_cannot_claim_an_evening_of_somebody_tapping(plan):
+    """Liam's first real Autopilot screen, replayed.
+
+    Thursday evening he sat with the app changing the temperature: fourteen
+    commands between 21:40 and 22:00, a mode press and a rail-and-count at a
+    time. One pre-cool event landed in the middle of it, and because a reason
+    used to claim everything inside its window, all fourteen were reported as
+    "getting the bed ready" — a job worth exactly two commands. The screen
+    credited Autopilot with his tapping, and the row those taps belonged in read
+    low by a dozen.
+    """
+    start = plan.bedtime_at - timedelta(minutes=50)
+    events = [ev(start, autopilot.AMBIENT_KIND, "Pre-cooling in quiet to 27C")]
+    # A mode press and a rail-and-count a minute apart, seven times over.
+    for i in range(7):
+        at = start + timedelta(minutes=i * 3)
+        events.append(ev(at, "mode", "Set mode by hand"))
+        events.append(ev(at + timedelta(minutes=1), "temperature", "Railed up by hand"))
+
+    night = build(plan, events)
+
+    assert night.counted(autopilot.AMBIENT_KIND) == 2, "one job is worth two commands"
+    assert night.counted(BY_HAND) == 12, "and the other twelve were a person"
+    assert night.adjustments == 2, "the headline counts what Autopilot did"
+
+
+def test_a_reason_still_gets_both_of_its_commands(plan):
+    """The cap is two rather than one, because a boundary that changes mode sends
+    a mode press and then a rail-and-count."""
+    at = plan.steps[1].starts_at
+    night = build(plan, [
+        ev(at, PHASE_KIND, "REM: 22C in quiet"),
+        ev(at + timedelta(seconds=5), "mode", "Set mode to quiet"),
+        ev(at + timedelta(seconds=45), "temperature", "Railed to 15C then up to 22C"),
+    ])
+    assert night.counted(PHASE_KIND) == 2
+
+
+def test_a_slow_power_on_does_not_lose_the_boundary(plan):
+    """A stage boundary that finds the unit off now spends two patient minutes on
+    power_on before it sets anything, which is why the window is not tight."""
+    at = plan.steps[0].starts_at
+    night = build(plan, [
+        ev(at, PHASE_KIND, "Deep: 19C in quiet"),
+        ev(at + timedelta(minutes=2, seconds=20), "temperature", "Railed to 15C then up to 19C"),
+    ])
+    assert night.counted(PHASE_KIND) == 1
+    assert night.counted(BY_HAND) == 0
+
+
+def test_each_reason_gets_its_own_pair_rather_than_the_first_one_taking_four(plan):
+    """Two corrections half an hour apart are two jobs, not one greedy one."""
+    first = plan.steps[0].starts_at + timedelta(hours=1)
+    second = first + timedelta(minutes=30)
+    events = []
+    for at in (first, second):
+        events += [
+            ev(at, RESPONSE_KIND, "Swapped to hold it quietly"),
+            ev(at, "mode"),
+            ev(at, "temperature"),
+        ]
+    night = build(plan, events)
+    assert night.counted(RESPONSE_KIND) == 4
+    assert night.counted(BY_HAND) == 0

@@ -75,13 +75,27 @@ REASONS = {
 BY_HAND = "manual"
 LABELS = {**REASONS, BY_HAND: "Set by hand"}
 
-#: How long a reason explains the commands that follow it.
+#: How far from a reason an adjustment can be and still belong to it.
 #:
-#: A stage boundary is a burst: the mode press and then the rail-and-count land
-#: within a minute of each other. Anything arriving a quarter of an hour later
-#: was somebody with the app in their hand, and attributing that to a boundary
-#: nobody triggered would put a stranger's tap in Autopilot's column.
-EXPLAINS_FOR = timedelta(minutes=15)
+#: Generous, because a stage boundary that finds the unit switched off now spends
+#: two patient minutes on power_on before it sets a temperature. The bound that
+#: does the real work is the one below.
+EXPLAINS_FOR = timedelta(minutes=10)
+
+#: The most adjustments one reason can possibly be responsible for.
+#:
+#: Two, and it is not a guess. Every path that changes the bed goes through a
+#: single call to _apply, which presses the mode button only if the mode is
+#: actually changing and then does one rail-and-count. One reason, at most two
+#: commands.
+#:
+#: Without this the window alone decided, and a window claims everything inside
+#: it. On the first night Autopilot shipped, one pre-cool event swept up twenty
+#: minutes of Liam changing the temperature by hand in the evening and reported
+#: fourteen adjustments as "getting the bed ready", which is two commands' worth
+#: of work. The screen was crediting Autopilot with somebody else's tapping, and
+#: at the same time the "Set by hand" row it should have gone in was reading low.
+CLAIMS_AT_MOST = 2
 
 #: How far off setpoint counts as the bed having lost the thread. Used only for
 #: the summary line, never to decide anything.
@@ -239,25 +253,31 @@ def _marks(plan: NightPlan, events: list[Event], track: list[Point]) -> list[Mar
     meant to happen and this screen is about what did. A stage that landed eleven
     minutes late belongs at the moment it landed.
 
-    The reason is the nearest one within a quarter of an hour, looking **both
-    ways**. A stage boundary announces itself and then presses; a drift
-    correction presses and then explains itself afterwards, because the sentence
-    it writes describes what it just did. Only looking backwards put every drift
-    correction of every night in the "set by hand" column, which is both wrong
-    and the most annoying possible way to be wrong: it credits Autopilot's own
-    work to somebody else.
+    Each reason claims the nearest couple of unclaimed commands, looking **both
+    ways**. Both ways because a stage boundary announces itself and then presses,
+    while a drift correction presses and then explains itself afterwards; only
+    looking backwards filed every drift correction of every night under "set by
+    hand". Nearest and a couple, because a reason is worth exactly one call to
+    _apply and a window on its own claims everything that happens to fall inside
+    it, including a person.
+
+    Whatever is left was nobody's plan, so it was somebody's hand.
     """
     reasons = [(e.at, e.kind) for e in events if e.level == "info" and e.kind in REASONS]
+    commands = [e for e in events if e.level == "info" and e.kind in ADJUST_KINDS]
 
-    def why(when: datetime) -> str:
-        near = [(abs(at - when), kind) for at, kind in reasons if abs(at - when) <= EXPLAINS_FOR]
-        return min(near)[1] if near else BY_HAND
+    claimed: dict[int, str] = {}
+    for at, kind in sorted(reasons):
+        near = sorted(
+            (i for i, e in enumerate(commands) if i not in claimed and abs(e.at - at) <= EXPLAINS_FOR),
+            key=lambda i: abs(commands[i].at - at),
+        )
+        for i in near[:CLAIMS_AT_MOST]:
+            claimed[i] = kind
 
     out: list[Mark] = []
-    for event in events:
-        if event.level != "info" or event.kind not in ADJUST_KINDS:
-            continue
-        kind = why(event.at)
+    for i, event in enumerate(commands):
+        kind = claimed.get(i, BY_HAND)
         out.append(
             Mark(
                 at=event.at,
