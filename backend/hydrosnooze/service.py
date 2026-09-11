@@ -1441,9 +1441,17 @@ class Service:
                 self._fail("power", exc, power=Power.UNKNOWN)
 
     async def power_off(self) -> None:
+        """Switch the unit off, on purpose, right now.
+
+        One gesture and the patient wait on the plug, and no board restart if it
+        does not land. The scheduled power off escalates to a restart because
+        nobody is awake at 07:30 to notice; this one is somebody asking for it
+        with the app in their hand, and they can reach the Restart blaster button
+        themselves if the answer they get is that nothing arrived.
+        """
         async with self._lock:
             try:
-                await self._through_a_reboot(self.commands.power_off)
+                await self.commands.power_off()
                 self._set_state(
                     power=Power.OFF,
                     current_stage=None,
