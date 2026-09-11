@@ -250,3 +250,45 @@ def test_only_the_things_worth_a_look_come_through_as_notes(plan):
         ev(at, "plug", "The plug is slow", level="warning"),
     ])
     assert night.notes == ["The blaster is not answering", "The plug is slow"]
+
+
+# --- Which night, and what to call it ---------------------------------------------
+
+
+def test_it_describes_the_night_that_has_finished_not_the_one_coming(plan):
+    """Asked at five in the afternoon, the answer is the night that ended that
+    morning. The one starting in a few hours has not happened."""
+    from hydrosnooze.scheduler import Scheduler
+
+    schedule = Schedule(
+        wake_time=time(7, 30),
+        days_of_week=[0, 1, 2, 3, 4],
+        stages=[SleepStage(Stage.DEEP, 240, 19), SleepStage(Stage.WAKE, 60, 26)],
+    )
+    picked = Scheduler().last_finished(schedule, datetime(2026, 9, 11, 17, 19))
+
+    assert picked is not None
+    assert picked.bedtime_at.date() == date(2026, 9, 10), "it went to bed on Thursday"
+    assert picked.wake_at.date() == date(2026, 9, 11), "and got up on Friday"
+
+
+def test_a_night_still_running_is_not_reported_on(plan):
+    from hydrosnooze.scheduler import Scheduler
+
+    schedule = Schedule(
+        wake_time=time(7, 30),
+        days_of_week=[0, 1, 2, 3, 4],
+        stages=[SleepStage(Stage.DEEP, 240, 19), SleepStage(Stage.WAKE, 60, 26)],
+    )
+    # Three in the morning, mid-night. The answer is the night before, not this one.
+    picked = Scheduler().last_finished(schedule, datetime(2026, 9, 11, 3, 0))
+    assert picked is not None and picked.wake_at.date() == date(2026, 9, 10)
+
+
+def test_the_night_carries_both_of_its_dates(plan):
+    """Which is the whole reason the label can say so. A night has an evening and
+    a morning, and naming only one of them is how "Friday" ended up on a report
+    about a night that finished on Friday morning."""
+    night = build(plan, [])
+    assert night.starts_at.date() != night.wake_at.date()
+    assert night.starts_at < night.wake_at

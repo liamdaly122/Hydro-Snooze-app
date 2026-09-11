@@ -19,13 +19,32 @@ import type { AutopilotNight } from '../types'
  * measures sleep. Everything else was written down while it happened.
  */
 
-function longDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
+/**
+ * Which night this is, said so it cannot be read as tonight.
+ *
+ * It used to be the wake date alone, and at five in the afternoon on Friday that
+ * said "Friday, 11 September" about a night that had already finished nine hours
+ * earlier. Every word of it was true and the whole thing read as a report on a
+ * night nobody had slept yet.
+ *
+ * A night has two dates and naming one of them is the problem, so this names
+ * both. "Last night" goes in front while the morning it ended is still today,
+ * which is when anyone is actually reading this.
+ */
+function nightLabel(startsAt: string, wakeAt: string): string {
+  // Assembled from parts rather than from one toLocaleDateString call, which
+  // punctuates it as "Fri, 11 Sept" and puts a comma in the middle of a span.
+  const part = (iso: string, month = false) => {
+    const d = new Date(iso)
+    const weekday = d.toLocaleDateString('en-GB', { weekday: 'short' })
+    const mon = d.toLocaleDateString('en-GB', { month: 'short' })
+    return month ? `${weekday} ${d.getDate()} ${mon}` : `${weekday} ${d.getDate()}`
+  }
+  const span = `${part(startsAt)} to ${part(wakeAt, true)}`
+
+  const midnight = new Date()
+  midnight.setHours(0, 0, 0, 0)
+  return new Date(wakeAt) >= midnight ? `Last night · ${span}` : span
 }
 
 /** "Perfect", or how far off it typically sat. Never a bare number with no verdict. */
@@ -73,7 +92,7 @@ export function Autopilot({ client }: { client: ApiClient }) {
         <Sparkle size={44} className="ap-hero__mark" glow />
         <p className="ap-hero__count">{night.adjustments}</p>
         <h2 className="ap-hero__title">Autopilot adjustments</h2>
-        <p className="ap-hero__date">{longDate(night.wake_at)}</p>
+        <p className="ap-hero__date">{nightLabel(night.starts_at, night.wake_at)}</p>
 
         {night.boosts.length > 0 && (
           <div className="ap-boosts">
@@ -92,7 +111,7 @@ export function Autopilot({ client }: { client: ApiClient }) {
 
       {night.boosts.length > 0 && (
         <p className="footnote">
-          Those three are for fun. Nothing in this bed measures sleep, so they are worked out from
+          The sleep figures above are for fun. Nothing in this bed measures sleep, so they are worked out from
           how tightly the water held its setpoints rather than from you. Not medical advice, and not
           a measurement.
         </p>
