@@ -14,12 +14,13 @@ from ..models import (
     SleepStage,
     Stage,
     minutes_between,
+    mode_for_target,
     modes_for,
     range_for,
 )
 from ..sequences import CommandFailed
 from ..service import Service
-from .schemas import health_json, state_json
+from .schemas import health_json, profile_json, state_json
 
 router = APIRouter(prefix="/api")
 
@@ -59,6 +60,11 @@ class RehearsalBody(BaseModel):
     #: Bounded at both ends. Below the floor the stages cannot finish their own
     #: presses; above it this stops being a test you stand and watch.
     seconds: int = Field(default=300, ge=120, le=1800)
+
+
+class NewProfile(BaseModel):
+    #: Long enough to say "Summer, spare room", short enough to fit a list row.
+    name: str = Field(min_length=1, max_length=40)
 
 
 # --- Reads --------------------------------------------------------------------
@@ -275,6 +281,61 @@ async def post_notify_test(request: Request) -> dict[str, object]:
             409, "No notification topic set. Add HS_NTFY_TOPIC to .env and restart."
         )
     return {"sent": True}
+
+
+# --- Saved nights ---------------------------------------------------------------
+
+
+@router.get("/profiles")
+async def get_profiles(request: Request) -> list[dict[str, object]]:
+    service = _service(request)
+    return [profile_json(p, service.schedule) for p in service.db.profiles()]
+
+
+@router.post("/profiles")
+async def post_profile(request: Request, body: NewProfile) -> list[dict[str, object]]:
+    """Save the night the schedule is currently holding, under a name.
+
+    Snapshots what is there rather than taking stages in the body, because the
+    thing anyone wants to save is the night they have just finished tuning.
+    """
+    service = _service(request)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "A profile needs a name")
+    service.db.save_profile(name, service.schedule, service.clock.now())
+    return [profile_json(p, service.schedule) for p in service.db.profiles()]
+
+
+@router.post("/profiles/{profile_id}/activate")
+async def post_activate_profile(request: Request, profile_id: int) -> dict[str, object]:
+    """Copy a saved night into the schedule.
+
+    Only the stages and the cooling speed. The wake time and the days of the week
+    stay exactly as they are: loading "Summer" should never move an alarm.
+    """
+    service = _service(request)
+    profile = service.db.profile(profile_id)
+    if profile is None:
+        raise HTTPException(404, "No profile with that id")
+    for stage in profile.stages:
+        _guard_temperature(
+            service,
+            stage.temp_c,
+            mode_for_target(stage.temp_c, profile.cooling_speed),
+        )
+    service.update_schedule(
+        {"stages": list(profile.stages), "cooling_speed": profile.cooling_speed}
+    )
+    return service.schedule_as_shown()
+
+
+@router.delete("/profiles/{profile_id}")
+async def delete_profile(request: Request, profile_id: int) -> list[dict[str, object]]:
+    service = _service(request)
+    if not service.db.delete_profile(profile_id):
+        raise HTTPException(404, "No profile with that id")
+    return [profile_json(p, service.schedule) for p in service.db.profiles()]
 
 
 @router.post("/blaster/restart")

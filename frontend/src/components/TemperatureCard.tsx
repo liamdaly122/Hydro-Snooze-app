@@ -27,9 +27,19 @@ interface Props {
   maxC: number
   onStageChange: (stage: Stage, tempC: number) => void
   onSetNow: (targetC: number) => void
+  /** Opens the saved nights. The card is where a whole night's temperatures live,
+   *  so it is where saving and loading a set of them belongs. */
+  onOpenProfiles?: () => void
 }
 
-export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }: Props) {
+export function TemperatureCard({
+  state,
+  draft,
+  maxC,
+  onStageChange,
+  onSetNow,
+  onOpenProfiles,
+}: Props) {
   const [tab, setTab] = useState<TabKey>('now')
 
   // "Now" is edited optimistically and committed once the tapping stops, because
@@ -81,7 +91,7 @@ export function TemperatureCard({ state, draft, maxC, onStageChange, onSetNow }:
   const atCeiling = selected !== null && selected >= ceiling
 
   return (
-    <Card label="Temperature">
+    <Card label="Temperature" onOpen={onOpenProfiles} openLabel="Open saved nights">
       <div className="tabs" role="tablist" aria-label="Part of the night to edit">
         {TABS.map((key) => {
           const value = valueFor(key)

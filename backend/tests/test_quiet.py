@@ -17,7 +17,7 @@ genuinely loses ground, only warming will do and the noise is worth it again.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import pytest
 
@@ -34,6 +34,7 @@ from hydrosnooze.models import (
     Stage,
     quieter_mode,
 )
+from hydrosnooze.scheduler import Job
 from hydrosnooze.sequences import CommandFailed
 from hydrosnooze.service import MODE_DWELL, Service
 
@@ -386,3 +387,53 @@ async def test_the_nightly_switch_off_gets_the_same_treatment(service, wedged):
     assert await service._run_power_off(plan) is True
     assert wedged.reboots == 1
     assert not service.unit.powered
+
+
+# --- A fresh board for every night ----------------------------------------------
+#
+# Both times the blaster wedged it had been powered up for days, answering the
+# network the whole time and emitting nothing. This does not detect that state.
+# It stops the board being in it when the night that matters arrives.
+
+
+@pytest.mark.asyncio
+async def test_the_blaster_is_restarted_before_the_bed_gets_ready(service):
+    from hydrosnooze.scheduler import WAKE_BLASTER_BEFORE
+
+    service.schedule = Schedule(
+        wake_time=time(7, 30),
+        days_of_week=list(range(7)),
+        stages=[SleepStage(Stage.DEEP, 240, 26), SleepStage(Stage.REM, 240, 27)],
+    )
+    plan = service.scheduler.plan_in_progress(service.schedule, service.clock.now())
+    starts = plan.precool_at or plan.bedtime_at
+
+    service.clock.jump_to(starts - WAKE_BLASTER_BEFORE - timedelta(minutes=1))
+    assert service.scheduler.due(service.schedule, service.clock.now()) is None, "too early"
+
+    service.clock.jump_to(starts - WAKE_BLASTER_BEFORE + timedelta(minutes=1))
+    job = service.scheduler.due(service.schedule, service.clock.now())
+    assert job is not None and job.kind == "wake_blaster"
+
+
+@pytest.mark.asyncio
+async def test_it_runs_once_a_night_like_every_other_job(service):
+    plan = service.scheduler.plan_in_progress(service.schedule, service.clock.now())
+    job = Job("wake_blaster", plan)
+    service.scheduler.fired.mark(job)
+    assert service.scheduler.fired.has_fired(job)
+
+
+@pytest.mark.asyncio
+async def test_a_board_that_will_not_restart_does_not_cost_the_night(service):
+    """A precaution that can fail the schedule is worse than no precaution. A
+    board that refuses to restart may be working perfectly."""
+
+    async def refuse():
+        raise RuntimeError("no answer")
+
+    service.transmitter.reboot = refuse
+    assert await service._wake_blaster() is True
+
+    said = [e for e in service.events.recent(20) if e.kind == "blaster"]
+    assert said and "carrying on" in said[0].message.lower()

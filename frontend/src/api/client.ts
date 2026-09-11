@@ -16,6 +16,7 @@ import type {
   DeviceState,
   Mode,
   PowerSample,
+  Profile,
   Schedule,
   ServiceInfo,
 } from '../types'
@@ -85,6 +86,14 @@ export interface ApiClient {
    * reporting success, and no infrared leaving the LED.
    */
   restartBlaster(): Promise<void>
+
+  /** Saved nights, newest state of each, with whichever one is running marked. */
+  getProfiles(): Promise<Profile[]>
+  /** Snapshot the night the schedule is holding now, under a name. */
+  saveProfile(name: string): Promise<Profile[]>
+  /** Copy a saved night into the schedule. The wake time is left alone. */
+  activateProfile(id: number): Promise<void>
+  deleteProfile(id: number): Promise<Profile[]>
   setMode(mode: Mode): Promise<void>
 
   /** How each device is doing. The service is not in here: see LiveUpdate.connected. */

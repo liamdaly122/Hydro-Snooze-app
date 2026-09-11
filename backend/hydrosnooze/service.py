@@ -1074,6 +1074,8 @@ class Service:
         return self.probes.bed_c
 
     async def _run_job(self, job: Job) -> bool:
+        if job.kind == "wake_blaster":
+            return await self._wake_blaster()
         if job.kind == "precool":
             return await self._run_precool(job.plan)
         if job.kind == "stage" and job.step is not None:
@@ -1126,6 +1128,29 @@ class Service:
             except CommandFailed as exc:
                 self._fail("precool", exc)
                 return False
+
+    async def _wake_blaster(self) -> bool:
+        """Restart the blaster before the night that depends on it.
+
+        Not a fix, and not pretending to be one. Twice the board answered the
+        network, reported every press as sent, and put no infrared out at all,
+        and both times it had been powered up for days. Nothing on this side can
+        see that state, so this does not try to: it stops the board entering it,
+        by making sure the one that has to work tonight booted half an hour ago.
+
+        Never fails the night. A board that will not restart may still be working
+        perfectly, and refusing to run a schedule over it would turn a precaution
+        into the thing that cost a night.
+        """
+        try:
+            await self.reboot_blaster()
+        except CommandFailed as exc:
+            self.events.warning(
+                "blaster",
+                f"Could not restart the blaster before tonight: {exc} Carrying on, "
+                "because a board that will not restart may still be working.",
+            )
+        return True
 
     def _send_report(self, plan: NightPlan) -> bool:
         """One message about the night that has just finished.

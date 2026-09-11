@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..models import DeviceHealth, DeviceState, LearnedLead, Schedule, modes_for
+from ..models import DeviceHealth, DeviceState, LearnedLead, Profile, Schedule, modes_for
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -96,3 +96,32 @@ def health_json(devices: list[DeviceHealth]) -> list[dict[str, Any]]:
         }
         for d in devices
     ]
+
+
+def profile_json(profile: Profile, schedule: Schedule) -> dict[str, Any]:
+    """One saved night, and whether it is the one currently running.
+
+    `active` is computed against the schedule rather than stored, so it can never
+    be a flag left behind by an edit made afterwards. Change a temperature and the
+    profile stops being active, which is the truth.
+    """
+    return {
+        "id": profile.id,
+        "name": profile.name,
+        "cooling_speed": profile.cooling_speed.value,
+        "stages": [
+            {
+                "stage": s.stage.value,
+                "duration_minutes": s.duration_minutes,
+                "temp_c": s.temp_c,
+                "mode": mode.value,
+            }
+            for s, mode in zip(
+                profile.stages,
+                modes_for(profile.stages, profile.cooling_speed),
+                strict=True,
+            )
+        ],
+        "active": profile.matches(schedule),
+        "created_at": _iso(profile.created_at),
+    }

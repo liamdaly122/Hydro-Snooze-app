@@ -14,16 +14,27 @@ export function Card({
   children,
   onOpen,
   openLabel,
+  action,
 }: {
   label: string
   children: ReactNode
   onOpen?: () => void
   openLabel?: string
+  /**
+   * Something in the header, to the right of the label. For a card whose action
+   * belongs to the card rather than to a row inside it.
+   *
+   * Here rather than positioned absolutely by the caller, because `.card` is not
+   * a positioning context and making it one would move `.stage::before` and
+   * `.stage__note`, which are anchored to a stage inside the Temperature card.
+   */
+  action?: ReactNode
 }) {
   return (
     <section className="card">
       <header className="card__head">
         <h2 className="card__label">{label}</h2>
+        {action}
         {onOpen && (
           <button
             type="button"

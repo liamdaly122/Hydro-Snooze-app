@@ -12,6 +12,7 @@ interface Props {
   schedule: Schedule
   maxC: number
   onOpenSchedule: () => void
+  onOpenProfiles: () => void
 }
 
 /**
@@ -22,7 +23,7 @@ interface Props {
  * service drives every stage itself now, so a change is just a change: it saves,
  * and the next stage boundary uses it.
  */
-export function Home({ client, state, schedule, maxC, onOpenSchedule }: Props) {
+export function Home({ client, state, schedule, maxC, onOpenSchedule, onOpenProfiles }: Props) {
   const [draft, setDraft] = useState<Schedule>(schedule)
   const [error, setError] = useState<string | null>(null)
 
@@ -45,6 +46,7 @@ export function Home({ client, state, schedule, maxC, onOpenSchedule }: Props) {
         state={state}
         draft={draft}
         maxC={maxC}
+        onOpenProfiles={onOpenProfiles}
         onStageChange={setStageTemp}
         onSetNow={(targetC) => {
           void client.setTemperature(targetC).catch((e: Error) => setError(e.message))

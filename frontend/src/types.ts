@@ -178,3 +178,26 @@ export interface ServiceInfo {
    */
   build: string
 }
+
+/**
+ * A saved night, by name. "Summer", "Winter", "Guest room".
+ *
+ * Only the shape of a night: the stage temperatures, how long each lasts, and
+ * the cooling speed. Deliberately not the wake time or the days of the week,
+ * because those belong to the week you are having rather than to the weather,
+ * and loading "Summer" should not move an alarm.
+ */
+export interface Profile {
+  id: number
+  name: string
+  cooling_speed: Mode
+  stages: SleepStage[]
+  /**
+   * Whether the schedule is currently running exactly this. Worked out by the
+   * service by comparing, never stored, so it cannot be a flag left behind by an
+   * edit made afterwards. Change a temperature and this goes false, which is the
+   * truth.
+   */
+  active: boolean
+  created_at: string | null
+}

@@ -15,6 +15,7 @@ import type {
   DeviceState,
   Mode,
   PowerSample,
+  Profile,
   Schedule,
   ServiceInfo,
 } from '../types'
@@ -85,6 +86,22 @@ export class HttpApiClient implements ApiClient {
       body: JSON.stringify({ target_c: targetC }),
     })
   }
+
+  getProfiles = () => request<Profile[]>('/api/profiles')
+
+  saveProfile = (name: string) =>
+    request<Profile[]>('/api/profiles', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+
+  activateProfile = async (id: number) => {
+    await request<Schedule>(`/api/profiles/${id}/activate`, { method: 'POST' })
+  }
+
+  deleteProfile = (id: number) =>
+    request<Profile[]>(`/api/profiles/${id}`, { method: 'DELETE' })
 
   restartBlaster = async () => {
     await request<DeviceState>('/api/blaster/restart', { method: 'POST' })

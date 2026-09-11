@@ -16,6 +16,7 @@ from typing import NamedTuple
 from .events import Event, Level
 from .models import (
     MINUTES_IN_A_DAY,
+    Profile,
     STAGE_ORDER,
     Mode,
     Schedule,
@@ -117,6 +118,23 @@ CREATE TABLE IF NOT EXISTS power_samples (
 CREATE TABLE IF NOT EXISTS fired_jobs (
     key     TEXT PRIMARY KEY,
     wake_at TEXT NOT NULL
+);
+
+-- Saved nights, by name. "Summer", "Winter", "Guest room".
+--
+-- Only the shape of a night: the stages and the cooling speed. Not the wake time
+-- and not the days of the week, because those belong to the week you are having
+-- rather than to the weather, and loading "Summer" should not move an alarm.
+--
+-- No `active` column on purpose. Which one is running is worked out by comparing
+-- the stages against the schedule, so it cannot be a flag left behind by an edit
+-- that happened afterwards.
+CREATE TABLE IF NOT EXISTS profiles (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL,
+    stages        TEXT    NOT NULL,
+    cooling_speed TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL
 );
 
 -- How long the bed really took to reach a temperature.
@@ -304,6 +322,64 @@ class Database:
         self._db.close()
 
     # --- Schedule -------------------------------------------------------------
+
+    # --- Saved nights -----------------------------------------------------------
+
+    def profiles(self) -> list[Profile]:
+        rows = self._db.execute("SELECT * FROM profiles ORDER BY name COLLATE NOCASE").fetchall()
+        return [
+            Profile(
+                id=r["id"],
+                name=r["name"],
+                stages=[
+                    SleepStage(Stage(s["stage"]), s["duration_minutes"], s["temp_c"])
+                    for s in json.loads(r["stages"])
+                ],
+                cooling_speed=Mode(r["cooling_speed"]),
+                created_at=_parse(r["created_at"]),
+            )
+            for r in rows
+        ]
+
+    def save_profile(self, name: str, schedule: Schedule, at: datetime) -> Profile:
+        """Snapshot the night the schedule is currently holding, under a name.
+
+        A name that already exists is overwritten rather than duplicated. Two
+        profiles called Summer is never what anyone meant, and picking between
+        them in a list is worse than losing the older one.
+        """
+        stages = json.dumps(
+            [
+                {"stage": s.stage.value, "duration_minutes": s.duration_minutes, "temp_c": s.temp_c}
+                for s in schedule.stages
+            ]
+        )
+        existing = self._db.execute(
+            "SELECT id FROM profiles WHERE name = ? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if existing is not None:
+            self._db.execute(
+                "UPDATE profiles SET stages = ?, cooling_speed = ? WHERE id = ?",
+                (stages, schedule.cooling_speed.value, existing["id"]),
+            )
+            new_id = existing["id"]
+        else:
+            cursor = self._db.execute(
+                "INSERT INTO profiles (name, stages, cooling_speed, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (name, stages, schedule.cooling_speed.value, at.isoformat()),
+            )
+            new_id = cursor.lastrowid
+        self._db.commit()
+        return next(p for p in self.profiles() if p.id == new_id)
+
+    def delete_profile(self, profile_id: int) -> bool:
+        cursor = self._db.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+        self._db.commit()
+        return cursor.rowcount > 0
+
+    def profile(self, profile_id: int) -> Profile | None:
+        return next((p for p in self.profiles() if p.id == profile_id), None)
 
     def load_schedule(self) -> Schedule:
         row = self._db.execute("SELECT * FROM schedule WHERE id = 1").fetchone()

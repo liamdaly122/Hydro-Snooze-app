@@ -26,7 +26,7 @@ from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep
 
 log = logging.getLogger(__name__)
 
-JobKind = Literal["precool", "stage", "power_off", "report"]
+JobKind = Literal["wake_blaster", "precool", "stage", "power_off", "report"]
 
 #: How late a stage transition is still worth making. Past this the stage is
 #: mostly over and setting it would be worse than leaving the bed alone.
@@ -43,6 +43,19 @@ POWER_OFF_GRACE = timedelta(hours=2)
 #: enough back from the alarm that it is read over breakfast rather than in the
 #: first confused seconds of being awake.
 REPORT_AFTER = timedelta(minutes=20)
+
+#: How long before the bed starts getting ready to restart the blaster.
+#:
+#: Both times the board wedged it had been powered up for days, answering the
+#: network the whole time and emitting nothing. Nothing on this side can see that
+#: state, so the answer is not to detect it but to stop entering it: the board
+#: that has to work tonight boots half an hour before it is needed.
+#:
+#: Half an hour rather than five minutes because the point is to be early. If the
+#: restart itself goes wrong, there is time to notice and time for the board's own
+#: two minute Wi-Fi timeout to have another go, all of it before the first press
+#: that actually matters.
+WAKE_BLASTER_BEFORE = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
@@ -169,6 +182,17 @@ class Scheduler:
         plan = self.plan_in_progress(schedule, now)
         if plan is None:
             return None
+
+        # Before anything else tonight, and before the first press that matters.
+        # A board fresh from a reboot is in a known state; one that has been up
+        # for days is the state both wedges were found in.
+        starts = plan.precool_at or plan.bedtime_at
+        wake_at = starts - WAKE_BLASTER_BEFORE
+        if (
+            wake_at <= now < starts
+            and not self.fired.has_fired(wake := Job("wake_blaster", plan))
+        ):
+            return wake
 
         if (
             plan.precool_at is not None

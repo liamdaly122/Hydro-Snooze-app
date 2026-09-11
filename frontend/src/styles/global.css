@@ -1179,3 +1179,147 @@ button:disabled {
 .tab__value--unset {
   color: var(--text-faint);
 }
+
+/* --- Profiles ---------------------------------------------------------------- */
+
+/* Top right of the card, level with the label, where a plus is expected. The
+   card header is the only thing above it, so absolute against the card is safe
+   and avoids restructuring the header for one screen. */
+.profiles__add {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--control);
+  color: var(--text-label);
+  cursor: pointer;
+}
+
+.profiles__add:active {
+  background: var(--control-active);
+}
+
+.profiles__new {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.profiles__name {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--control);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* 16px or iOS zooms the page on focus */
+}
+
+.profiles__save {
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--blue);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.profiles__save:disabled {
+  opacity: 0.4;
+}
+
+.profiles {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profiles__row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--control);
+  /* The active one is marked with a rail rather than a fill, so the temperature
+     colours inside it stay readable against the same background as the rest. */
+  box-shadow: inset 3px 0 0 0 transparent;
+}
+
+.profiles__row.is-active {
+  box-shadow: inset 3px 0 0 0 var(--green);
+}
+
+.profiles__pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profiles__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profiles__label {
+  font-size: 16px;
+  color: var(--text-label);
+}
+
+.profiles__badge {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.profiles__temps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.profiles__temp {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.profiles__stage {
+  color: var(--text-faint);
+}
+
+.profiles__delete {
+  padding: 0 14px;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.profiles__delete:active {
+  color: var(--red);
+}
+

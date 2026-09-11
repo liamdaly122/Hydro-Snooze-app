@@ -718,6 +718,42 @@ def rehearsal_plan(
 # --- Schedule -----------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Profile:
+    """A saved night, by name. "Summer", "Winter", "Guest room".
+
+    Only the shape of the night: the stage temperatures, how long each lasts, and
+    which cooling speed they use. Deliberately not the wake time or the days of
+    the week, because those belong to the week you are having rather than to the
+    weather, and nobody wants loading "Summer" to also move their alarm.
+
+    Applying one copies its stages into the schedule. From then on the schedule is
+    the live thing, exactly as it was before profiles existed, and the profile is
+    the snapshot it came from. That is why editing a temperature afterwards does
+    not silently rewrite the profile: a saved thing that changes under you is not
+    saved.
+    """
+
+    id: int
+    name: str
+    stages: list[SleepStage]
+    cooling_speed: Mode = Mode.QUIET
+    created_at: datetime | None = None
+
+    def matches(self, schedule: Schedule) -> bool:
+        """Whether the schedule is still running exactly this.
+
+        Compared rather than remembered, so "active" can never be a flag left
+        behind by an edit. Durations count as well as temperatures: the same
+        numbers over a differently divided night is a different night.
+        """
+        if self.cooling_speed is not schedule.cooling_speed:
+            return False
+        mine = [(s.stage, s.duration_minutes, s.temp_c) for s in self.stages]
+        theirs = [(s.stage, s.duration_minutes, s.temp_c) for s in schedule.stages]
+        return mine == theirs
+
+
 @dataclass
 class Schedule:
     """The one saved schedule. v1 has exactly one.

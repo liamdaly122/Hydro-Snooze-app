@@ -18,6 +18,7 @@ import type {
   DeviceState,
   Mode,
   PowerSample,
+  Profile,
   Preconditioning,
   Schedule,
   ServiceInfo,
@@ -190,6 +191,77 @@ export class MockApiClient implements ApiClient {
   }
 
   private muted = false
+
+  /**
+   * Seed profiles. Two, because one of everything never shows how a list reads,
+   * and because the interesting state is a saved night that is not the one
+   * currently running.
+   */
+  private profiles: Profile[] = [
+    {
+      id: 1,
+      name: 'Summer',
+      cooling_speed: 'quiet',
+      stages: [
+        { stage: 'deep', duration_minutes: 240, temp_c: 16, mode: 'quiet' },
+        { stage: 'rem', duration_minutes: 210, temp_c: 19, mode: 'quiet' },
+        { stage: 'wake', duration_minutes: 30, temp_c: 26, mode: 'warming' },
+      ],
+      active: true,
+      created_at: nowIso(),
+    },
+    {
+      id: 2,
+      name: 'Winter',
+      cooling_speed: 'quiet',
+      stages: [
+        { stage: 'deep', duration_minutes: 240, temp_c: 26, mode: 'warming' },
+        { stage: 'rem', duration_minutes: 210, temp_c: 27, mode: 'warming' },
+        { stage: 'wake', duration_minutes: 30, temp_c: 28, mode: 'warming' },
+      ],
+      active: false,
+      created_at: nowIso(),
+    },
+  ]
+
+  async getProfiles(): Promise<Profile[]> {
+    await sleep(120)
+    return this.profiles.map((p) => ({ ...p }))
+  }
+
+  async saveProfile(name: string): Promise<Profile[]> {
+    await sleep(200)
+    const existing = this.profiles.find((p) => p.name.toLowerCase() === name.toLowerCase())
+    const stages = this.schedule.stages.map((s) => ({ ...s }))
+    if (existing) {
+      existing.stages = stages
+    } else {
+      this.profiles.push({
+        id: Math.max(0, ...this.profiles.map((p) => p.id)) + 1,
+        name,
+        cooling_speed: this.schedule.cooling_speed,
+        stages,
+        active: false,
+        created_at: nowIso(),
+      })
+    }
+    return this.getProfiles()
+  }
+
+  async activateProfile(id: number): Promise<void> {
+    await sleep(200)
+    const wanted = this.profiles.find((p) => p.id === id)
+    if (!wanted) return
+    this.schedule = { ...this.schedule, stages: wanted.stages.map((s) => ({ ...s })) }
+    for (const p of this.profiles) p.active = p.id === id
+    this.emit({ schedule: this.schedule })
+  }
+
+  async deleteProfile(id: number): Promise<Profile[]> {
+    await sleep(150)
+    this.profiles = this.profiles.filter((p) => p.id !== id)
+    return this.getProfiles()
+  }
 
   async restartBlaster(): Promise<void> {
     await sleep(400)
