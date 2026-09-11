@@ -1366,10 +1366,12 @@ button:disabled {
   position: relative;
 }
 
+/* Inset rather than tucked into the corner. Hard against the radius it reads as
+   something that overflowed; with a margin it reads as a mark. */
 .ap-hero__mark {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 18px;
+  right: 18px;
   filter: drop-shadow(0 0 14px rgb(140 176 255 / 0.65));
 }
 

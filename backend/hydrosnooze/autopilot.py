@@ -315,7 +315,13 @@ def _boosts(plan: NightPlan, samples: list[Sample], ready: PreconditionRow | Non
     # The third one is about the half hour before anyone is in the bed, which is
     # the only stretch of the night this system genuinely controls on its own.
     if ready is not None and ready.reached:
-        out.append(Boost(key="ready", label="Fell asleep faster", percent=max(4, 20 - ready.seconds // 120)))
+        out.append(
+            Boost(
+                key="ready",
+                label="Fell asleep faster",
+                percent=max(4, 20 - ready.seconds // 120),
+            )
+        )
     return out
 
 
