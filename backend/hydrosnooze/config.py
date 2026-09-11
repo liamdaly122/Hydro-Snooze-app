@@ -79,7 +79,29 @@ class Settings(BaseSettings):
     command_gap_ms: int = 300
     save_wait_ms: int = 3000
     arm_wait_s: int = 20
+
+    # --- Waiting for the plug to catch up -------------------------------------
+    #
+    # The Shelly does not report a change of state quickly. Measured on the real
+    # one on 11 September: the unit was switched off at 07:30 and `apower` was
+    # still reporting the running draw more than thirty seconds later.
+    #
+    # This used to be one ten second check, and ten seconds is inside that lag.
+    # So every morning the app read "still drawing" from a unit that had already
+    # switched off, decided its presses had not landed, and sent more. An extra
+    # press of power on a unit that is off turns it back on, so the correction
+    # was the thing that broke it, over and over, until the log was four failures
+    # deep and the bed was still running at breakfast.
+    #
+    # First pause before asking at all.
     power_settle_s: int = 10
+    #: Then keep asking until the plug agrees or this runs out. Two minutes is
+    #: far longer than the lag and costs nothing at the wake time, when nothing
+    #: is waiting on the answer.
+    power_confirm_s: int = 120
+    #: How often to ask while waiting. Not once a second: the plug sits behind a
+    #: bed next to a metal chassis and measures -87 dBm.
+    power_poll_s: int = 5
 
     # --- Safety ---------------------------------------------------------------
     #: The highest temperature the API accepts. Defaults to the unit's own maximum,

@@ -169,12 +169,14 @@ async def test_power_on_is_a_no_op_when_already_on(rig):
     assert rig.tx.presses_sent == 0
 
 
-# --- Switching off, which took three presses and did not work -------------------
+# --- Switching off, which sent eight presses and left the bed running -----------
 #
-# Power is not the toggle it looks like. One press does nothing on its own: the
-# unit wants a second close behind it. So a press swallowed by a dark display
-# does not cost a press, it costs the whole gesture, and what was left behind was
-# a single press that did nothing at all.
+# Two steps, not two presses. Liam works the remote as "one to turn the display
+# on and then one to turn off the unit", and only the second step has to be
+# power: this file has always had a safer way to wake a display. So the gesture
+# is the `temp_down` preamble and then a single press of power, from every
+# starting state, and a second press of power is not a correction. It is the
+# thing that switches a unit that has just gone off back on again.
 
 
 @pytest.mark.parametrize("display_dark", [True, False])
@@ -185,35 +187,41 @@ async def test_power_off_lands_from_either_display_state(rig, display_dark):
 
 
 @pytest.mark.parametrize("display_dark", [True, False])
-async def test_power_is_pressed_exactly_twice(rig, display_dark):
-    """Two presses is the gesture. A third is not a correction, it is the start
-    of another gesture that never finishes."""
+async def test_power_is_pressed_exactly_once(rig, display_dark):
+    """The whole fix, in one assertion.
+
+    It used to be two, and the second one is what left the bed running every
+    morning. Deterministic across both display states, which is why the preamble
+    is worth its two harmless presses: nothing here has to guess.
+    """
     rig.unit_on(display_dark=display_dark)
     await rig.commands.power_off()
-    assert rig.tx.count(Button.POWER) == 2
+    assert rig.tx.count(Button.POWER) == 1
+    assert rig.tx.count(Button.TEMP_DOWN) == 2, "the wake preamble, which cannot switch anything on"
 
 
-async def test_a_dark_display_no_longer_eats_half_the_gesture(rig):
-    """The bug, as it happened on a real night.
+async def test_a_second_press_turns_it_straight_back_on(rig):
+    """The bug of 11 September, reproduced against the unit rather than the app.
 
-    Sending the pair straight at a dark display leaves one press behind, and one
-    press of power does nothing. The wake preamble in front of it is what makes
-    both halves count.
+    This is what the old gesture did on every night of the week. The preamble lit
+    the display, the first press of power switched the unit off, and the second,
+    six tenths of a second later, switched it back on. Then the plug was asked ten
+    seconds later, said "still running", and the whole thing went again.
     """
     rig.unit_on(display_dark=True)
-    await rig.tx.press(Button.POWER, "off 1/2")
-    await rig.tx.press(Button.POWER, "off 2/2")
-    assert rig.unit.powered, "the display ate the first, and the second was on its own"
+    await rig.commands.wake()
+    await rig.tx.press(Button.POWER, "off")
+    assert not rig.unit.powered, "one press, on a lit display, is all it takes"
+
+    await rig.tx.press(Button.POWER, "the spare one")
+    assert rig.unit.powered, "and the spare press is what was undoing it"
 
 
-async def test_two_presses_ten_seconds_apart_are_not_a_pair(rig):
-    """Why the old third press never rescued it. The unit is waiting for the
-    second press and does not wait through a plug check."""
-    rig.unit_on(display_dark=False)
-    await rig.tx.press(Button.POWER, "one")
-    rig.clock.advance(timedelta(seconds=10))
-    await rig.tx.press(Button.POWER, "another one")
-    assert rig.unit.powered
+async def test_a_dark_display_still_eats_the_first_press_of_anything(rig):
+    """Which is why the preamble is there at all, and why it is not power."""
+    rig.unit_on(display_dark=True)
+    await rig.tx.press(Button.POWER, "into a dark display")
+    assert rig.unit.powered, "swallowed waking the display"
 
 
 async def test_power_off_is_still_a_no_op_when_the_plug_says_it_is_off(rig):
@@ -335,21 +343,33 @@ async def test_it_does_not_check_afterwards_or_try_again(rig):
     assert rig.tx.presses_sent == 1
 
 
-async def test_two_taps_switch_a_woken_unit_off(rig):
-    """Which is the whole reason a single press is a reasonable button."""
-    rig.unit_on(display_dark=False)
+async def test_two_taps_switch_a_dark_unit_off(rig):
+    """Which is the whole reason a single press is a reasonable button.
+
+    Two taps from dark is exactly what the hand does on the remote: the first
+    wakes the display and the second switches the unit off.
+    """
+    rig.unit_on(display_dark=True)
     await rig.commands.press_power()
     await rig.commands.press_power()
     assert not rig.unit.powered
 
 
-async def test_the_scheduled_power_off_is_untouched_by_any_of_this(rig):
-    """Nobody is watching at the wake time, so that one keeps its preamble, its
-    pair and its confirmation against the plug."""
+async def test_one_tap_is_enough_once_the_display_is_lit(rig):
+    """And the corollary, which is the thing the scheduled gesture relies on."""
+    rig.unit_on(display_dark=False)
+    await rig.commands.press_power()
+    assert not rig.unit.powered
+
+
+async def test_the_scheduled_power_off_keeps_its_preamble_and_its_plug_check(rig):
+    """Nobody is watching at the wake time, so that one still wakes the display
+    deliberately and still confirms against the plug afterwards. What it no
+    longer does is send a press it does not need."""
     rig.unit_on(display_dark=True)
     await rig.commands.power_off()
     assert not rig.unit.powered
-    assert rig.tx.count(Button.POWER) == 2
+    assert rig.tx.count(Button.POWER) == 1
     assert rig.tx.count(Button.TEMP_DOWN) == 2, "the wake preamble"
 
 

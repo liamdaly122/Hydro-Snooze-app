@@ -221,18 +221,32 @@ class Scheduler:
 
         # Not optional any more. Without the unit's own schedule, nothing else
         # turns it off.
+        closes = plan.wake_at + POWER_OFF_GRACE
         off = Job("power_off", plan)
-        if plan.wake_at <= now < plan.wake_at + POWER_OFF_GRACE and not self.fired.has_fired(off):
-            return off
+        off_due = plan.wake_at <= now < closes and not self.fired.has_fired(off)
 
-        # Last, and after the power off has had its own window to run, so the
-        # report describes a night that is completely over. A fired mark like
+        # After the power off, so the report describes a night that is completely
+        # over, including whether switching off worked. A fired mark like
         # everything else here, so it is sent once and a restart does not send it
         # again.
-        due_at = plan.wake_at + REPORT_AFTER
         report = Job("report", plan)
-        if due_at <= now < plan.wake_at + POWER_OFF_GRACE and not self.fired.has_fired(report):
+        report_due = (
+            plan.wake_at + REPORT_AFTER <= now < closes and not self.fired.has_fired(report)
+        )
+
+        # Until the report is actually due, switching off comes first. After
+        # that, the report goes ahead of it.
+        #
+        # It used to wait unconditionally, and the cost showed up on 11 September:
+        # a power off in trouble kept being handed back here, so the report was
+        # held behind it and did not arrive. That is exactly backwards. The
+        # morning the report is most worth reading is the morning something went
+        # wrong, and it can say so: the power off keeps its place in the queue and
+        # carries on straight afterwards.
+        if report_due:
             return report
+        if off_due:
+            return off
 
         return None
 

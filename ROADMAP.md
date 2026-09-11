@@ -49,8 +49,10 @@ suits, while the software gets built in parallel. Realistically the app will be 
 Code that behaves like an HS1001. It knows the display goes dark after five minutes and swallows the
 first two presses. It knows the temperature buttons do nothing at all while the sleep schedule is
 running. It knows the three cooling modes cycle round and wrap. It knows power takes one press to
-switch on and two, close together, to switch off. Next to it, a pretend plug that reports believable
-watts based on what the pretend unit is doing.
+switch on, and that switching off is the ordinary dark-display rule rather than a special gesture: a
+press to wake the display, then a press to switch the unit off. Next to it, a pretend plug that
+reports believable watts based on what the pretend unit is doing, about half a minute late, the way
+the real one does.
 
 Everything it knows comes from the manual and my own testing. Where something is a guess rather than
 a fact, the code says so in a comment, so it can be corrected once I can test it for real.
@@ -287,8 +289,11 @@ everything and is far too long. The device bar holds this moment and has forgott
 hours. So "did that go well?" meant opening the app and scrolling, which nobody does on the fourth
 morning.
 
-Twenty minutes after the wake time, once the power off has had its own window and the night is
-completely over, one message:
+Twenty minutes after the wake time, when the night is over, one message. It used to wait for the
+power off to finish first, and on 11 September that meant it never arrived: the power off was in
+trouble all morning and kept being handed back ahead of it. Now the power off has priority right up
+until the report is due and loses it the moment the report is overdue, because the morning a report
+is most worth reading is the morning something went wrong.
 
 ```
 All 3 stages landed.

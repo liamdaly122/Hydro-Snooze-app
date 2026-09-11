@@ -383,6 +383,9 @@ async def test_the_nightly_switch_off_gets_the_same_treatment(service, wedged):
     service.unit.deaf = True
     plan = service.schedule.plan_for(service.clock.now().date())
 
+    # Twice: the board is only suspected once the cheap retry has also failed,
+    # because one press that vanished is not a broken board.
+    assert await service._run_power_off(plan) is False
     assert await service._run_power_off(plan) is True
     assert wedged.reboots == 1
     assert not service.unit.powered

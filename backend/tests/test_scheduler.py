@@ -7,12 +7,12 @@ optional: without it the bed runs all day.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
 from hydrosnooze.models import Mode, Schedule, SleepStage, Stage
-from hydrosnooze.scheduler import Scheduler
+from hydrosnooze.scheduler import REPORT_AFTER, Job, Scheduler
 
 
 @pytest.fixture
@@ -96,8 +96,37 @@ def test_powering_off_is_not_optional(schedule):
 def test_powering_off_has_a_generous_window(schedule):
     # A stage missed by an hour is water under the bridge. A power off missed by
     # an hour is a bed heating all day, so it keeps trying for much longer.
-    job = Scheduler().due(schedule, datetime(2026, 9, 8, 8, 0))
-    assert job is not None and job.kind == "power_off"
+    sched = Scheduler()
+    job = sched.due(schedule, datetime(2026, 9, 8, 8, 0))
+    assert job is not None and job.kind == "report", "the report goes first once it is due"
+
+    sched.fired.mark(job)
+    job = sched.due(schedule, datetime(2026, 9, 8, 8, 0))
+    assert job is not None and job.kind == "power_off", "and then it carries straight on"
+
+
+def test_the_report_is_not_held_behind_a_power_off_that_is_struggling(schedule):
+    """11 September: the power off was in trouble all morning, so due() kept
+    handing it back and the report never came.
+
+    That is exactly backwards. The morning a report is most worth reading is the
+    morning something went wrong, and it is the thing that can say so. So the
+    power off keeps its priority right up until the report is due, and loses it
+    the moment the report is overdue.
+    """
+    sched = Scheduler()
+    wake = datetime(2026, 9, 8, 6, 30)
+
+    # Before the report is due, switching off is the only thing that matters.
+    assert sched.due(schedule, wake + timedelta(minutes=5)).kind == "power_off"
+
+    # Once it is due, it goes ahead, even though the power off is still unfired.
+    due_at = wake + REPORT_AFTER
+    report = sched.due(schedule, due_at)
+    assert report.kind == "report"
+
+    off = Job("power_off", report.plan)
+    assert not sched.fired.has_fired(off), "and the power off is still waiting its turn"
 
 
 def test_saturday_night_is_skipped_when_sunday_is_not_selected(schedule):

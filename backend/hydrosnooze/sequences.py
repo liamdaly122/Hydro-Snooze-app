@@ -26,7 +26,6 @@ sharpest edge in the original design, and dropping their scheduler removes it.
 
 from __future__ import annotations
 
-
 from .adapters.base import PowerMonitor, Transmitter
 from .clock import Clock
 from .config import Settings
@@ -163,6 +162,15 @@ class Commands:
         )
 
     async def power_on(self) -> None:
+        """One press, then wait for the plug to agree.
+
+        A unit that is off answers nothing but power, and answers it with one
+        press, so there is no display to wake and no gesture to get wrong. All
+        the care here is in the waiting: the plug takes the better part of a
+        minute to report a jump from standby to a running unit, and a second
+        press sent inside that lag lands on a unit that is already on and with a
+        lit display, which switches it straight back off.
+        """
         self._banner("power_on()")
         watts = await self.power.read_watts()
         if watts is not None and watts >= self.settings.off_threshold_w:
@@ -170,16 +178,10 @@ class Commands:
             return
 
         await self._press(Button.POWER, "on")
-        if await self._settled_on():
+        if await self._confirm(off=False):
             return
 
-        # One retry, then stop. Never retry a whole sequence blindly.
-        await self._press(Button.POWER, "on, retry")
-        if await self._settled_on():
-            self.events.warning("power", "Powered on, but it took two presses")
-            return
-
-        raise NotLanding("Pressed power twice and the plug still reads off")
+        raise NotLanding("Pressed power and the plug still reads off two minutes later")
 
     async def press_power(self) -> None:
         """One press of power. No wake, no check, no retry, no second thoughts.
@@ -204,23 +206,29 @@ class Commands:
         self.events.info("power", "Sent one press of power")
 
     async def power_off(self) -> None:
-        """Two presses of power, on a display that is awake for both of them.
+        """One gesture, then wait long enough to actually know whether it worked.
 
-        Power is not the toggle it looks like. One press on its own does nothing:
-        the unit wants a second, close behind it, before it switches off. So the
-        two presses here are one gesture rather than two attempts, and the wake
-        preamble in front of them matters more here than anywhere else in this
-        file. A press swallowed by a dark display does not cost a press, it costs
-        the gesture, because what is left behind is a single press and a single
-        press is nothing.
+        Rewritten on 11 September, after a morning where the app sent eight
+        presses of power, restarted the board twice, and left the bed running.
 
-        That is what was going wrong. The display sleeps after five minutes and
-        the last stage change of a night is half an hour before the wake time, so
-        at 07:30 the display was always dark. The first press woke it, the second
-        was left standing on its own, and the correction ten seconds later was
-        another one on its own. Three presses and a bed still running at
-        breakfast. A rehearsal never showed it, because its stages are seconds
-        apart and the display is still lit when the power off arrives.
+        Two things were wrong, and they fed each other.
+
+        **It pressed power one time too many.** The unit's own behaviour is
+        exactly two steps: a press wakes the display, and the next press switches
+        the unit off. This file used to send a wake preamble of two `temp_down`
+        presses and then a *pair* of power presses, which on an already lit
+        display is one press to switch off and a second, six tenths of a second
+        later, to switch straight back on. It ended on every time. The old
+        comment here described power as needing a pair, and that was a guess made
+        to explain an earlier failure. It was wrong.
+
+        **And the plug is slow.** A Shelly does not report a change of draw for
+        the better part of a minute. The check afterwards waited ten seconds, saw
+        a unit that was still "drawing", concluded nothing had landed, and sent
+        the gesture again. So the correction was the thing that broke it, every
+        time, and then the board was restarted for a fault that was never there.
+
+        So: as few presses as the unit needs, and then real patience.
         """
         self._banner("power_off()")
         watts = await self.power.read_watts()
@@ -229,29 +237,38 @@ class Commands:
             return
 
         await self._off_gesture()
-        if await self._settled_off():
+        if await self._confirm(off=True):
             return
 
-        # One retry, then stop, and a whole gesture rather than one more press.
-        # An odd press added to a pair that did not land is how this failed in
-        # the first place.
-        await self._off_gesture()
-        if await self._settled_off():
-            self.events.warning("power", "Powered off, but it took a second pair of presses")
-            return
-
-        raise NotLanding("Pressed power twice, twice over, and the plug still reads on")
+        raise NotLanding(
+            f"Pressed power and the plug still reads on "
+            f"{self.settings.power_confirm_s}s later"
+        )
 
     async def _off_gesture(self) -> None:
-        """Wake the display, then the two presses that switch the unit off.
+        """Wake the display, then the one press that switches the unit off.
 
-        The gap between the pair is short on purpose. The unit is waiting for the
-        second press and will not wait long, and the ten second check that comes
-        afterwards is far too late to be the other half of anything.
+        Liam works the remote by hand as two presses of power: "one to turn the
+        display on and then one to turn off the unit". That is two steps, not two
+        presses, and only the second step has to be power. The first is just
+        waking the display, and this file has had a safer way to do that since the
+        beginning.
+
+        So the wake preamble stays and the second press of power goes. `temp_down`
+        cannot switch anything on, which is the entire reason the preamble is
+        `temp_down` everywhere else in this file. A press of power can, and a
+        spare one sent at a unit that has just switched off is precisely what was
+        leaving the bed running.
+
+        Three presses where the hand sends two, and deterministic where guessing
+        is not. Working out whether the display is already lit was the obvious
+        alternative and it is not knowable: the physical remote is invisible from
+        here, so a guess is wrong exactly when someone has been at the unit, and
+        being wrong costs a bed that switches off and straight back on. Two
+        harmless presses buy certainty from every starting state.
         """
         await self.wake()
-        await self._press(Button.POWER, "off 1/2", gap=0.6)
-        await self._press(Button.POWER, "off 2/2", gap=0)
+        await self._press(Button.POWER, "switches the unit off", gap=0)
 
     async def mute(self) -> None:
         """Silence the button beep.
@@ -267,16 +284,50 @@ class Commands:
 
     # --- Verification ---------------------------------------------------------
 
-    async def _settled_on(self) -> bool:
-        await self.clock.sleep(self.settings.power_settle_s)
-        watts = await self.power.read_watts()
-        if watts is None:
-            raise CommandFailed("Plug unreachable, cannot confirm the unit powered on")
-        return watts >= self.settings.off_threshold_w
+    async def _confirm(self, *, off: bool) -> bool:
+        """Keep asking the plug until it agrees, or until patience runs out.
 
-    async def _settled_off(self) -> bool:
-        await self.clock.sleep(self.settings.power_settle_s)
-        watts = await self.power.read_watts()
-        if watts is None:
-            raise CommandFailed("Plug unreachable, cannot confirm the unit powered off")
-        return watts < self.settings.off_threshold_w
+        This replaced a single check ten seconds after the presses, which was the
+        other half of the morning described in power_off. Ten seconds is inside
+        the plug's own reporting lag, so the answer it gave was not "it did not
+        work", it was "I have not noticed yet". The app could not tell those
+        apart and treated the second as the first.
+
+        Polling rather than one long sleep so the usual case still returns as
+        soon as the plug catches up, rather than always costing the full wait.
+
+        An unreachable plug is a different failure and keeps its own message. It
+        only counts as unreachable if it never answered once across the whole
+        window: a single dropped packet from a plug at -87 dBm behind a bed is
+        not a reason to give up on a command.
+        """
+        want = "off" if off else "on"
+        waited = float(self.settings.power_settle_s)
+        await self.clock.sleep(waited)
+
+        heard = False
+        while True:
+            watts = await self.power.read_watts()
+            if watts is not None:
+                heard = True
+                reads_off = watts < self.settings.off_threshold_w
+                if reads_off is off:
+                    if waited > self.settings.power_settle_s:
+                        self.events.info(
+                            "power",
+                            f"The plug took {waited:.0f}s to report the unit {want}",
+                        )
+                    return True
+
+            if waited >= self.settings.power_confirm_s:
+                if not heard:
+                    raise CommandFailed(
+                        f"Plug unreachable, cannot confirm the unit powered {want}"
+                    )
+                return False
+
+            step = min(
+                float(self.settings.power_poll_s), self.settings.power_confirm_s - waited
+            )
+            await self.clock.sleep(step)
+            waited += step

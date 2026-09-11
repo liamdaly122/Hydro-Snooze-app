@@ -51,7 +51,8 @@ def build_adapters(
                 "HS_POWER_MONITOR=fake needs HS_TRANSMITTER=fake: the fake plug reads "
                 "the simulated unit, and there is no simulated unit to read."
             )
-        power: PowerMonitor = FakePowerMonitor(unit)
+        # The clock is what lets it be as slow as the real plug.
+        power: PowerMonitor = FakePowerMonitor(unit, clock)
     else:
         from .shelly import ShellyPowerMonitor
 

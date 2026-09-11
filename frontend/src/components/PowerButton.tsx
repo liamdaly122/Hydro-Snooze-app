@@ -25,9 +25,11 @@ interface Props {
  * The colour still reflects what the plug last said, because that is worth
  * knowing. It just no longer decides what the tap does.
  *
- * The scheduled power off at the wake time is untouched. Nobody is looking at
- * seven in the morning, so that one keeps its wake preamble, its pair of presses
- * and its confirmation.
+ * The scheduled power off at the wake time is a different thing. Nobody is
+ * looking at seven in the morning, so that one wakes the display deliberately,
+ * sends the single press of power that switches the unit off, and then waits on
+ * the plug to confirm it. Two taps here does the same job by hand: the first
+ * wakes the display and the second switches the unit off.
  */
 export function PowerButton({ power, onPress, onError }: Props) {
   const [busy, setBusy] = useState(false)

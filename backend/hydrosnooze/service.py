@@ -56,6 +56,36 @@ log = logging.getLogger(__name__)
 #: before the thing that would tell us it is back has run.
 RETRY_AFTER = timedelta(seconds=30)
 
+#: The same, for switching off, which is the one step that is slow by design.
+#:
+#: A power off now sends as few presses as the unit needs and then spends two
+#: minutes asking the plug whether they worked, because the plug takes most of a
+#: minute to notice. Retrying that every thirty seconds would start the next
+#: attempt before the last one had finished being patient, which is how a morning
+#: ends up eight presses deep. The window is two hours; there is time.
+RETRY_AFTER_POWER_OFF = timedelta(minutes=5)
+
+#: How many failed attempts at switching off before the board itself is suspected.
+#:
+#: Two, because one is a press that vanished and two is a pattern. The first fix
+#: for a vanished press is another one five minutes later, which costs nothing.
+#: Restarting the board costs it fifteen seconds off the network, and is not
+#: something to reach for on the first try.
+REBOOT_AFTER_FAILURES = 2
+
+
+def _retry_gap(job: Job) -> timedelta:
+    return RETRY_AFTER_POWER_OFF if job.kind == "power_off" else RETRY_AFTER
+
+
+def _plainly(gap: timedelta) -> str:
+    seconds = int(gap.total_seconds())
+    if seconds % 60 or seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+
 #: Events to keep. About thirty a night, so this is a couple of months of
 #: history, which is far more than anyone reads and still nothing on a card.
 EVENTS_KEPT = 2000
@@ -186,6 +216,16 @@ class Service:
 
         self._retrying: str | None = None
         self._retry_after: datetime | None = None
+        #: The night whose power off has already cost a board restart. See
+        #: _power_off_once: one per night, not one per attempt.
+        self._rebooted_for: datetime | None = None
+        #: And the night whose power off has already been shouted about.
+        self._power_off_told: datetime | None = None
+        #: How many times switching off has failed tonight, and which night that
+        #: count belongs to. See _power_off_once: the restart is the answer to a
+        #: fault that persists, not to the first sign of one.
+        self._power_off_night: datetime | None = None
+        self._power_off_fails = 0
 
         # Whether the probe board was last heard from, and when it went quiet.
         # None means never asked, which is not the same as not answering.
@@ -671,16 +711,23 @@ class Service:
         # Left unmarked on purpose, so due() offers it again. The stage's own
         # window is the limit: once it closes, missed() reports it and stops.
         if first_try:
+            gap = _retry_gap(job)
             self.events.warning(
                 "stage",
                 f"The {job.key} step did not land. Retrying every "
-                f"{int(RETRY_AFTER.total_seconds())}s until its window closes.",
+                f"{_plainly(gap)} until its window closes.",
             )
         # Set before anything else can go wrong, so the backoff holds even if the
         # events above throw. This is the line whose absence caused the 1Hz loop.
-
+        #
+        # Measured from now rather than from the `now` this tick started with.
+        # They used to be the same thing. They stopped being the same thing when
+        # confirming a power press started taking two patient minutes: the
+        # attempt itself outlasted its own backoff, so the next tick found the
+        # deadline already in the past and went straight round again, which is
+        # the hammering this is here to prevent.
         self._retrying = job.key
-        self._retry_after = now + RETRY_AFTER
+        self._retry_after = self.clock.now() + _retry_gap(job)
 
     def _report_stage_start(self, job: Job) -> None:
         """The first stage of a night is also the moment to check pre-conditioning
@@ -1246,21 +1293,75 @@ class Service:
         self.events.info("power_off", f"Night finished at {plan.wake_at:%H:%M}, switching off")
         async with self._lock:
             try:
-                # Through a reboot if the presses prove they are not arriving.
-                # This is the one that matters most: nothing else switches the
-                # bed off, and nobody is awake to notice that it did not.
-                await self._through_a_reboot(self.commands.power_off)
+                await self._power_off_once(plan)
                 self._set_state(
                     power=Power.OFF, assumed_target_c=None, last_command_at=self.clock.now()
                 )
                 return True
             except CommandFailed as exc:
-                self.events.error(
-                    "power_off",
-                    f"{exc}. The unit will not switch itself off. Check it, and check "
-                    "the Shelly's daily schedule is still set: off at 09:00, on at 19:00.",
-                )
+                # Loudly once a night, then quietly. The window is two hours and
+                # the retry runs all of it, so a board that is genuinely dead used
+                # to send this to the phone twenty times over breakfast. The
+                # second identical alarm tells you nothing the first did not, and
+                # it is how you learn to ignore the first.
+                if self._power_off_told != plan.wake_at:
+                    self._power_off_told = plan.wake_at
+                    self.events.error(
+                        "power_off",
+                        f"{exc}. The unit will not switch itself off. Check it, and check "
+                        "the Shelly's daily schedule is still set: off at 09:00, on at 19:00.",
+                    )
+                else:
+                    self.events.info("power_off", f"Still trying to switch off. {exc}")
                 self._set_state(last_error=str(exc), power=Power.UNKNOWN)
+                return False
+
+    async def _power_off_once(self, plan: NightPlan) -> None:
+        """One gesture, and a board restart only once the simple thing has failed
+        twice.
+
+        Restarting the blaster was never the wrong idea, only the wrong trigger.
+        On 11 September it took ten seconds of a plug that had not caught up to
+        decide "nothing is reaching the unit", and a board that was working
+        perfectly got power cycled twice inside two minutes while the retry
+        underneath did the whole thing again.
+
+        So it escalates now instead of jumping. Attempt one is a gesture and two
+        patient minutes. The retry above comes back five minutes later and does
+        the same, which is the cheap recovery for a single press that vanished
+        into someone walking past the blaster. Only when that has failed too is
+        the board the likely fault, and only then is it restarted, once for the
+        whole night: the window is two hours, and a board that is genuinely dead
+        must not be power cycled for all of it.
+        """
+        if self._power_off_night != plan.wake_at:
+            self._power_off_night = plan.wake_at
+            self._power_off_fails = 0
+
+        try:
+            await self.commands.power_off()
+            return
+        except NotLanding as failure:
+            self._power_off_fails += 1
+            spent = self._rebooted_for == plan.wake_at
+            if self._power_off_fails < REBOOT_AFTER_FAILURES or spent:
+                raise
+            self.events.warning(
+                "blaster",
+                f"{failure}, twice over. The board is answering but nothing is reaching "
+                "the unit, so it is being restarted and tried once more.",
+            )
+
+        self._rebooted_for = plan.wake_at
+        try:
+            await self.transmitter.reboot()
+        except Exception as exc:  # noqa: BLE001
+            raise CommandFailed(
+                f"Nothing is reaching the unit, and the board would not restart: {exc}"
+            ) from exc
+
+        await self.clock.sleep(REBOOT_SECONDS)
+        await self.commands.power_off()
 
     async def _apply(self, mode: Mode, target_c: int) -> None:
         """Put the unit into a mode at a temperature. The whole night is this."""
