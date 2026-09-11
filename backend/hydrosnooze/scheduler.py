@@ -98,12 +98,34 @@ class FiredMarks:
     #: Called with the whole set whenever it changes.
     store: Callable[[dict[str, datetime]], None] | None = None
 
-    def mark(self, job: Job) -> None:
-        self.done[job.key] = job.plan.wake_at
+    #: Prefix on the key of a job that was given up on rather than run.
+    #:
+    #: A missed stage is marked like any other, to stop the tick reporting it
+    #: every second for the rest of the night. That made it indistinguishable
+    #: from a stage that worked: the morning report asks this set what ran, and
+    #: a night with a missed Deep stage reported three of three landed. The one
+    #: morning that report is worth reading is the morning something went wrong,
+    #: and it said the night was perfect.
+    GAVE_UP = "missed:"
+
+    def mark(self, job: Job, *, ran: bool = True) -> None:
+        self.done[(job.key if ran else self.GAVE_UP + job.key)] = job.plan.wake_at
         self._save()
 
+    def gave_up_on(self, job: Job) -> bool:
+        return self.done.get(self.GAVE_UP + job.key) == job.plan.wake_at
+
     def has_fired(self, job: Job) -> bool:
-        return self.done.get(job.key) == job.plan.wake_at
+        """Whether this job is finished with, one way or the other.
+
+        Both marks count. due() must not offer a stage again once it has been
+        given up on, or the tick would keep retrying a stage whose window closed
+        hours ago. What ran and what was abandoned are told apart by keys_for.
+        """
+        return job.plan.wake_at in (
+            self.done.get(job.key),
+            self.done.get(self.GAVE_UP + job.key),
+        )
 
     def keys_for(self, plan: NightPlan) -> set[str]:
         """Which jobs have already run for this particular night.
@@ -111,7 +133,11 @@ class FiredMarks:
         The marks outlive a night by design, so asking "what ran" without naming
         the night would answer with yesterday's as well.
         """
-        return {key for key, at in self.done.items() if at == plan.wake_at}
+        return {
+            key
+            for key, at in self.done.items()
+            if at == plan.wake_at and not key.startswith(self.GAVE_UP)
+        }
 
     def clear(self) -> None:
         self.done.clear()
@@ -163,7 +189,7 @@ class Scheduler:
         # would fight over the unit, and the real one is hours away in any case.
         if self.rehearsal is not None:
             return self.rehearsal
-        if not schedule.enabled or not schedule.days_of_week or not schedule.stages:
+        if not schedule.days_of_week or not schedule.stages:
             return None
         # Read once, so every night considered in the loop below is worked out
         # from the same reading rather than from whatever arrived mid-loop.
@@ -174,8 +200,31 @@ class Scheduler:
                 continue
             plan = schedule.plan_for(wake_on, self.learned_lead, bed)
             if now < plan.wake_at + POWER_OFF_GRACE:
+                # Switching automation off stops the next night. It does not
+                # abandon one already under way.
+                #
+                # It used to. The toggle on the Alarm card dropped the whole
+                # plan the moment it was flipped, and with it the power off
+                # nothing else in the house performs, so flicking it at 2am
+                # left the bed running until the Shelly's own schedule caught
+                # it seven hours later. A setting is about future nights; what
+                # to do with the unit that is running right now is not a
+                # setting, and `due` below serves only the finishing jobs once
+                # this is off.
+                if not schedule.enabled and now < plan.starts_at:
+                    return None
                 return plan
         return None
+
+    def only_finishing(self, schedule: Schedule) -> bool:
+        """Whether tonight is being wound up rather than run.
+
+        True once automation has been switched off part way through a night. The
+        stage changes still to come are cancelled, because that is what the
+        toggle means; switching the unit off is not cancelled, because that is a
+        promise rather than a preference.
+        """
+        return not schedule.enabled and self.rehearsal is None
 
     def last_finished(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The most recent night that is over, for the morning report to describe.
@@ -203,6 +252,9 @@ class Scheduler:
         plan = self.plan_in_progress(schedule, now)
         if plan is None:
             return None
+
+        if self.only_finishing(schedule):
+            return self._winding_up(plan, now)
 
         # Before anything else tonight, and before the first press that matters.
         # A board fresh from a reboot is in a known state; one that has been up
@@ -240,6 +292,16 @@ class Scheduler:
                     return job
                 break
 
+        return self._winding_up(plan, now)
+
+    def _winding_up(self, plan: NightPlan, now: datetime) -> Job | None:
+        """Switching the unit off, and then saying how the night went.
+
+        Its own method because it is also the whole of what a night does once
+        automation has been switched off mid-way. Everything above this is about
+        driving a night; this is about finishing one, and finishing one is not
+        optional.
+        """
         # Not optional any more. Without the unit's own schedule, nothing else
         # turns it off.
         closes = plan.wake_at + POWER_OFF_GRACE

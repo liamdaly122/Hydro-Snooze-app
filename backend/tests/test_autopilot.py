@@ -361,3 +361,62 @@ def test_each_reason_gets_its_own_pair_rather_than_the_first_one_taking_four(pla
     night = build(plan, events)
     assert night.counted(RESPONSE_KIND) == 4
     assert night.counted(BY_HAND) == 0
+
+
+# --- A stage that did not happen --------------------------------------------------
+
+
+def test_a_missed_stage_is_not_counted_among_the_ones_that_landed(plan):
+    """The bug Codex found on 11 September, and the one that mattered most.
+
+    A missed stage is marked like any other, so the tick stops reporting it every
+    second for the rest of the night. That made it indistinguishable from a stage
+    that worked: this report asks the marks what ran, and a night with a missed
+    Deep stage said three of three landed.
+
+    The one morning this screen is worth reading is the morning something went
+    wrong, and it said the night had been perfect.
+    """
+    from hydrosnooze.scheduler import FiredMarks, Job
+
+    marks = FiredMarks()
+    deep, rem, wake = (Job("stage", plan, step) for step in plan.steps)
+    marks.mark(deep, ran=False)
+    marks.mark(rem)
+    marks.mark(wake)
+
+    night = autopilot.build(plan, [], [], marks.keys_for(plan), None)
+
+    assert night.missed == ["Deep"]
+    assert night.stages_landed == 2
+    assert night.stages_total == 3
+
+
+def test_a_stage_given_up_on_is_still_not_offered_again(plan):
+    """Both marks have to stop due() handing the job back, or the tick would
+    retry a stage whose window closed hours ago. Only the report tells them
+    apart."""
+    from hydrosnooze.scheduler import FiredMarks, Job
+
+    marks = FiredMarks()
+    job = Job("stage", plan, plan.steps[0])
+    marks.mark(job, ran=False)
+
+    assert marks.has_fired(job), "it would be retried all night"
+    assert marks.gave_up_on(job)
+    assert job.key not in marks.keys_for(plan), "but it did not land"
+
+
+def test_last_nights_verdict_does_not_leak_into_tonight(plan):
+    """The marks outlive a night on purpose, so they are keyed by the night they
+    belong to. A stage missed yesterday must not read as missed again today."""
+    from dataclasses import replace as _replace
+    from datetime import timedelta as _td
+    from hydrosnooze.scheduler import FiredMarks, Job
+
+    marks = FiredMarks()
+    yesterday = _replace(plan, wake_at=plan.wake_at - _td(days=1))
+    marks.mark(Job("stage", yesterday, yesterday.steps[0]), ran=False)
+
+    assert marks.keys_for(plan) == set()
+    assert not marks.gave_up_on(Job("stage", plan, plan.steps[0]))

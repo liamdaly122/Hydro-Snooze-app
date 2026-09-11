@@ -673,7 +673,10 @@ class Service:
         # A missed stage means the bed spent that stretch of the night at the
         # wrong temperature. Worth saying out loud rather than passing over.
         for job in self.scheduler.missed(self.schedule, now):
-            self.scheduler.fired.mark(job)
+            # ran=False. Marked so the tick stops offering it, recorded as given
+            # up on so the morning report does not count it among the stages that
+            # landed, which it did until 11 September.
+            self.scheduler.fired.mark(job, ran=False)
             assert job.step is not None
             self.events.error(
                 "stage",

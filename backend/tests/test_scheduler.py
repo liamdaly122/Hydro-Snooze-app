@@ -7,6 +7,7 @@ optional: without it the bed runs all day.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
 import pytest
@@ -169,3 +170,65 @@ def test_a_night_that_cools_then_heats_is_allowed(schedule):
     plan = schedule.plan_for(datetime(2026, 9, 8).date())
     assert plan.steps[0].mode.is_cooling
     assert plan.steps[1].mode is Mode.WARMING
+
+
+# --- Switching automation off part way through a night ---------------------------
+#
+# The toggle on the Alarm card used to drop the whole plan the moment it was
+# flipped, and with it the power off that nothing else in the house performs. So
+# turning automation off at 2am left the bed running until the Shelly's own daily
+# schedule caught it seven hours later.
+#
+# A setting is about future nights. What to do with the unit that is running
+# right now is not a setting.
+
+
+def off(schedule):
+    return replace(schedule, enabled=False)
+
+
+def test_switching_it_off_mid_night_still_switches_the_unit_off(schedule):
+    sched = Scheduler()
+    at_wake = datetime(2026, 9, 8, 6, 35)
+
+    job = sched.due(off(schedule), at_wake)
+    assert job is not None and job.kind == "power_off"
+
+
+def test_switching_it_off_mid_night_cancels_what_is_still_to_come(schedule):
+    """Which is what the toggle means. The stages are the automation; switching
+    the unit off is the promise underneath it."""
+    sched = Scheduler()
+    # The REM boundary, inside its grace window, so a stage really is due.
+    rem = datetime(2026, 9, 8, 2, 30)
+
+    assert sched.due(schedule, rem).kind == "stage", "the test needs a live boundary"
+    assert sched.due(off(schedule), rem) is None
+
+
+def test_the_report_still_goes_out_on_a_night_that_was_switched_off(schedule):
+    sched = Scheduler()
+    plan = sched.plan_in_progress(off(schedule), datetime(2026, 9, 8, 6, 35))
+    assert plan is not None
+    sched.fired.mark(Job("power_off", plan))
+
+    job = sched.due(off(schedule), plan.wake_at + REPORT_AFTER)
+    assert job is not None and job.kind == "report"
+
+
+def test_it_does_not_start_a_night_while_it_is_off(schedule):
+    """The whole point of the toggle. Nothing begins."""
+    sched = Scheduler()
+    # Half an hour before bedtime, when the board would be restarted for the
+    # night ahead. The first thing that happens on any night.
+    evening = datetime(2026, 9, 8, 21, 45)
+
+    assert sched.due(schedule, evening) is not None, "the test needs a night to start"
+    assert sched.due(off(schedule), evening) is None
+
+
+def test_once_the_night_is_over_it_stays_off(schedule):
+    """Not stuck winding up the same night forever."""
+    sched = Scheduler()
+    assert sched.due(off(schedule), datetime(2026, 9, 9, 21, 0)) is None
+    assert sched.due(off(schedule), datetime(2026, 9, 10, 3, 0)) is None
