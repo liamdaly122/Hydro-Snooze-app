@@ -23,8 +23,11 @@ export function WakeCard({ draft, onDraftChange, onOpen }: Props) {
   const firstTemp = draft.stages[0]?.temp_c ?? 20
   const warming = draft.preconditioning.mode === 'warming'
 
+  // "Alarm" rather than "Wake". Wake is also the name of the last sleep stage,
+  // three inches up this same screen with its own temperature, and one word
+  // meaning two things on one screen is one too many.
   return (
-    <Card label="Wake" onOpen={onOpen} openLabel="Edit the schedule">
+    <Card label="Alarm" onOpen={onOpen} openLabel="Edit the schedule">
       <p className="wake__days">
         {draft.days_of_week.length === 0
           ? 'No days selected'

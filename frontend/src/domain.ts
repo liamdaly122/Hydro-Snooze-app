@@ -107,10 +107,17 @@ export function formatDayTime(d: Date): string {
   return `${DAY_SHORT[mondayFirstDay(d)]} ${formatTime(d)}`
 }
 
+/**
+ * The days, without the word in front of them.
+ *
+ * "day" rather than "Every day" for a full week, because both callers say
+ * "Every" themselves and the card read "EVERY EVERY DAY" for anyone who had the
+ * schedule running seven nights.
+ */
 export function formatDays(days: number[]): string {
   if (days.length === 0) return 'Never'
   const sorted = [...days].sort((a, b) => a - b)
-  if (sorted.length === 7) return 'Every day'
+  if (sorted.length === 7) return 'day'
   // Collapse a single run into "Mon-Thu", the way the reference app does.
   const isRun = sorted.every((d, i) => i === 0 || d === sorted[i - 1]! + 1)
   if (isRun && sorted.length > 2) {

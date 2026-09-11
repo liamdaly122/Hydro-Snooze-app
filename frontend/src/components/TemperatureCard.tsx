@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card } from './Card'
-import { Minus, Plus } from './Icons'
+import { Minus, Plus, Sparkle } from './Icons'
 import { canSetTemperature, formatTemp, tint, tintAlpha } from '../domain'
 import {
   MODE_RANGE,
@@ -143,11 +143,18 @@ export function TemperatureCard({
         </button>
 
         {selected === null ? (
-          // "unknown" was accurate and useless: it named the problem without
-          // saying what to do about it. The probes mean the note underneath can
-          // now carry the measured temperature, so this can be the instruction.
+          // Nothing to show is not the same as nothing happening. When the app
+          // has not commanded a temperature, the night ahead is still Autopilot's
+          // and saying so is more use than a blank or an instruction: the thing
+          // worth knowing here is that it is handled. The note underneath carries
+          // the measured bed temperature and how to override it.
+          //
+          // It reads the schedule rather than assuming. A night switched off is a
+          // night nothing will drive, and claiming otherwise on the largest text
+          // on the home screen would be the worst place in the app to be wrong.
           <span className="stage__value stage__value--unknown stage__value--prompt">
-            Set bed temp
+            <Sparkle size={20} className="stage__mark" glow />
+            {draft.enabled ? 'Autopilot on' : 'Autopilot off'}
           </span>
         ) : (
           <span className="stage__value">
@@ -212,12 +219,17 @@ function StageNote({
     // This is the first number on this card that was measured rather than
     // decided. Everything else here is what the app last commanded.
     const bed = state.observed_return_c ?? state.observed_flow_c
-    const measured = bed === null ? null : `Bed is around ${bed.toFixed(1)}° now.`
+    const measured = bed === null ? null : `Bed is around ${bed.toFixed(1)}° right now.`
 
-    if (state.power === 'off') note = say(measured, 'Unit is off. Only the power button responds.')
+    // The instruction goes first when there is one, the measurement second. The
+    // order matters: this is read by somebody who has just seen "Autopilot on"
+    // and wants to know whether they can overrule it.
+    if (state.power === 'off')
+      note = say(measured, 'The unit is off, so only the power button responds.')
     else if (state.power === 'unknown')
       note = say(measured, 'Unit state unknown. Check the plug reading below.')
-    else if (value === null) note = say(measured, 'Press + or − to set a target.')
+    else if (value === null)
+      note = say('Adjust the bed temp by hand with + and −.', measured)
     else if (state.current_stage !== null) {
       // Said before it happens rather than after. Reaching for the temperature
       // mid-stage is a correction, not a one-off, so it sticks; better to know

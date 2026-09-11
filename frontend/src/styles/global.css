@@ -290,13 +290,20 @@ button:disabled {
   letter-spacing: 0;
 }
 
-/* An instruction rather than a value, so it is words rather than digits and
-   needs the room for them. Without this it overflows its flex item and paints
-   straight over the plus and minus buttons, because the value never wraps. */
+/* Words rather than digits, so it needs the room for them. Without this it
+   overflows its flex item and paints straight over the plus and minus buttons,
+   because the value never wraps.
+
+   Brighter than the dimmed "unknown" it sits on top of. "Autopilot on" is a
+   statement about tonight rather than a gap where a number should be, and the
+   greyed-out treatment made it read as the second one. */
 .stage__value--prompt {
   font-size: clamp(15px, 4.8vw, 19px);
   white-space: normal;
   line-height: 1.25;
+  color: var(--text-label);
+  display: inline-flex;
+  align-items: center;
 }
 
 .stage__unit {
@@ -1710,3 +1717,11 @@ button:disabled {
 }
 
 .ap-teaser__chevron { flex: none; color: rgb(255 255 255 / 0.5); }
+
+/* The Autopilot mark beside the placeholder in the Temperature card. Inline with
+   the text rather than absolute, so it moves with a line that wraps at 390px. */
+.stage__mark {
+  vertical-align: -3px;
+  margin-right: 8px;
+  flex: none;
+}
