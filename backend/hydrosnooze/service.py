@@ -86,9 +86,27 @@ def _plainly(gap: timedelta) -> str:
     return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
 
-#: Events to keep. About thirty a night, so this is a couple of months of
-#: history, which is far more than anyone reads and still nothing on a card.
-EVENTS_KEPT = 2000
+#: How long to keep the record of what happened.
+#:
+#: Both numbers were small because I assumed the SD card could not afford them,
+#: and then measured it: a row of power sample is 96 bytes and an event is 148,
+#: so five years is about 505 MB of samples and 11 MB of events. Half a gigabyte
+#: on a card with tens to spare.
+#:
+#: Retention costs almost nothing in card wear either, which was the real worry.
+#: The writing happens at the same rate whatever the limit is, one batched
+#: transaction every ten minutes; keeping more only means deleting less.
+#:
+#: The two have to match, and they did not. Samples ran a week and events ran to
+#: a fixed two thousand rows, about two months, so Autopilot would have drawn a
+#: chart for an old night and reported nothing happening on it: the temperatures
+#: outlived the record of what was done to them.
+HISTORY = timedelta(days=365 * 5)
+
+#: Roughly forty events a night, and a cap rather than a date because the table
+#: is trimmed by row count. Generous against the twenty-odd a real night writes,
+#: so the limit that actually bites is the age one above.
+EVENTS_KEPT = 40 * 365 * 5
 
 #: How long without a completed tick before the scheduler counts as stuck.
 #: Generous against a one second loop, and far shorter than a stage boundary.
@@ -810,7 +828,7 @@ class Service:
             # whole setup to fail. prune_events was written for this and then
             # never called, so events were the one thing growing unbounded.
             if now.minute == 0 and now.second < self.settings.power_sample_seconds:
-                self.db.prune_power(now - timedelta(days=7))
+                self.db.prune_power(now - HISTORY)
                 self.db.prune_events(keep=EVENTS_KEPT)
                 self._check_the_pi()
 

@@ -168,3 +168,21 @@ def test_they_ride_the_same_batch_rather_than_costing_the_card_more_writes(tmp_p
         db.add_power_sample(START + timedelta(seconds=30 * i), 170.0, flow_c=26.0)
     assert db.night_history(START - timedelta(hours=1))  # a read flushes
     db.close()
+
+
+def test_the_two_retentions_cover_the_same_stretch_of_time():
+    """Samples and events have to outlive each other, or neither is any use.
+
+    They did not. Power samples ran a week and events ran to a fixed two thousand
+    rows, which is about two months, so once the samples were pushed out to five
+    years Autopilot would have drawn a chart for an old night and reported
+    nothing happening on it: the temperatures outliving the record of what was
+    done to them.
+
+    A night writes twenty-odd events. Forty is the number the cap is built on,
+    and this fails if anyone moves one of the two without the other.
+    """
+    from hydrosnooze.service import EVENTS_KEPT, HISTORY
+
+    nights = HISTORY.days
+    assert EVENTS_KEPT >= nights * 40, "events would be pruned while samples remain"
