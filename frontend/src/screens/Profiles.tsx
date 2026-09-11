@@ -65,10 +65,17 @@ export function Profiles({ client, onSaved }: { client: ApiClient; onSaved?: () 
 
   async function activate(profile: Profile) {
     if (profile.active) return
-    await run(profile.id, () => client.activateProfile(profile.id))
+    // `ok` is checked rather than discarded. run() sets the error and returns
+    // undefined on a rejection, and calling onSaved anyway unmounted this screen
+    // before the error could paint: you were bounced to a home screen still
+    // showing the old night, which reads exactly like the profile having loaded.
+    const ok = await run(profile.id, async () => {
+      await client.activateProfile(profile.id)
+      return true
+    })
     const list = await client.getProfiles().catch(() => null)
     if (list) setProfiles(list)
-    onSaved?.()
+    if (ok) onSaved?.()
   }
 
   async function remove(profile: Profile) {

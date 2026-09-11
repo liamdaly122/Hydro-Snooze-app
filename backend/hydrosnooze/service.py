@@ -1141,15 +1141,40 @@ class Service:
         Never fails the night. A board that will not restart may still be working
         perfectly, and refusing to run a schedule over it would turn a precaution
         into the thing that cost a night.
+
+        Which is also why this returns True on a failure rather than False, even
+        though False would let the retry machinery try again inside the half hour
+        window. That machinery announces a step that did not land as a warning,
+        and "did not land" is on the notifier's loud list, so a momentary Wi-Fi
+        blip at the wrong second would ring a phone about a precaution nobody
+        asked for. Losing one night's restart to a bad packet is the better half
+        of that trade: a false alarm is how you learn to ignore the real one.
         """
-        try:
-            await self.reboot_blaster()
-        except CommandFailed as exc:
-            self.events.warning(
-                "blaster",
-                f"Could not restart the blaster before tonight: {exc} Carrying on, "
-                "because a board that will not restart may still be working.",
-            )
+        # transmitter.reboot rather than reboot_blaster, deliberately. That one
+        # is the button in the app, where a failure is worth an error: someone
+        # pressed it and is waiting. This is a precaution nobody asked for, and
+        # routing it through the same path logged at error level, which pushes to
+        # a phone unconditionally and lands inside the window the morning report
+        # covers, so a board that "may still be working perfectly" would set off
+        # an alarm and retitle an otherwise perfect night.
+        async with self._lock:
+            try:
+                await self.transmitter.reboot()
+            except Exception as exc:  # noqa: BLE001
+                self.events.info(
+                    "blaster",
+                    f"Could not restart the blaster before tonight: {exc}. Carrying on, "
+                    "because a board that will not restart may still be working.",
+                )
+                return True
+
+        self._blaster_ok = False
+        self._push_state()
+        self.events.info(
+            "blaster",
+            "Restarted the blaster before tonight. It is off the network for a few "
+            "seconds and the dot will go red and come back.",
+        )
         return True
 
     def _send_report(self, plan: NightPlan) -> bool:

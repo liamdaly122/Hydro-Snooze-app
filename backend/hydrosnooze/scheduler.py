@@ -186,10 +186,18 @@ class Scheduler:
         # Before anything else tonight, and before the first press that matters.
         # A board fresh from a reboot is in a known state; one that has been up
         # for days is the state both wedges were found in.
+        #
+        # Never in front of a rehearsal. A rehearsal compresses the whole night
+        # into a few minutes, so its first stage is seconds away rather than half
+        # an hour, and rebooting the board would take it off the network exactly
+        # as the first press went out. A rehearsal exists to answer "does every
+        # stage boundary really land", and a precaution that sabotages the test
+        # of the thing it protects is worse than no precaution.
         starts = plan.precool_at or plan.bedtime_at
         wake_at = starts - WAKE_BLASTER_BEFORE
         if (
-            wake_at <= now < starts
+            self.rehearsal is None
+            and wake_at <= now < starts
             and not self.fired.has_fired(wake := Job("wake_blaster", plan))
         ):
             return wake

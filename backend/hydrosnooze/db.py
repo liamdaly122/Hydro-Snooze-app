@@ -321,8 +321,6 @@ class Database:
         self.flush_power()
         self._db.close()
 
-    # --- Schedule -------------------------------------------------------------
-
     # --- Saved nights -----------------------------------------------------------
 
     def profiles(self) -> list[Profile]:
@@ -358,9 +356,12 @@ class Database:
             "SELECT id FROM profiles WHERE name = ? COLLATE NOCASE", (name,)
         ).fetchone()
         if existing is not None:
+            # The name too. Matching is case-insensitive, so typing "summer"
+            # over "Summer" took this branch and silently kept the old spelling,
+            # which reads as the rename having failed rather than as a rule.
             self._db.execute(
-                "UPDATE profiles SET stages = ?, cooling_speed = ? WHERE id = ?",
-                (stages, schedule.cooling_speed.value, existing["id"]),
+                "UPDATE profiles SET name = ?, stages = ?, cooling_speed = ? WHERE id = ?",
+                (name, stages, schedule.cooling_speed.value, existing["id"]),
             )
             new_id = existing["id"]
         else:
@@ -380,6 +381,8 @@ class Database:
 
     def profile(self, profile_id: int) -> Profile | None:
         return next((p for p in self.profiles() if p.id == profile_id), None)
+
+    # --- Schedule -------------------------------------------------------------
 
     def load_schedule(self) -> Schedule:
         row = self._db.execute("SELECT * FROM schedule WHERE id = 1").fetchone()

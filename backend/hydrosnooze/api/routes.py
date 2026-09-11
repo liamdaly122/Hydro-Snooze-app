@@ -14,7 +14,6 @@ from ..models import (
     SleepStage,
     Stage,
     minutes_between,
-    mode_for_target,
     modes_for,
     range_for,
 )
@@ -158,11 +157,7 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
             SleepStage(Stage(r["stage"]), r["duration_minutes"], r["temp_c"])
             for r in data["stages"]
         ]
-        # Which mode a stage lands in depends on the stage before it, so the night
-        # is resolved as a sequence and each temperature checked against the range
-        # of the mode it actually ends up in.
-        for stage, mode in zip(data["stages"], modes_for(data["stages"], speed), strict=True):
-            _guard_temperature(service, stage.temp_c, mode)
+        _guard_night(service, data["stages"], speed)
 
     for field in ("wake_time", "bed_time"):
         if field in data:
@@ -289,7 +284,7 @@ async def post_notify_test(request: Request) -> dict[str, object]:
 @router.get("/profiles")
 async def get_profiles(request: Request) -> list[dict[str, object]]:
     service = _service(request)
-    return [profile_json(p, service.schedule) for p in service.db.profiles()]
+    return _profiles_json(service)
 
 
 @router.post("/profiles")
@@ -304,7 +299,7 @@ async def post_profile(request: Request, body: NewProfile) -> list[dict[str, obj
     if not name:
         raise HTTPException(422, "A profile needs a name")
     service.db.save_profile(name, service.schedule, service.clock.now())
-    return [profile_json(p, service.schedule) for p in service.db.profiles()]
+    return _profiles_json(service)
 
 
 @router.post("/profiles/{profile_id}/activate")
@@ -318,12 +313,15 @@ async def post_activate_profile(request: Request, profile_id: int) -> dict[str, 
     profile = service.db.profile(profile_id)
     if profile is None:
         raise HTTPException(404, "No profile with that id")
-    for stage in profile.stages:
-        _guard_temperature(
-            service,
-            stage.temp_c,
-            mode_for_target(stage.temp_c, profile.cooling_speed),
-        )
+
+    # The same checks a hand-edited night gets, rather than a second set that
+    # happens to agree today. Asking mode_for_target per stage with nothing to
+    # come from contradicts modes_for's own contract, which says outright that a
+    # night has to be resolved as a sequence because a stage's mode inside the
+    # 25 to 35 overlap depends on the temperature before it. The two agree only
+    # because every cooling speed currently shares one range.
+    _guard_night(service, list(profile.stages), profile.cooling_speed)
+    _guard_room(service, list(profile.stages))
     service.update_schedule(
         {"stages": list(profile.stages), "cooling_speed": profile.cooling_speed}
     )
@@ -335,7 +333,10 @@ async def delete_profile(request: Request, profile_id: int) -> list[dict[str, ob
     service = _service(request)
     if not service.db.delete_profile(profile_id):
         raise HTTPException(404, "No profile with that id")
-    return [profile_json(p, service.schedule) for p in service.db.profiles()]
+    return _profiles_json(service)
+
+
+# --- The devices themselves -----------------------------------------------------
 
 
 @router.post("/blaster/restart")
@@ -383,6 +384,40 @@ async def post_mode(request: Request, body: ModeBody) -> dict[str, object]:
     except CommandFailed as exc:
         raise HTTPException(502, str(exc)) from exc
     return state_json(service.state)
+
+
+def _profiles_json(service: Service) -> list[dict[str, object]]:
+    """The saved nights as the app sees them. One place, so the three endpoints
+    that return this list cannot drift apart."""
+    return [profile_json(p, service.schedule) for p in service.db.profiles()]
+
+
+def _guard_night(service: Service, stages: list[SleepStage], speed: Mode) -> None:
+    """Every stage of a night, against the range of the mode it will really run in.
+
+    Resolved as a sequence rather than a stage at a time, because inside the 25 to
+    35 overlap a stage's mode depends on the temperature before it. modes_for's
+    docstring says this is the only way to ask, so both the route that edits a
+    night and the route that loads a saved one ask the same way.
+    """
+    for stage, mode in zip(stages, modes_for(stages, speed), strict=True):
+        _guard_temperature(service, stage.temp_c, mode)
+
+
+def _guard_room(service: Service, stages: list[SleepStage]) -> None:
+    """That the night is long enough to hold this many stages.
+
+    Checked before the schedule is built, because the schedule itself would
+    silently squeeze them to fit and break its own invariant that the durations
+    add up to exactly the night.
+    """
+    floor = MIN_STAGE_MINUTES * len(stages)
+    if minutes_between(service.schedule.bed_time, service.schedule.wake_time) < floor:
+        raise HTTPException(
+            422,
+            f"A night of {len(stages)} stages needs at least {floor} minutes "
+            f"between going to bed and waking up.",
+        )
 
 
 def _guard_temperature(service: Service, target_c: int, mode: Mode) -> None:

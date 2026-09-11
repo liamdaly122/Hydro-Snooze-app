@@ -203,8 +203,8 @@ export class MockApiClient implements ApiClient {
       name: 'Summer',
       cooling_speed: 'quiet',
       stages: [
-        { stage: 'deep', duration_minutes: 240, temp_c: 16, mode: 'quiet' },
-        { stage: 'rem', duration_minutes: 210, temp_c: 19, mode: 'quiet' },
+        { stage: 'deep', duration_minutes: 240, temp_c: 17, mode: 'quiet' },
+        { stage: 'rem', duration_minutes: 210, temp_c: 20, mode: 'quiet' },
         { stage: 'wake', duration_minutes: 30, temp_c: 26, mode: 'warming' },
       ],
       active: true,
@@ -224,9 +224,25 @@ export class MockApiClient implements ApiClient {
     },
   ]
 
+  /**
+   * Worked out rather than stored, the same way the service does it.
+   *
+   * This held `active` as a flag nothing recomputed, so editing a temperature on
+   * the home screen left a profile badged Running against numbers the screen
+   * visibly contradicted. The seed data is a demo of the feature, and it was
+   * demonstrating precisely the drift the design exists to prevent.
+   */
+  private isRunning(profile: Profile): boolean {
+    if (profile.cooling_speed !== this.schedule.cooling_speed) return false
+    return profile.stages.every((stage, i) => {
+      const mine = this.schedule.stages[i]
+      return mine && mine.stage === stage.stage && mine.temp_c === stage.temp_c
+    })
+  }
+
   async getProfiles(): Promise<Profile[]> {
     await sleep(120)
-    return this.profiles.map((p) => ({ ...p }))
+    return this.profiles.map((p) => ({ ...p, active: this.isRunning(p) }))
   }
 
   async saveProfile(name: string): Promise<Profile[]> {
@@ -235,6 +251,9 @@ export class MockApiClient implements ApiClient {
     const stages = this.schedule.stages.map((s) => ({ ...s }))
     if (existing) {
       existing.stages = stages
+      // The speed too. The real save_profile updates both columns, and leaving
+      // it behind meant a profile saved under turbo activated as quiet.
+      existing.cooling_speed = this.schedule.cooling_speed
     } else {
       this.profiles.push({
         id: Math.max(0, ...this.profiles.map((p) => p.id)) + 1,
@@ -252,9 +271,14 @@ export class MockApiClient implements ApiClient {
     await sleep(200)
     const wanted = this.profiles.find((p) => p.id === id)
     if (!wanted) return
-    this.schedule = { ...this.schedule, stages: wanted.stages.map((s) => ({ ...s })) }
-    for (const p of this.profiles) p.active = p.id === id
-    this.emit({ schedule: this.schedule })
+    // Through putSchedule, which mirrors what Schedule.__post_init__ does on the
+    // real service: refits the stages to the night, re-derives each stage's mode
+    // and rebuilds the preconditioning. Writing stages straight in skipped all
+    // three, and dropped cooling_speed entirely.
+    await this.putSchedule({
+      stages: wanted.stages.map((s) => ({ ...s })),
+      cooling_speed: wanted.cooling_speed,
+    })
   }
 
   async deleteProfile(id: number): Promise<Profile[]> {

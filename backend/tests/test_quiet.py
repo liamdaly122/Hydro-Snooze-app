@@ -34,7 +34,6 @@ from hydrosnooze.models import (
     Stage,
     quieter_mode,
 )
-from hydrosnooze.scheduler import Job
 from hydrosnooze.sequences import CommandFailed
 from hydrosnooze.service import MODE_DWELL, Service
 
@@ -418,10 +417,48 @@ async def test_the_blaster_is_restarted_before_the_bed_gets_ready(service):
 
 @pytest.mark.asyncio
 async def test_it_runs_once_a_night_like_every_other_job(service):
+    """Through due(), not through the marks. Asserting that mark() then
+    has_fired() agree is a round trip on a dict and passes for any job kind,
+    including one due() never returns at all."""
+    from hydrosnooze.scheduler import WAKE_BLASTER_BEFORE
+
+    service.schedule = Schedule(
+        wake_time=time(7, 30),
+        days_of_week=list(range(7)),
+        stages=[SleepStage(Stage.DEEP, 240, 26), SleepStage(Stage.REM, 240, 27)],
+    )
     plan = service.scheduler.plan_in_progress(service.schedule, service.clock.now())
-    job = Job("wake_blaster", plan)
-    service.scheduler.fired.mark(job)
-    assert service.scheduler.fired.has_fired(job)
+    starts = plan.precool_at or plan.bedtime_at
+    service.clock.jump_to(starts - WAKE_BLASTER_BEFORE + timedelta(minutes=1))
+
+    first = service.scheduler.due(service.schedule, service.clock.now())
+    assert first is not None and first.kind == "wake_blaster"
+    service.scheduler.fired.mark(first)
+
+    again = service.scheduler.due(service.schedule, service.clock.now())
+    assert again is None or again.kind != "wake_blaster", "offered twice in one night"
+
+
+@pytest.mark.asyncio
+async def test_it_never_fires_in_front_of_a_rehearsal(service):
+    """A rehearsal compresses the night into minutes, so its first press is
+    seconds away. Taking the board off the network then would sabotage the one
+    test of the thing this precaution protects."""
+    from hydrosnooze.models import rehearsal_plan
+
+    service.scheduler.rehearsal = rehearsal_plan(
+        service.schedule.stages,
+        service.schedule.cooling_speed,
+        now=service.clock.now(),
+        total_seconds=300,
+        bed_c=26.0,
+    )
+    for _ in range(4):
+        job = service.scheduler.due(service.schedule, service.clock.now())
+        assert job is None or job.kind != "wake_blaster"
+        if job is not None:
+            service.scheduler.fired.mark(job)
+        service.clock.advance(timedelta(seconds=20))
 
 
 @pytest.mark.asyncio

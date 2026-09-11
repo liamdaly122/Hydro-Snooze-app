@@ -743,15 +743,24 @@ class Profile:
     def matches(self, schedule: Schedule) -> bool:
         """Whether the schedule is still running exactly this.
 
-        Compared rather than remembered, so "active" can never be a flag left
-        behind by an edit. Durations count as well as temperatures: the same
-        numbers over a differently divided night is a different night.
+        Asked as "would loading me change anything?" rather than by comparing
+        stored minutes, and that is not a stylistic choice. A Schedule rescales
+        its stages in __post_init__ so they fill the night exactly, so a profile
+        saved from an eight hour night comes back as 240/210/30 and lands in a
+        nine hour night as 270/236/34. Comparing the numbers as saved made every
+        profile read as not running the moment the wake time moved, including
+        immediately after loading it, which is the one case that has to work.
+
+        Applying it to a copy and comparing the result has no such problem,
+        because the copy goes through exactly the rescaling activation does. The
+        proportions and the temperatures are what a profile really holds; the
+        minutes are what the night makes of them.
         """
         if self.cooling_speed is not schedule.cooling_speed:
             return False
-        mine = [(s.stage, s.duration_minutes, s.temp_c) for s in self.stages]
-        theirs = [(s.stage, s.duration_minutes, s.temp_c) for s in schedule.stages]
-        return mine == theirs
+        applied = replace(schedule, stages=list(self.stages))
+        shape = [(s.stage, s.duration_minutes, s.temp_c) for s in applied.stages]
+        return shape == [(s.stage, s.duration_minutes, s.temp_c) for s in schedule.stages]
 
 
 @dataclass

@@ -28,7 +28,12 @@ NOW = datetime(2026, 9, 11, 9, 0)
 
 @pytest.fixture
 def db():
-    return Database(":memory:")
+    # Closed, like the service fixture below. Database.close() flushes the
+    # pending power samples first, so skipping it also skips the clean shutdown
+    # path the rest of the suite exercises.
+    database = Database(":memory:")
+    yield database
+    database.close()
 
 
 @pytest.fixture
@@ -99,10 +104,15 @@ def test_saving_over_a_name_replaces_rather_than_duplicates(db, schedule):
     assert db.profiles()[0].stages[0].temp_c == 15
 
 
-def test_the_name_match_ignores_case(db, schedule):
+def test_the_name_match_ignores_case_and_keeps_the_spelling_you_typed(db, schedule):
+    """Matching is case-insensitive so "summer" overwrites "Summer" rather than
+    making a second one. The spelling that survives has to be the one just
+    typed, or the list redraws with the old one and reads as a failed rename."""
     db.save_profile("Summer", schedule, NOW)
-    db.save_profile("summer", schedule, NOW)
+    db.save_profile("SUMMER", schedule, NOW)
+
     assert len(db.profiles()) == 1
+    assert db.profiles()[0].name == "SUMMER"
 
 
 def test_they_come_back_in_a_stable_order(db, schedule):
@@ -173,3 +183,22 @@ def test_exactly_one_is_running_at_a_time(service):
     running = [p.name for p in service.db.profiles() if p.matches(service.schedule)]
     assert running == ["Summer"]
     assert winter.id != summer.id
+
+
+def test_a_profile_survives_the_night_getting_longer(db, schedule):
+    """The bug that made this feature useless the moment a wake time moved.
+
+    A Schedule rescales its stages to fill the night, so a profile saved from an
+    eight hour night lands in a nine hour night as different minutes. Comparing
+    the numbers as saved meant a profile read as not running immediately after
+    being loaded, which is the one case that has to work.
+    """
+    saved = db.save_profile("Summer", schedule, NOW)
+
+    longer = Schedule(wake_time=time(9, 0), bed_time=schedule.bed_time, stages=list(saved.stages))
+    assert longer.night_minutes != schedule.night_minutes, "the test needs a different night"
+    assert [s.duration_minutes for s in longer.stages] != [
+        s.duration_minutes for s in saved.stages
+    ], "and the stages really were rescaled"
+
+    assert saved.matches(longer), "loading it has to leave it reading as running"
