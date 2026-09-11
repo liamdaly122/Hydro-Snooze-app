@@ -1130,8 +1130,8 @@ class Service:
             )
         self._push_state()
 
-    def _learned_lead(self, mode: Mode, target_c: int) -> int | None:
-        return self.db.learned_lead_minutes(mode.value, target_c)
+    def _learned_lead(self, mode: Mode, target_c: int, gap_c: float) -> int | None:
+        return self.db.learned_lead_minutes(mode.value, target_c, gap_c)
 
     def _bed_now(self) -> float | None:
         """Where the bed is starting from, for working out the head start.

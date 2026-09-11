@@ -29,6 +29,20 @@ from .models import (
 #: an anecdote, and the estimate it would replace is at least consistent.
 MIN_RUNS_TO_LEARN = 3
 
+#: The least distance a run must have covered before it can teach a rate.
+#:
+#: A run that started half a degree from its target got there almost at once,
+#: and two minutes divided by half a degree is not a rate. It is noise with a
+#: unit attached, and it is what sent the pre-heat out at 21:58.
+MIN_LEARNABLE_GAP_C = 2.0
+
+#: Fixed cost on top of a learned rate: the presses themselves, and the unit
+#: getting going before any water moves.
+#:
+#: Smaller than the estimate's fifteen, because that fifteen is also covering
+#: the estimate being a guess. A measured rate does not need padding for that.
+LEARNED_BASE_MINUTES = 5
+
 
 class Sample(NamedTuple):
     """One sampling beat: what the unit drew and what the bed was doing.
@@ -601,23 +615,42 @@ class Database:
         rows = [r for r in self.precondition_runs(5) if r.at >= start]
         return rows[0] if rows else None
 
-    def learned_lead_minutes(self, mode: str, target_c: int, *, within_c: int = 3) -> int | None:
-        """How long this bed has really taken to reach about this temperature.
+    def learned_lead_minutes(
+        self, mode: str, target_c: int, gap_c: float, *, within_c: int = 3
+    ) -> int | None:
+        """How long this bed needs to close a gap of this size, near this target.
 
-        Averaged over runs that actually got there, at a target within a few
-        degrees, most recent first. None until there is enough to be worth
-        trusting, because one night is an anecdote and the estimate it would
-        replace is at least consistent.
+        A **rate**, not a duration, and that distinction is the whole of this
+        method. It used to average the raw minutes of past runs at a similar
+        target and hand that back whatever tonight's gap was.
+
+        On 11 September that put Liam's pre-heat at 21:58 for a 22:00 bedtime,
+        aiming to take the bed from 20C to 28C in two minutes. He had spent the
+        previous nights with the bed already warm, so its runs had half a degree
+        to cover and reached their target almost at once. Three of those and it
+        had "learned" that this bed warms in two minutes, as a fact about the
+        bed rather than about the half degree. The estimate it replaced would
+        have said twenty-three.
+
+        So only runs that actually travelled teach anything, and what they teach
+        is minutes per degree, applied to the distance tonight really has to go.
         """
         rows = self._db.execute(
-            "SELECT seconds FROM precondition_runs "
+            "SELECT seconds, start_c, end_c FROM precondition_runs "
             "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= ? "
+            "AND start_c IS NOT NULL AND end_c IS NOT NULL "
             "ORDER BY id DESC LIMIT 10",
             (mode, target_c, within_c),
         ).fetchall()
-        if len(rows) < MIN_RUNS_TO_LEARN:
+
+        rates = [
+            r["seconds"] / 60 / travelled
+            for r in rows
+            if (travelled := abs(r["end_c"] - r["start_c"])) >= MIN_LEARNABLE_GAP_C
+        ]
+        if len(rates) < MIN_RUNS_TO_LEARN:
             return None
-        return max(1, round(sum(r["seconds"] for r in rows) / len(rows) / 60))
+        return max(1, round(LEARNED_BASE_MINUTES + abs(gap_c) * (sum(rates) / len(rates))))
 
     def precondition_runs(self, limit: int = 20) -> list[PreconditionRow]:
         rows = self._db.execute(

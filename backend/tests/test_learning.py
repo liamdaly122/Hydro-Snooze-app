@@ -40,37 +40,70 @@ def db():
     return Database(":memory:")
 
 
+def ran(db, *, target=17, mode="turbo", minutes=30, frm=27.0, to=17.0, reached=True):
+    """One finished run: how long it took and how far it actually went."""
+    db.record_precondition(
+        NOW, mode, target, minutes * 60, reached, start_c=frm, end_c=to
+    )
+
+
 def test_one_night_is_not_enough_to_learn_from(db):
     """An anecdote should not replace a consistent estimate."""
-    db.record_precondition(NOW, "turbo", 17, 1800, True)
-    assert db.learned_lead_minutes("turbo", 17) is None
+    ran(db)
+    assert db.learned_lead_minutes("turbo", 17, 10.0) is None
 
 
-def test_a_few_nights_give_a_real_number(db):
-    for seconds in (1800, 2100, 1500):
-        db.record_precondition(NOW, "turbo", 17, seconds, True)
-    assert db.learned_lead_minutes("turbo", 17) == 30
+def test_a_few_nights_give_a_rate_and_apply_it_to_tonight(db):
+    """Thirty minutes to cover ten degrees is three minutes a degree. What that
+    is worth tonight depends entirely on how far tonight has to go."""
+    for _ in range(MIN_RUNS_TO_LEARN):
+        ran(db, minutes=30, frm=27.0, to=17.0)
+
+    assert db.learned_lead_minutes("turbo", 17, 10.0) == 35, "the same trip again"
+    assert db.learned_lead_minutes("turbo", 17, 2.0) == 11, "a shorter one costs less"
+    assert db.learned_lead_minutes("turbo", 17, 20.0) == 65, "and a longer one more"
+
+
+def test_a_run_that_barely_moved_teaches_nothing(db):
+    """The bug of 11 September. Liam had spent a week with the bed already warm,
+    so its runs had half a degree to cover and got there almost at once. Three of
+    those taught it that this bed warms in two minutes, as a fact about the bed
+    rather than about the half degree, and the pre-heat went out at 21:58 for a
+    22:00 bedtime aiming to move it eight degrees."""
+    for _ in range(MIN_RUNS_TO_LEARN + 2):
+        ran(db, mode="warming", target=28, minutes=2, frm=27.6, to=28.1)
+
+    assert db.learned_lead_minutes("warming", 28, 8.0) is None, "two minutes is not a rate"
 
 
 def test_runs_that_never_got_there_do_not_count(db):
     """A night the unit could not reach the target says nothing about how long
     reaching it takes."""
     for _ in range(MIN_RUNS_TO_LEARN + 1):
-        db.record_precondition(NOW, "turbo", 17, 9999, False)
-    assert db.learned_lead_minutes("turbo", 17) is None
+        ran(db, minutes=166, reached=False)
+    assert db.learned_lead_minutes("turbo", 17, 10.0) is None
+
+
+def test_a_run_with_no_probe_readings_cannot_teach_a_rate(db):
+    """Distance is what makes a duration mean anything, and a run decided off the
+    plug alone never recorded one. The estimate is better than a number that
+    silently assumes tonight is the same trip as last night."""
+    for _ in range(MIN_RUNS_TO_LEARN + 1):
+        db.record_precondition(NOW, "turbo", 17, 1800, True)
+    assert db.learned_lead_minutes("turbo", 17, 10.0) is None
 
 
 def test_each_mode_is_learned_separately(db):
     for _ in range(MIN_RUNS_TO_LEARN):
-        db.record_precondition(NOW, "turbo", 17, 1800, True)
-    assert db.learned_lead_minutes("warming", 17) is None
+        ran(db)
+    assert db.learned_lead_minutes("warming", 17, 10.0) is None
 
 
 def test_a_distant_target_is_not_evidence_for_this_one(db):
     for _ in range(MIN_RUNS_TO_LEARN):
-        db.record_precondition(NOW, "turbo", 17, 1800, True)
-    assert db.learned_lead_minutes("turbo", 30) is None
-    assert db.learned_lead_minutes("turbo", 18) == 30, "nearby targets should still count"
+        ran(db)
+    assert db.learned_lead_minutes("turbo", 30, 10.0) is None
+    assert db.learned_lead_minutes("turbo", 18, 10.0) == 35, "nearby targets still count"
 
 
 # --- What the plan does with it -------------------------------------------------
@@ -83,15 +116,15 @@ def test_without_history_it_estimates_and_says_so():
 
 
 def test_with_history_it_uses_the_measurement_and_says_so():
-    pre = preconditioning_for(17, Mode.QUIET, learned=lambda mode, target: 42)
+    pre = preconditioning_for(17, Mode.QUIET, learned=lambda mode, target, gap: 42)
     assert pre.lead_minutes == 42
-    assert "Measured" in pre.reason
+    assert "measured on recent nights" in pre.reason
 
 
 def test_a_measured_lead_still_respects_the_cap():
     """Something has gone wrong if it measures four hours, and a lead longer than
     the cap would have the unit running most of the evening."""
-    pre = preconditioning_for(17, Mode.QUIET, learned=lambda mode, target: 10_000)
+    pre = preconditioning_for(17, Mode.QUIET, learned=lambda mode, target, gap: 10_000)
     assert pre.lead_minutes < 10_000
 
 
@@ -100,7 +133,7 @@ def test_the_lookup_is_asked_about_the_mode_that_was_chosen():
     A warming night must not be timed with cooling's history."""
     asked: list[Mode] = []
 
-    def learned(mode: Mode, target: int) -> int | None:
+    def learned(mode: Mode, target: int, gap: float) -> int | None:
         asked.append(mode)
         return None
 

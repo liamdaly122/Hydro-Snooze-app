@@ -350,7 +350,10 @@ class Preconditioning:
 #: Looks up how long this bed has really taken to reach a temperature in a mode.
 #: A function rather than a value, because the mode is decided inside and the
 #: answer depends on it.
-LearnedLead = Callable[[Mode, int], "int | None"]
+#: Asked "how long to move this bed `gap_c` degrees to about `target_c`, in this
+#: mode". The gap is the argument that was missing: without it the answer was a
+#: duration borrowed from a night that had a completely different distance to go.
+LearnedLead = Callable[[Mode, int, float], "int | None"]
 
 
 def preconditioning_for(
@@ -409,12 +412,13 @@ def preconditioning_for(
     # Measured beats estimated. The probes watch the gap between the two hoses
     # close, and the plug watches the draw fall, so after a few nights there is a
     # real number for this bed in this room rather than a rate I picked.
-    measured = learned(mode, first_temp_c) if learned else None
+    measured = learned(mode, first_temp_c, gap) if learned else None
     if measured is not None:
         return Preconditioning(
             mode,
             min(measured, PRECONDITION_MAX_MINUTES),
-            f"{reason} Measured at about {measured} minutes on recent nights.",
+            f"{reason} About {measured} minutes, at the rate this bed has "
+            f"measured on recent nights.",
         )
 
     low, high = range_for(mode)
