@@ -237,8 +237,8 @@ def test_getting_ready_earns_one_only_when_it_actually_arrived(plan):
 
 
 def test_a_missed_stage_is_named(plan):
-    night = autopilot.build(plan, [], [], {"stage:deep", "stage:rem"}, None)
-    assert night.stages_landed == 2
+    night = autopilot.build(plan, [], [], {"stage:drift", "stage:deep", "stage:rem"}, None)
+    assert night.stages_landed == 3
     assert night.missed == ["Wake"]
 
 
@@ -380,7 +380,8 @@ def test_a_missed_stage_is_not_counted_among_the_ones_that_landed(plan):
     from hydrosnooze.scheduler import FiredMarks, Job
 
     marks = FiredMarks()
-    deep, rem, wake = (Job("stage", plan, step) for step in plan.steps)
+    drift, deep, rem, wake = (Job("stage", plan, step) for step in plan.steps)
+    marks.mark(drift)
     marks.mark(deep, ran=False)
     marks.mark(rem)
     marks.mark(wake)
@@ -388,8 +389,8 @@ def test_a_missed_stage_is_not_counted_among_the_ones_that_landed(plan):
     night = autopilot.build(plan, [], [], marks.keys_for(plan), None)
 
     assert night.missed == ["Deep"]
-    assert night.stages_landed == 2
-    assert night.stages_total == 3
+    assert night.stages_landed == 3
+    assert night.stages_total == 4
 
 
 def test_a_stage_given_up_on_is_still_not_offered_again(plan):

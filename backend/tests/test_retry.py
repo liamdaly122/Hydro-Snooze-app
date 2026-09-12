@@ -15,7 +15,7 @@ import pytest
 
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
-from hydrosnooze.models import Schedule
+from hydrosnooze.models import Schedule, Stage
 from hydrosnooze.scheduler import STAGE_GRACE
 from hydrosnooze.sequences import CommandFailed
 from hydrosnooze.service import RETRY_AFTER, Service
@@ -95,7 +95,10 @@ async def test_it_stops_once_the_stage_is_mostly_over(service):
     which is what STAGE_GRACE has always meant. Retrying does not change that."""
     counter = break_the_blaster(service, failures=99)
     plan = service.schedule.plan_for(datetime(2026, 9, 9).date())
-    start = plan.steps[0].starts_at
+    # Deep rather than the first stage, because this runs past the grace window
+    # and Drift is shorter than that. Retries stopping and the next boundary
+    # arriving look identical from the call count.
+    start = next(s for s in plan.steps if s.stage is Stage.DEEP).starts_at
     service.clock.jump_to(start)
 
     await run_until(service, start + STAGE_GRACE + timedelta(minutes=5))
@@ -112,7 +115,7 @@ async def test_a_missed_step_is_still_reported(service):
     single most important thing for the log to say."""
     break_the_blaster(service, failures=99)
     plan = service.schedule.plan_for(datetime(2026, 9, 9).date())
-    start = plan.steps[0].starts_at
+    start = next(s for s in plan.steps if s.stage is Stage.DEEP).starts_at
     service.clock.jump_to(start)
 
     await run_until(service, start + STAGE_GRACE + timedelta(minutes=5))

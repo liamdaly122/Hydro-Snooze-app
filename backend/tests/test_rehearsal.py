@@ -14,6 +14,7 @@ import pytest
 
 from hydrosnooze.models import (
     MIN_REHEARSAL_STAGE_S,
+    STAGE_ORDER,
     Mode,
     Schedule,
     SleepStage,
@@ -41,7 +42,7 @@ def plan(schedule: Schedule, seconds: int = 300):
 
 def test_it_rehearses_every_stage_in_order(schedule):
     steps = plan(schedule).steps
-    assert [s.stage for s in steps] == [Stage.DEEP, Stage.REM, Stage.WAKE]
+    assert [s.stage for s in steps] == list(STAGE_ORDER)
 
 
 def test_the_temperatures_are_tonight_s_own(schedule):
@@ -77,15 +78,16 @@ def test_a_stage_is_never_shorter_than_its_own_presses(schedule):
 
 def test_asking_for_something_too_short_stretches_rather_than_overlaps(schedule):
     p = plan(schedule, seconds=1)
-    assert (p.wake_at - p.bedtime_at).total_seconds() >= MIN_REHEARSAL_STAGE_S * 3
+    assert (p.wake_at - p.bedtime_at).total_seconds() >= MIN_REHEARSAL_STAGE_S * len(
+        STAGE_ORDER
+    )
 
 
 def test_the_proportions_of_the_real_night_are_kept(schedule):
     """Deep is eight times Wake tonight, so it should be roughly eight times in
     the rehearsal too, not an equal third."""
-    steps = plan(schedule, seconds=900).steps
-    deep, wake = (steps[0].ends_at - steps[0].starts_at), (steps[2].ends_at - steps[2].starts_at)
-    assert deep > wake * 4
+    steps = {s.stage: s.ends_at - s.starts_at for s in plan(schedule, seconds=900).steps}
+    assert steps[Stage.DEEP] > steps[Stage.WAKE] * 4
 
 
 def test_preconditioning_still_runs_and_still_decides_for_itself(schedule):
@@ -134,7 +136,7 @@ def test_every_job_of_a_rehearsal_fires_in_order(schedule):
             fired.append(job.key)
         now += timedelta(seconds=1)
 
-    assert fired == ["precool", "stage:deep", "stage:rem", "stage:wake", "power_off"]
+    assert fired == ["precool", *(f"stage:{s.value}" for s in STAGE_ORDER), "power_off"]
 
 
 def test_nothing_is_missed_during_a_rehearsal(schedule):

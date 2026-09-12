@@ -12,15 +12,27 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 
-from hydrosnooze.models import Mode, Schedule, SleepStage, Stage
+from hydrosnooze.models import STAGE_ORDER, Mode, Schedule, SleepStage, Stage
 from hydrosnooze.scheduler import REPORT_AFTER, Job, Scheduler
 
 
 @pytest.fixture
 def schedule() -> Schedule:
-    # Deep 4h at 17C, REM 3h30 at 20C, Wake 30m at 26C, finishing at 06:30.
-    # So bedtime is 22:30 and pre-conditioning starts at 22:00.
+    # The default night: Drift 35m, then Deep, REM and Wake dividing what is left
+    # of the eight hours. Bedtime 22:30, alarm 06:30, pre-conditioning before it.
     return Schedule(wake_time=time(6, 30), days_of_week=[0, 1, 2, 3, 4])
+
+
+def boundary(schedule: Schedule, stage: Stage, late_by: int = 0) -> datetime:
+    """When a stage really starts, rather than a time typed into a test.
+
+    The boundaries move whenever the shape of a night changes, and a test holding
+    02:30 in its hand stops testing a boundary the moment they do. Four of these
+    went on passing for the wrong reason when Drift went in front of Deep.
+    """
+    plan = schedule.plan_for(date(2026, 9, 8))
+    step = next(s for s in plan.steps if s.stage is stage)
+    return step.starts_at + timedelta(minutes=late_by)
 
 
 def _fire(sched: Scheduler, schedule: Schedule, when: datetime):
@@ -49,17 +61,11 @@ def test_every_stage_fires_at_its_boundary(schedule):
     plan = schedule.plan_for(date(2026, 9, 8))
     assert plan.precool_at is not None
     fired = []
-    for when in [
-        plan.precool_at,
-        datetime(2026, 9, 7, 22, 30),
-        datetime(2026, 9, 8, 2, 30),
-        datetime(2026, 9, 8, 6, 0),
-        datetime(2026, 9, 8, 6, 30),
-    ]:
+    for when in [plan.precool_at, *(s.starts_at for s in plan.steps), plan.wake_at]:
         job = _fire(sched, schedule, when)
         assert job is not None, when
         fired.append(job.step.stage if job.step else job.kind)
-    assert fired == ["precool", Stage.DEEP, Stage.REM, Stage.WAKE, "power_off"]
+    assert fired == ["precool", *STAGE_ORDER, "power_off"]
 
 
 def test_a_job_only_fires_once(schedule):
@@ -69,9 +75,9 @@ def test_a_job_only_fires_once(schedule):
 
 
 def test_a_late_start_jumps_to_the_stage_that_should_be_running(schedule):
-    # Booting at 3am should go straight to REM, not walk through Deep first and
-    # leave the bed four degrees too cold.
-    job = Scheduler().due(schedule, datetime(2026, 9, 8, 2, 35))
+    # Booting mid-night should go straight to the stage that should be running,
+    # not walk through Deep first and leave the bed four degrees too cold.
+    job = Scheduler().due(schedule, boundary(schedule, Stage.REM, 5))
     assert job is not None and job.step is not None
     assert job.step.stage is Stage.REM
 
@@ -79,12 +85,12 @@ def test_a_late_start_jumps_to_the_stage_that_should_be_running(schedule):
 def test_a_stage_is_not_set_once_it_is_nearly_over(schedule):
     # Twenty minutes late is still worth doing. An hour late is not: the stage is
     # mostly gone and changing the bed then is worse than leaving it.
-    assert Scheduler().due(schedule, datetime(2026, 9, 8, 3, 40)) is None
+    assert Scheduler().due(schedule, boundary(schedule, Stage.REM, 70)) is None
 
 
 def test_a_missed_stage_is_reported(schedule):
-    missed = Scheduler().missed(schedule, datetime(2026, 9, 8, 3, 40))
-    assert [m.step.stage for m in missed if m.step] == [Stage.DEEP, Stage.REM]
+    missed = Scheduler().missed(schedule, boundary(schedule, Stage.REM, 70))
+    assert [m.step.stage for m in missed if m.step] == [Stage.DRIFT, Stage.DEEP, Stage.REM]
 
 
 def test_powering_off_is_not_optional(schedule):
@@ -137,7 +143,7 @@ def test_saturday_night_is_skipped_when_sunday_is_not_selected(schedule):
 def test_sunday_evening_starts_mondays_night(schedule):
     job = Scheduler().due(schedule, datetime(2026, 9, 6, 22, 30))
     assert job is not None and job.step is not None
-    assert job.step.stage is Stage.DEEP
+    assert job.step.stage is Stage.DRIFT, "bedtime is where the night starts"
     assert job.plan.wake_at == datetime(2026, 9, 7, 6, 30)
 
 
@@ -200,7 +206,7 @@ def test_switching_it_off_mid_night_cancels_what_is_still_to_come(schedule):
     the unit off is the promise underneath it."""
     sched = Scheduler()
     # The REM boundary, inside its grace window, so a stage really is due.
-    rem = datetime(2026, 9, 8, 2, 30)
+    rem = boundary(schedule, Stage.REM)
 
     assert sched.due(schedule, rem).kind == "stage", "the test needs a live boundary"
     assert sched.due(off(schedule), rem) is None

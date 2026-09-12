@@ -22,7 +22,16 @@ import pytest
 
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
-from hydrosnooze.models import NUDGE_LIMIT_C, Mode, Schedule, SleepStage, Stage, Tonight
+from hydrosnooze.models import (
+    DRIFT_MINUTES,
+    NUDGE_LIMIT_C,
+    STAGE_ORDER,
+    Mode,
+    Schedule,
+    SleepStage,
+    Stage,
+    Tonight,
+)
 from hydrosnooze.service import Service
 
 # A Saturday evening, before a Sunday morning alarm.
@@ -40,6 +49,7 @@ def service(tmp_path):
         bed_time=time(22, 30),
         days_of_week=[0, 1, 2, 3, 4, 5, 6],
         stages=[
+            SleepStage(Stage.DRIFT, DRIFT_MINUTES, 19),
             SleepStage(Stage.DEEP, 240, 19),
             SleepStage(Stage.REM, 210, 22),
             SleepStage(Stage.WAKE, 60, 26),
@@ -62,15 +72,15 @@ def running(service):
 
 
 async def test_with_nothing_set_tonight_is_just_the_routine(service):
-    assert running(service) == usual(service) == [19, 22, 26]
+    assert running(service) == usual(service) == [19, 19, 22, 26]
     assert service.scheduler.tonight is None
 
 
 async def test_a_stage_set_for_tonight_leaves_the_routine_alone(service):
     service.set_stage_tonight(Stage.DEEP, 17)
 
-    assert running(service) == [17, 22, 26]
-    assert usual(service) == [19, 22, 26], "next week is unchanged"
+    assert running(service) == [19, 17, 22, 26]
+    assert usual(service) == [19, 19, 22, 26], "next week is unchanged"
 
 
 async def test_it_expires_by_the_calendar_rather_than_by_tidying_up(service):
@@ -89,7 +99,7 @@ async def test_it_survives_a_restart(service, tmp_path):
     again = Service(Settings(db_path=str(tmp_path / "s.db")), clock=VirtualClock(NOW), echo=False)
     again.schedule = service.schedule
     again.load_tonight()
-    assert [s.temp_c for s in again.tonight_now().stages] == [19, 24, 26]
+    assert [s.temp_c for s in again.tonight_now().stages] == [19, 19, 24, 26]
     again.db.close()
 
 
@@ -160,7 +170,7 @@ async def test_sleeping_in_stretches_the_stages_rather_than_dropping_one(service
     after = sum(s.duration_minutes for s in service.tonight_now().stages)
 
     assert after == before + 90
-    assert len(service.tonight_now().stages) == 3
+    assert len(service.tonight_now().stages) == len(STAGE_ORDER)
 
 
 async def test_going_to_bed_early_brings_the_preparation_forward(service):
@@ -209,17 +219,17 @@ async def test_clearing_it_puts_the_night_back_to_the_routine(service):
 
     service.clear_tonight()
 
-    assert running(service) == [19, 22, 26]
+    assert running(service) == [19, 19, 22, 26]
     assert service.tonight_now().wake_time == time(7, 30)
     assert service.db.load_tonight(TONIGHT) is None
 
 
 async def test_saving_it_as_a_preference_is_the_deliberate_one(service):
     service.set_stage_tonight(Stage.DEEP, 17)
-    assert usual(service) == [19, 22, 26], "not yet"
+    assert usual(service) == [19, 19, 22, 26], "not yet"
 
     service._adopt_into_running_stage(Stage.DEEP, 17)
-    assert usual(service) == [17, 22, 26], "now"
+    assert usual(service) == [19, 17, 22, 26], "now"
 
 
 # --- Which controls make sense right now ------------------------------------------

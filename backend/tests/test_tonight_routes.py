@@ -69,13 +69,18 @@ def test_a_stage_for_tonight_answers_with_the_night_it_made(client):
     r = client.post("/api/tonight/stage", json={"stage": "deep", "temp_c": 17})
 
     assert r.status_code == 200, r.text
-    assert temps(r.json()) == [17, 22, 26]
+    assert temps(r.json()) == [19, 17, 22, 26]
     assert r.json()["stages_changed"] is True
 
 
 def test_the_saved_routine_is_not_touched(client):
     client.post("/api/tonight/stage", json={"stage": "deep", "temp_c": 17})
-    assert [s["temp_c"] for s in client.get("/api/schedule").json()["stages"]] == [19, 22, 26]
+    assert [s["temp_c"] for s in client.get("/api/schedule").json()["stages"]] == [
+        19,
+        19,
+        22,
+        26,
+    ]
 
 
 def test_a_temperature_past_the_cap_is_refused_in_words(client):
@@ -95,7 +100,7 @@ def test_a_stage_is_judged_in_the_night_it_sits_in(client):
     r = client.post("/api/tonight/stage", json={"stage": "wake", "temp_c": 40})
 
     assert r.status_code == 200, r.text
-    assert temps(r.json()) == [19, 22, 40]
+    assert temps(r.json()) == [19, 19, 22, 40]
 
 
 def test_sleeping_in_moves_the_alarm_and_lengthens_the_night(client):
@@ -133,7 +138,7 @@ def test_clearing_puts_the_night_back(client):
 
     body = client.delete("/api/tonight").json()
 
-    assert temps(body) == [19, 22, 26]
+    assert temps(body) == [19, 19, 22, 26]
     assert body["running"]["wake_time"] == "07:30"
     assert body["changed"] is False
 
@@ -144,5 +149,10 @@ def test_keeping_it_is_the_only_one_that_touches_the_routine(client):
     kept = client.post("/api/tonight/keep")
 
     assert kept.status_code == 200, kept.text
-    assert [s["temp_c"] for s in kept.json()["stages"]] == [17, 22, 26]
-    assert [s["temp_c"] for s in client.get("/api/schedule").json()["stages"]] == [17, 22, 26]
+    assert [s["temp_c"] for s in kept.json()["stages"]] == [19, 17, 22, 26]
+    assert [s["temp_c"] for s in client.get("/api/schedule").json()["stages"]] == [
+        19,
+        17,
+        22,
+        26,
+    ]

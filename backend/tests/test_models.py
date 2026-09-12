@@ -12,8 +12,10 @@ from datetime import date, datetime, time, timedelta
 import pytest
 
 from hydrosnooze.models import (
+    DRIFT_MINUTES,
     MIN_STAGE_MINUTES,
     MINUTES_IN_A_DAY,
+    STAGE_ORDER,
     Activity,
     DeviceState,
     Mode,
@@ -46,7 +48,7 @@ def test_the_night_is_as_long_as_its_stages():
 
 def test_stages_run_in_order_and_finish_at_the_wake_time():
     plan = plan_for_wake(date(2026, 9, 8), time(6, 30), default_stages())
-    assert [s.stage for s in plan.steps] == [Stage.DEEP, Stage.REM, Stage.WAKE]
+    assert [s.stage for s in plan.steps] == [Stage.DRIFT, Stage.DEEP, Stage.REM, Stage.WAKE]
     assert plan.steps[0].starts_at == plan.bedtime_at
     assert plan.steps[-1].ends_at == plan.wake_at
     # Each one picks up where the last left off, with no gaps.
@@ -253,29 +255,48 @@ def test_moving_bedtime_takes_the_time_off_in_proportion():
     before = Schedule(bed_time=time(22, 30), wake_time=time(6, 30))
     after = replace(before, bed_time=time(23, 30))
 
-    assert [s.duration_minutes for s in before.stages] == [240, 210, 30]
+    assert [s.duration_minutes for s in before.stages] == [35, 222, 195, 28]
     assert sum(s.duration_minutes for s in after.stages) == 420
-    assert after.stages[0].duration_minutes > after.stages[1].duration_minutes
+    assert after.stages[1].duration_minutes > after.stages[2].duration_minutes
     assert all(s.duration_minutes >= MIN_STAGE_MINUTES for s in after.stages)
+
+
+def test_the_hour_comes_off_the_sleeping_stages_and_not_off_drift():
+    """Falling asleep takes as long as it takes. A night an hour shorter does not
+    make it quicker, so Drift is the one stage a late bedtime does not touch."""
+    before = Schedule(bed_time=time(22, 30), wake_time=time(6, 30))
+    after = replace(before, bed_time=time(23, 30))
+
+    assert before.stages[0].duration_minutes == DRIFT_MINUTES
+    assert after.stages[0].duration_minutes == DRIFT_MINUTES
+    assert sum(s.duration_minutes for s in after.stages[1:]) == 420 - DRIFT_MINUTES
+
+
+def test_a_night_too_short_for_a_held_drift_shares_everything_instead():
+    """A night with no room for Drift plus a floor under the other three is not a
+    night anybody means. Scaling all four is a better answer than one at nought."""
+    stages = fit_stages(default_stages(), 70)
+    assert all(s.duration_minutes >= MIN_STAGE_MINUTES for s in stages)
+    assert stages[0].duration_minutes < DRIFT_MINUTES
 
 
 def test_the_parts_add_up_to_the_whole_exactly():
     """Rounding each stage on its own loses a minute or gains one. Over a night
     that is invisible, and it still means bedtime is not when it says it is."""
-    for minutes in range(45, 24 * 60, 7):
+    for minutes in range(MIN_STAGE_MINUTES * len(STAGE_ORDER), 24 * 60, 7):
         stages = fit_stages(default_stages(), minutes)
         assert sum(s.duration_minutes for s in stages) == minutes, minutes
 
 
 def test_no_stage_is_ever_squeezed_out_of_existence():
-    stages = fit_stages(default_stages(), MIN_STAGE_MINUTES * 3)
-    assert [s.duration_minutes for s in stages] == [15, 15, 15]
+    stages = fit_stages(default_stages(), MIN_STAGE_MINUTES * 4)
+    assert [s.duration_minutes for s in stages] == [15, 15, 15, 15]
 
 
 def test_a_short_night_keeps_its_temperatures():
     stages = fit_stages(default_stages(), 60)
-    assert [s.temp_c for s in stages] == [17, 20, 26]
-    assert [s.stage for s in stages] == [Stage.DEEP, Stage.REM, Stage.WAKE]
+    assert [s.temp_c for s in stages] == [18, 17, 20, 26]
+    assert [s.stage for s in stages] == list(STAGE_ORDER)
 
 
 def test_bedtime_in_the_plan_is_the_bedtime_that_was_set():

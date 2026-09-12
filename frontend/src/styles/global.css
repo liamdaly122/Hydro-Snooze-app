@@ -313,6 +313,11 @@ button:disabled {
   color: var(--text-label);
   display: inline-flex;
   align-items: center;
+  /* The flex box fills the row, so its contents need centring in their own
+     right. `text-align: center` off .stage__value has no say once this is a
+     flex container, which left the mark and the words packed against the minus
+     button while every number that ever sits here is dead centre. */
+  justify-content: center;
 }
 
 .stage__unit {

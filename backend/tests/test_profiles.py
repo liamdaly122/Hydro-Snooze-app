@@ -20,7 +20,7 @@ import pytest
 
 from hydrosnooze.config import Settings
 from hydrosnooze.db import Database
-from hydrosnooze.models import Mode, Schedule, SleepStage, Stage
+from hydrosnooze.models import DRIFT_MINUTES, Mode, Schedule, SleepStage, Stage
 from hydrosnooze.service import Service
 
 NOW = datetime(2026, 9, 11, 9, 0)
@@ -41,6 +41,7 @@ def schedule():
     return Schedule(
         wake_time=time(7, 30),
         stages=[
+            SleepStage(Stage.DRIFT, DRIFT_MINUTES, 19),
             SleepStage(Stage.DEEP, 240, 17),
             SleepStage(Stage.REM, 210, 20),
             SleepStage(Stage.WAKE, 30, 26),
@@ -48,10 +49,14 @@ def schedule():
     )
 
 
-def night(wake, *temps, durations=(240, 210, 30)):
+def night(wake, *temps, durations=(240, 210, 30), drift=19):
+    """A night as stages. Drift is prepended rather than passed in, because every
+    test here is about the three that follow it and about whether two nights are
+    the same night."""
     return Schedule(
         wake_time=wake,
-        stages=[
+        stages=[SleepStage(Stage.DRIFT, DRIFT_MINUTES, drift)]
+        + [
             SleepStage(stage, minutes, temp)
             for stage, minutes, temp in zip(
                 (Stage.DEEP, Stage.REM, Stage.WAKE), durations, temps, strict=True
@@ -63,7 +68,7 @@ def night(wake, *temps, durations=(240, 210, 30)):
 def test_a_saved_night_comes_back_as_it_went_in(db, schedule):
     saved = db.save_profile("Summer", schedule, NOW)
     assert saved.name == "Summer"
-    assert [s.temp_c for s in saved.stages] == [17, 20, 26]
+    assert [s.temp_c for s in saved.stages] == [19, 17, 20, 26]
     # Against the schedule rather than against what was typed above: a Schedule
     # rescales its stages to fill the night exactly, so the schedule's durations
     # are the real ones and those are what a snapshot has to preserve.
@@ -101,7 +106,8 @@ def test_saving_over_a_name_replaces_rather_than_duplicates(db, schedule):
     db.save_profile("Summer", night(schedule.wake_time, 15, 20, 26), NOW)
 
     assert len(db.profiles()) == 1
-    assert db.profiles()[0].stages[0].temp_c == 15
+    deep = next(s for s in db.profiles()[0].stages if s.stage is Stage.DEEP)
+    assert deep.temp_c == 15
 
 
 def test_the_name_match_ignores_case_and_keeps_the_spelling_you_typed(db, schedule):

@@ -60,10 +60,14 @@ export const WARMING_FLOOR_C = 25
  *
  * Deep sleep is concentrated in the first third and REM lengthens through the
  * second half, so the order is chronological rather than alphabetical.
+ *
+ * Drift is the half hour before any of that: falling asleep is helped by a
+ * slightly warmer surface and deep sleep by a cooler one, and with Deep starting
+ * the moment the night did, one number had to serve both.
  */
-export type Stage = 'deep' | 'rem' | 'wake'
+export type Stage = 'drift' | 'deep' | 'rem' | 'wake'
 
-export const STAGE_ORDER: Stage[] = ['deep', 'rem', 'wake']
+export const STAGE_ORDER: Stage[] = ['drift', 'deep', 'rem', 'wake']
 
 /**
  * No stage is allowed to disappear, and this is also the step a boundary moves
@@ -73,10 +77,18 @@ export const STAGE_ORDER: Stage[] = ['deep', 'rem', 'wake']
 export const MIN_STAGE_MINUTES = 15
 
 export const STAGE_LABEL: Record<Stage, string> = {
+  drift: 'Drift',
   deep: 'Deep',
   rem: 'REM',
   wake: 'Wake',
 }
+
+/**
+ * Drift holds its length rather than taking a share of the night, so a later
+ * bedtime comes off the three that follow it. Mirrors HOLDS_ITS_LENGTH in
+ * backend/hydrosnooze/models.py.
+ */
+export const HOLDS_ITS_LENGTH: Stage[] = ['drift']
 
 export interface SleepStage {
   stage: Stage

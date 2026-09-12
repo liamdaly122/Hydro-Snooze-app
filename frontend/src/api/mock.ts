@@ -65,13 +65,15 @@ export class MockApiClient implements ApiClient {
     bed_time: '22:30',
     night_minutes: 480,
     stages: [
-      { stage: 'deep', duration_minutes: 240, temp_c: 17, mode: 'quiet' },
-      { stage: 'rem', duration_minutes: 210, temp_c: 20, mode: 'quiet' },
+      // Thirty five minutes to fall asleep on, a touch warmer than Deep.
+      { stage: 'drift', duration_minutes: 35, temp_c: 18, mode: 'quiet' },
+      { stage: 'deep', duration_minutes: 222, temp_c: 17, mode: 'quiet' },
+      { stage: 'rem', duration_minutes: 195, temp_c: 20, mode: 'quiet' },
       // The one the unit's own scheduler made impossible.
-      { stage: 'wake', duration_minutes: 30, temp_c: 26, mode: 'warming' },
+      { stage: 'wake', duration_minutes: 28, temp_c: 26, mode: 'warming' },
     ],
     cooling_speed: 'quiet',
-    preconditioning: { mode: 'turbo', lead_minutes: 20, reason: 'Cooling the bed from about 20C down to 17C.' },
+    preconditioning: { mode: 'turbo', lead_minutes: 20, reason: 'Cooling the bed from about 20C down to 18C.' },
     updated_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
   }
 
@@ -153,6 +155,10 @@ export class MockApiClient implements ApiClient {
     this.patchState({
       power: 'off',
       current_stage: null,
+      // Cleared, the way _run_power_off clears it. A unit that is off is not
+      // holding a temperature, and leaving the last one on the dial here meant
+      // the seed data never showed the state the real app spends its day in.
+      assumed_target_c: null,
       observed_power_w: 0.4,
       inferred_activity: 'off',
       last_command_at: nowIso(),
@@ -209,9 +215,10 @@ export class MockApiClient implements ApiClient {
       name: 'Summer',
       cooling_speed: 'quiet',
       stages: [
-        { stage: 'deep', duration_minutes: 240, temp_c: 17, mode: 'quiet' },
-        { stage: 'rem', duration_minutes: 210, temp_c: 20, mode: 'quiet' },
-        { stage: 'wake', duration_minutes: 30, temp_c: 26, mode: 'warming' },
+        { stage: 'drift', duration_minutes: 35, temp_c: 18, mode: 'quiet' },
+        { stage: 'deep', duration_minutes: 222, temp_c: 17, mode: 'quiet' },
+        { stage: 'rem', duration_minutes: 195, temp_c: 20, mode: 'quiet' },
+        { stage: 'wake', duration_minutes: 28, temp_c: 26, mode: 'warming' },
       ],
       active: true,
       created_at: nowIso(),
@@ -221,9 +228,10 @@ export class MockApiClient implements ApiClient {
       name: 'Winter',
       cooling_speed: 'quiet',
       stages: [
-        { stage: 'deep', duration_minutes: 240, temp_c: 26, mode: 'warming' },
-        { stage: 'rem', duration_minutes: 210, temp_c: 27, mode: 'warming' },
-        { stage: 'wake', duration_minutes: 30, temp_c: 28, mode: 'warming' },
+        { stage: 'drift', duration_minutes: 35, temp_c: 27, mode: 'warming' },
+        { stage: 'deep', duration_minutes: 222, temp_c: 26, mode: 'warming' },
+        { stage: 'rem', duration_minutes: 195, temp_c: 27, mode: 'warming' },
+        { stage: 'wake', duration_minutes: 28, temp_c: 28, mode: 'warming' },
       ],
       active: false,
       created_at: nowIso(),

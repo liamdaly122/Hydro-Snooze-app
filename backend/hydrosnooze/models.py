@@ -438,20 +438,39 @@ class Stage(str, Enum):
     through the second half, so the order here is chronological. During REM the
     body regulates its own temperature poorly, which is the usual argument for
     letting the bed run warmer later on.
+
+    Drift is the odd one out, because it is named for what the body is *about*
+    to do. Falling asleep is helped by a slightly warmer surface and deep sleep
+    is helped by a cooler one, and with Deep starting the moment the night did,
+    one number had to serve both. This is the other number.
     """
 
+    DRIFT = "drift"
     DEEP = "deep"
     REM = "rem"
     WAKE = "wake"
 
 
-STAGE_ORDER: tuple[Stage, ...] = (Stage.DEEP, Stage.REM, Stage.WAKE)
+STAGE_ORDER: tuple[Stage, ...] = (Stage.DRIFT, Stage.DEEP, Stage.REM, Stage.WAKE)
 
 STAGE_LABEL: dict[Stage, str] = {
+    Stage.DRIFT: "Drift",
     Stage.DEEP: "Deep",
     Stage.REM: "REM",
     Stage.WAKE: "Wake",
 }
+
+#: Stages whose length is a real duration rather than a share of the night.
+#:
+#: Falling asleep takes about as long as it takes whether there are eight hours
+#: ahead of you or five, so Drift is not scaled with the rest. Everything else
+#: divides what is left of the night after it.
+HOLDS_ITS_LENGTH: frozenset[Stage] = frozenset({Stage.DRIFT})
+
+#: How long Drift runs. Sleep onset for most people is ten to twenty minutes, so
+#: this covers it with something in hand. Settable per schedule; this is only the
+#: number a night starts life with.
+DRIFT_MINUTES = 35
 
 
 @dataclass
@@ -496,10 +515,27 @@ def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]
     """
     if not stages:
         return []
-    minutes = divide([s.duration_minutes for s in stages], total_minutes, MIN_STAGE_MINUTES)
-    return [
-        replace(stage, duration_minutes=m) for stage, m in zip(stages, minutes, strict=True)
-    ]
+
+    # Drift holds its length rather than taking a share. Falling asleep takes
+    # about as long as it takes; the night being an hour shorter does not make it
+    # quicker. So it comes off the top and the rest divide what is left.
+    held_out = [s for s in stages if s.stage in HOLDS_ITS_LENGTH]
+    held = sum(s.duration_minutes for s in held_out)
+    sharing = len(stages) - len(held_out)
+    # Unless there is not enough night to do that. A night too short for a held
+    # stage plus a floor under each of the others is not a night anybody means,
+    # and scaling everything is a better answer than a stage at nought.
+    if not sharing or total_minutes - held < MIN_STAGE_MINUTES * sharing:
+        held_out, held = [], 0
+
+    where = [i for i, s in enumerate(stages) if s not in held_out]
+    minutes = divide(
+        [stages[i].duration_minutes for i in where], total_minutes - held, MIN_STAGE_MINUTES
+    )
+    out = list(stages)
+    for i, m in zip(where, minutes, strict=True):
+        out[i] = replace(stages[i], duration_minutes=m)
+    return out
 
 
 def divide(weights: list[int], total: int, floor: int) -> list[int]:
@@ -543,17 +579,64 @@ def divide(weights: list[int], total: int, floor: int) -> list[int]:
 
 
 def default_stages() -> list[SleepStage]:
-    """A sensible starting night: cold for deep sleep, easing up through REM.
+    """A sensible starting night: a warmer half hour to drop off on, then cold
+    for deep sleep, easing up through REM.
 
-    Four hours deep at 17C, three and a half through REM at 20C, then half an
-    hour at 26C to surface on. The last one warms, which is exactly what the
-    unit's own scheduler made impossible.
+    Thirty five minutes at 18C, four hours deep at 17C, three and a half through
+    REM at 20C, then half an hour at 26C to surface on. The last one warms, which
+    is exactly what the unit's own scheduler made impossible.
+
+    Drift sits above Deep and below REM, which is the U the whole night is: a
+    little warmth to fall asleep on, cold for the deep block, then back up.
+
+    Only just above Deep, though, and that is deliberate. Pre-conditioning aims
+    at the first stage, and ASSUMED_ROOM_C is 20 with a deadband of one degree
+    either side, so a default Drift of 19 would leave a fresh install deciding
+    the bed was near enough already and never getting ready at all.
     """
     return [
+        SleepStage(Stage.DRIFT, DRIFT_MINUTES, 18),
         SleepStage(Stage.DEEP, 240, 17),
         SleepStage(Stage.REM, 210, 20),
         SleepStage(Stage.WAKE, 30, 26),
     ]
+
+
+def with_all_stages(stages: list[SleepStage]) -> list[SleepStage]:
+    """A night saved before a stage existed, brought up to date.
+
+    Schedules, saved profiles and tonight-only overrides are all stored as a list
+    of stages, so a night written by an older version is short one. Rather than
+    resetting to the defaults, which would throw away temperatures somebody
+    chose, the missing stage is inserted in order and seeded from its neighbour.
+
+    Seeding Drift from Deep is deliberate: the same temperature means the night
+    runs exactly as it did until somebody decides otherwise. A migration that
+    quietly changes what the bed does overnight is the wrong sort of surprise.
+    """
+    if not stages:
+        return default_stages()
+
+    have = {s.stage for s in stages}
+    if have.issuperset(STAGE_ORDER):
+        return list(stages)
+
+    defaults = {s.stage: s for s in default_stages()}
+    by_stage = {s.stage: s for s in stages}
+    filled: list[SleepStage] = []
+    for stage in STAGE_ORDER:
+        if stage in by_stage:
+            filled.append(by_stage[stage])
+            continue
+        # Seeded from a neighbour, so an inserted stage lands on a temperature
+        # somebody actually chose rather than on one this file picked. The stage
+        # after it first, which for Drift is Deep and is the case that matters.
+        order = list(STAGE_ORDER)
+        near = [st for st in order[order.index(stage) + 1 :] if st in by_stage]
+        near += [st for st in reversed(order[: order.index(stage)]) if st in by_stage]
+        temp_c = by_stage[near[0]].temp_c if near else defaults[stage].temp_c
+        filled.append(SleepStage(stage, defaults[stage].duration_minutes, temp_c))
+    return filled
 
 
 @dataclass(frozen=True)
@@ -896,10 +979,20 @@ class Schedule:
     id: int = 1
 
     def __post_init__(self) -> None:
-        # The one invariant. Bedtime and the wake time say how long the night is,
-        # and the stages fill it exactly, so there is no way to hold a schedule
-        # whose parts do not add up to its whole. Runs on replace() too, which is
-        # how every patch reaches this.
+        # Two invariants, both enforced here so there is no way to hold a
+        # schedule that does not make sense. Runs on replace() too, which is how
+        # every patch reaches this.
+        #
+        # A saved night has every stage. Filling that in only on the way out of
+        # the database would mean a schedule built anywhere else was a stage
+        # short, and the tonight-only override saved from it would not line up
+        # with the schedule it came from. Empty stays empty: a night with no
+        # stages is how "nothing is scheduled" is said, and it is not a night
+        # missing four.
+        if self.stages:
+            self.stages = with_all_stages(self.stages)
+        # And bedtime and the wake time say how long the night is, with the
+        # stages filling it exactly.
         self.stages = fit_stages(self.stages, self.night_minutes)
 
     @property

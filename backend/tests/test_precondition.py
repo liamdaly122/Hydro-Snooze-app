@@ -148,6 +148,7 @@ async def test_a_night_cools_then_heats(service):
         seen.append((step.label, service.unit.mode, service.unit.target))
 
     assert seen == [
+        ("Drift", Mode.QUIET, 17),
         ("Deep", Mode.QUIET, 17),
         ("REM", Mode.QUIET, 20),
         ("Wake", Mode.WARMING, 26),
@@ -297,7 +298,7 @@ async def test_a_stage_that_drops_into_the_overlap_switches_the_unit_to_cooling(
         ]
     )
     plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
-    deep, rem, wake = plan.steps
+    _, deep, rem, wake = plan.steps
 
     service.clock.jump_to(deep.starts_at)
     await service._run_stage(plan, deep)
@@ -370,8 +371,8 @@ async def test_a_change_during_a_stage_is_for_tonight(service):
 
     await service.set_temperature(22)
 
-    assert [s.temp_c for s in service.tonight_now().stages] == [22, 20, 26], "tonight moves"
-    assert [s.temp_c for s in service.schedule.stages] == [17, 20, 26], "the routine does not"
+    assert [s.temp_c for s in service.tonight_now().stages] == [17, 22, 20, 26], "tonight moves"
+    assert [s.temp_c for s in service.schedule.stages] == [17, 17, 20, 26], "the routine does not"
 
 
 @pytest.mark.asyncio
@@ -396,8 +397,8 @@ async def test_tonights_change_survives_a_restart(service):
 
     stored = service.db.load_tonight(service._tonight_date())
     assert stored is not None
-    assert [s.temp_c for s in stored.stages] == [22, 20, 26]
-    assert [s.temp_c for s in service.db.load_schedule().stages] == [17, 20, 26]
+    assert [s.temp_c for s in stored.stages] == [17, 22, 20, 26]
+    assert [s.temp_c for s in service.db.load_schedule().stages] == [18, 17, 20, 26]
 
 
 @pytest.mark.asyncio
@@ -409,7 +410,7 @@ async def test_making_it_permanent_is_a_separate_deliberate_thing(service):
 
     service._adopt_into_running_stage(Stage.DEEP, 22)
 
-    assert [s.temp_c for s in service.db.load_schedule().stages] == [22, 20, 26]
+    assert [s.temp_c for s in service.db.load_schedule().stages] == [17, 22, 20, 26]
 
 
 @pytest.mark.asyncio
@@ -422,7 +423,7 @@ async def test_a_change_with_no_stage_running_is_left_as_a_one_off(service):
 
     await service.set_temperature(22)
 
-    assert [s.temp_c for s in service.schedule.stages] == [17, 20, 26]
+    assert [s.temp_c for s in service.schedule.stages] == [17, 17, 20, 26]
 
 
 @pytest.mark.asyncio
@@ -471,10 +472,10 @@ async def test_editing_mid_night_does_not_report_finished_stages_as_missed(servi
     anything at 2am produced a screen of complaints about the past."""
     service.schedule = _schedule()
     plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
-    deep, rem, _ = plan.steps
+    drift, deep, rem, _ = plan.steps
 
-    # Both stages ran at their boundaries, as they would have.
-    for step in (deep, rem):
+    # Every earlier stage ran at its boundary, as they would have.
+    for step in (drift, deep, rem):
         service.clock.jump_to(step.starts_at)
         await service._run_stage(plan, step)
         service.scheduler.fired.mark(service.scheduler.due(service.schedule, step.starts_at))
@@ -507,8 +508,8 @@ async def test_any_schedule_edit_mid_night_leaves_the_past_alone(service):
     anything else at 2am used to have the same effect."""
     service.schedule = _schedule()
     plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
-    deep, rem, _ = plan.steps
-    for step in (deep, rem):
+    drift, deep, rem, _ = plan.steps
+    for step in (drift, deep, rem):
         service.clock.jump_to(step.starts_at)
         await service._run_stage(plan, step)
         service.scheduler.fired.mark(service.scheduler.due(service.schedule, step.starts_at))

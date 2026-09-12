@@ -16,7 +16,7 @@ from datetime import time
 import pytest
 
 from hydrosnooze.db import Database
-from hydrosnooze.models import Mode, Stage
+from hydrosnooze.models import STAGE_ORDER, Mode, Stage
 
 #: The schedule table exactly as it was before the app drove the night.
 LEGACY_SCHEMA = """
@@ -92,13 +92,55 @@ def test_the_rebuild_leaves_nothing_behind(upgraded: Database) -> None:
 
 def test_the_three_phases_become_the_three_stages(upgraded: Database) -> None:
     """The old phases were 4h, 4h and 30m, fixed. Those are Deep, REM and Wake,
-    so the temperatures Liam set carry over rather than reverting to defaults."""
+    so the temperatures Liam set carry over rather than reverting to defaults.
+
+    Drift is added in front of them and seeded from Deep, so the bed gets ready
+    thirty five minutes earlier and every temperature the old row held is still
+    the temperature at the same point in the night. A migration that moved Deep
+    to a number nobody chose would be worse than not migrating.
+    """
     stages = upgraded.load_schedule().stages
     assert [(s.stage, s.duration_minutes, s.temp_c) for s in stages] == [
+        (Stage.DRIFT, 35, 19),
         (Stage.DEEP, 240, 19),
         (Stage.REM, 240, 21),
         (Stage.WAKE, 30, 26),
     ]
+
+
+def test_a_saved_night_keeps_its_length_and_drift_comes_out_of_the_front(
+    tmp_path,
+) -> None:
+    """The case that actually matters, because it is the one Liam's Pi is in.
+
+    A row with a bedtime has a night length of its own, so Drift cannot add to
+    it. It takes its thirty five minutes off the front of Deep instead, and the
+    alarm does not move, which is the rule every other change here follows.
+    """
+    path = tmp_path / "saved.db"
+    legacy_db(path)
+    first = Database(path)
+    first._db.execute(
+        "UPDATE schedule SET stages = ?, bed_time = '22:30'",
+        (
+            '[{"stage": "deep", "duration_minutes": 240, "temp_c": 19},'
+            ' {"stage": "rem", "duration_minutes": 210, "temp_c": 21},'
+            ' {"stage": "wake", "duration_minutes": 30, "temp_c": 26}]',
+        ),
+    )
+    first._db.commit()
+    first.close()
+
+    schedule = Database(path).load_schedule()
+    try:
+        assert schedule.bed_time == time(22, 30)
+        assert schedule.night_minutes == schedule.total_minutes == 480
+        assert [s.stage for s in schedule.stages] == list(STAGE_ORDER)
+        assert schedule.stages[0].duration_minutes == 35
+        assert schedule.stages[0].temp_c == 19, "seeded from Deep, so nothing changes"
+        assert [s.temp_c for s in schedule.stages] == [19, 19, 21, 26]
+    finally:
+        schedule = None
 
 
 def test_the_rest_of_the_schedule_survives(upgraded: Database) -> None:
@@ -226,5 +268,67 @@ def test_nights_recorded_before_start_again_existed_still_count(tmp_path) -> Non
     try:
         assert db.learned_offset_c("warming", 28) == -2.1
         assert db.learning_for("warming", 28)["settle_runs"] == 3
+    finally:
+        db.close()
+
+
+def test_a_profile_saved_before_drift_comes_back_with_it(tmp_path) -> None:
+    """Profiles and tonight-only overrides are stored the same way a schedule is,
+    so they need the same filling in. Loading a three-stage "Summer" into a
+    four-stage night would drop a stage on the floor."""
+    from hydrosnooze.models import Mode as _Mode
+
+    path = tmp_path / "profiles.db"
+    legacy_db(path)
+    first = Database(path)
+    first._db.execute(
+        "INSERT INTO profiles (name, stages, cooling_speed, created_at) VALUES (?, ?, ?, ?)",
+        (
+            "Summer",
+            '[{"stage": "deep", "duration_minutes": 240, "temp_c": 16},'
+            ' {"stage": "rem", "duration_minutes": 210, "temp_c": 19},'
+            ' {"stage": "wake", "duration_minutes": 30, "temp_c": 25}]',
+            "quiet",
+            "2026-09-01T09:00:00",
+        ),
+    )
+    first._db.commit()
+    first.close()
+
+    db = Database(path)
+    try:
+        saved = db.profiles()[0]
+        assert [s.stage for s in saved.stages] == list(STAGE_ORDER)
+        assert [s.temp_c for s in saved.stages] == [16, 16, 19, 25]
+        assert saved.cooling_speed is _Mode.QUIET
+    finally:
+        db.close()
+
+
+def test_a_tonight_override_saved_before_drift_comes_back_with_it(tmp_path) -> None:
+    """The one that would bite at 2am. A tonight row is written when somebody
+    reaches for the temperature, and it is read back on every restart."""
+    from datetime import date
+
+    path = tmp_path / "tonight.db"
+    legacy_db(path)
+    first = Database(path)
+    first._db.execute(
+        "INSERT INTO tonight (id, wake_on, skip, stages) VALUES (1, '2026-09-12', 0, ?)",
+        (
+            '[{"stage": "deep", "duration_minutes": 240, "temp_c": 22},'
+            ' {"stage": "rem", "duration_minutes": 210, "temp_c": 20},'
+            ' {"stage": "wake", "duration_minutes": 30, "temp_c": 26}]',
+        ),
+    )
+    first._db.commit()
+    first.close()
+
+    db = Database(path)
+    try:
+        tonight = db.load_tonight(date(2026, 9, 12))
+        assert tonight is not None and tonight.stages is not None
+        assert [s.stage for s in tonight.stages] == list(STAGE_ORDER)
+        assert [s.temp_c for s in tonight.stages] == [22, 22, 20, 26]
     finally:
         db.close()

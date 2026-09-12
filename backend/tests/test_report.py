@@ -74,7 +74,7 @@ def test_a_good_night_is_short_and_says_nothing_alarming(plan):
 
     assert made.level == "info"
     assert "with notes" not in made.title
-    assert "All 3 stages landed." in made.body
+    assert "All 4 stages landed." in made.body
     assert len(made.body.splitlines()) <= 6, "nobody reads more than this"
 
 
@@ -133,7 +133,7 @@ def test_a_missed_stage_is_the_first_line_and_changes_the_title(plan):
 
     assert made.level == "warning"
     assert "with notes" in made.title
-    assert made.body.splitlines()[0] == "2 of 3 stages landed. Missed: REM."
+    assert made.body.splitlines()[0] == "3 of 4 stages landed. Missed: REM."
 
 
 def test_warnings_are_counted_and_the_first_one_is_quoted(plan):

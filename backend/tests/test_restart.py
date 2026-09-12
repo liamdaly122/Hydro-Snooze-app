@@ -18,7 +18,7 @@ import pytest
 
 from hydrosnooze.config import Settings
 from hydrosnooze.db import Database
-from hydrosnooze.models import Schedule
+from hydrosnooze.models import STAGE_ORDER, Schedule
 from hydrosnooze.notify import Notifier
 from hydrosnooze.scheduler import Job, Scheduler
 from hydrosnooze.service import Service
@@ -82,7 +82,9 @@ def test_a_stage_that_really_was_missed_is_still_reported(db_path):
 
     after = scheduler_on(db_path)
     missed = [job.key for job in after.missed(schedule, THREE_AM)]
-    assert missed == ["stage:rem"]
+    # Deep, which is long gone by three. REM has only just started, so it is not
+    # missed, it is due, and the two are deliberately different answers.
+    assert missed == ["stage:deep"]
 
 
 def test_last_nights_marks_do_not_count_for_tonight(db_path):
@@ -124,7 +126,10 @@ def test_the_table_never_grows(db_path):
             sched.fired.mark(Job("stage", plan, step))
         sched.fired.mark(Job("power_off", plan))
 
-    assert len(Database(db_path).fired_marks()) == len(sched.fired.done) <= 5
+    # Pre-conditioning, one mark a stage, and the power off. One night's worth,
+    # however many nights went through the loop above.
+    most = 2 + len(STAGE_ORDER)
+    assert len(Database(db_path).fired_marks()) == len(sched.fired.done) <= most
 
 
 def test_a_storage_failure_does_not_stop_the_night(db_path, caplog):

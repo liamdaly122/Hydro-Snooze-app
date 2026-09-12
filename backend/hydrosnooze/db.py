@@ -17,13 +17,13 @@ from .events import Event, Level
 from .models import (
     MINUTES_IN_A_DAY,
     Profile,
-    STAGE_ORDER,
     Mode,
     Schedule,
     SleepStage,
     Stage,
     Tonight,
     default_stages,
+    with_all_stages,
 )
 
 #: Nights needed before the measured figure replaces the estimate. One night is
@@ -238,6 +238,10 @@ SCHEDULE_COLUMNS = (
 #: have meant.
 LEGACY_PHASE_MINUTES = (240, 240, 30)
 
+#: Which stages the unit's own three phases were, spelled out rather than taken
+#: off the front of STAGE_ORDER, which has since grown one the hardware never had.
+LEGACY_PHASES = (Stage.DEEP, Stage.REM, Stage.WAKE)
+
 
 #: How many power samples to hold before writing them as one transaction.
 #:
@@ -381,10 +385,7 @@ class Database:
             Profile(
                 id=r["id"],
                 name=r["name"],
-                stages=[
-                    SleepStage(Stage(s["stage"]), s["duration_minutes"], s["temp_c"])
-                    for s in json.loads(r["stages"])
-                ],
+                stages=stages_from_json(r["stages"]),
                 cooling_speed=Mode(r["cooling_speed"]),
                 created_at=_parse(r["created_at"]),
             )
@@ -458,14 +459,7 @@ class Database:
         return Tonight(
             wake_on=wake_on,
             skip=bool(row["skip"]),
-            stages=(
-                tuple(
-                    SleepStage(Stage(x["stage"]), x["duration_minutes"], x["temp_c"])
-                    for x in json.loads(row["stages"])
-                )
-                if row["stages"]
-                else None
-            ),
+            stages=(tuple(saved) if (saved := stages_from_json(row["stages"])) else None),
             wake_time=_time_from(row["wake_time"]) if row["wake_time"] else None,
             bed_time=_time_from(row["bed_time"]) if row["bed_time"] else None,
             nudge_c=row["nudge_c"] or 0,
@@ -953,6 +947,26 @@ def _bed_time_from(row: sqlite3.Row, wake_time: time, stages: list[SleepStage]) 
     return time(bed // 60, bed % 60)
 
 
+def stages_from_json(raw: str | None) -> list[SleepStage]:
+    """Stored stages, brought up to whatever the night is made of now.
+
+    The one place stage JSON is read. Schedules, saved profiles and tonight-only
+    overrides are all stored the same way and all predate Drift, so they all need
+    the same filling in, and three copies of that would be three chances to
+    disagree about what an old night turns into.
+    """
+    parsed = json.loads(raw) if raw else []
+    # Empty in, empty out. A column defaulted to '[]' by the migration is a row
+    # that never had stages, not a row whose night was four empty ones, and only
+    # the caller knows what to fall back to. Checking the string rather than what
+    # came out of it is how this went wrong once already: '[]' is truthy.
+    if not parsed:
+        return []
+    return with_all_stages(
+        [SleepStage(Stage(s["stage"]), s["duration_minutes"], s["temp_c"]) for s in parsed]
+    )
+
+
 def _stages_from(row: sqlite3.Row) -> list[SleepStage]:
     """The night, in order.
 
@@ -960,19 +974,24 @@ def _stages_from(row: sqlite3.Row) -> list[SleepStage]:
     phases: 4h, 4h and 30m, fixed, one temperature each. Those are Deep, REM and
     Wake with the durations spelled out, so an upgraded database keeps the three
     temperatures rather than quietly resetting to the defaults.
+
+    Named here rather than taken from STAGE_ORDER, which has since grown a fourth
+    stage the hardware never had. Zipping a three-phase row against it would have
+    quietly slid every temperature one stage along.
     """
-    parsed = json.loads(row["stages"]) if row["stages"] else []
-    if parsed:
-        return [
-            SleepStage(Stage(s["stage"]), s["duration_minutes"], s["temp_c"]) for s in parsed
-        ]
+    if stored := stages_from_json(row["stages"]):
+        return stored
     # sqlite3.Row iterates its values, not its names, so membership goes via keys().
     if "phase1_temp_c" in set(row.keys()):
         temps = (row["phase1_temp_c"], row["phase2_temp_c"], row["phase3_temp_c"])
-        return [
-            SleepStage(stage, minutes, temp)
-            for stage, minutes, temp in zip(STAGE_ORDER, LEGACY_PHASE_MINUTES, temps)
-        ]
+        return with_all_stages(
+            [
+                SleepStage(stage, minutes, temp)
+                for stage, minutes, temp in zip(
+                    LEGACY_PHASES, LEGACY_PHASE_MINUTES, temps, strict=True
+                )
+            ]
+        )
     return default_stages()
 
 
