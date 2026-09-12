@@ -59,9 +59,10 @@ def main() -> int:
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     counting = _counting(db)
+    sent = "COALESCE(sent_c, target_c)" if _has(db, "sent_c") else "target_c"
     rows = db.execute(
-        "SELECT at, mode, target_c, end_c, room_c, decided_by FROM precondition_runs "
-        f"WHERE reached = 1{counting} AND end_c IS NOT NULL ORDER BY at"
+        f"SELECT at, mode, target_c, {sent} AS sent_c, end_c, room_c, decided_by "
+        f"FROM precondition_runs WHERE reached = 1{counting} AND end_c IS NOT NULL ORDER BY at"
     ).fetchall()
 
     if not rows:
@@ -74,16 +75,21 @@ def main() -> int:
 
     print(f"{len(rows)} finished runs, measured on the hoses with nobody in the bed.")
     print()
-    print(f"  {'when':16} {'mode':8} {'asked':>6} {'bed':>7} {'off by':>7} {'room':>6}")
-    print(f"  {'-' * 16} {'-' * 8} {'-' * 6} {'-' * 7} {'-' * 7} {'-' * 6}")
+    print(
+        f"  {'when':16} {'mode':8} {'asked':>6} {'sent':>5} {'bed':>7} {'off by':>7} {'room':>6}"
+    )
+    print(f"  {'-' * 16} {'-' * 8} {'-' * 6} {'-' * 5} {'-' * 7} {'-' * 7} {'-' * 6}")
 
     by_mode: dict[str, list[float]] = {}
     for r in rows:
-        off = r["end_c"] - r["target_c"]
+        # Against what was sent, not what was asked for. Once a correction is in
+        # force those differ, and scoring a working correction against the number
+        # on the screen reads it as no droop at all.
+        off = r["end_c"] - r["sent_c"]
         by_mode.setdefault(r["mode"], []).append(off)
         room = f"{r['room_c']:.1f}" if r["room_c"] is not None else "  --"
         print(
-            f"  {r['at'][:16]:16} {r['mode']:8} {r['target_c']:6} "
+            f"  {r['at'][:16]:16} {r['mode']:8} {r['target_c']:6} {r['sent_c']:5.0f} "
             f"{r['end_c']:7.1f} {off:+7.1f} {room:>6}"
         )
 
@@ -107,11 +113,16 @@ def main() -> int:
             print("  above. They are still in the table and Autopilot still draws them.")
 
     print()
-    print("  A negative number means the bed ends up cooler than the app asked for.")
+    print("  A negative number means the bed ends up cooler than the unit was sent.")
     print("  If the two modes disagree in sign, that is the hose run losing heat")
     print("  both ways rather than the unit being wrong, and one flat correction")
     print("  will not fix both.")
     return 0
+
+
+def _has(db, column: str) -> bool:
+    """Whether a column exists, for a script that may be pointed at an old copy."""
+    return column in {r["name"] for r in db.execute("PRAGMA table_info(precondition_runs)")}
 
 
 def _counting(db) -> str:
@@ -123,8 +134,7 @@ def _counting(db) -> str:
     at, and read-only means it cannot be added here. Missing means nothing has
     ever been set aside, which comes to the same answer.
     """
-    columns = {r["name"] for r in db.execute("PRAGMA table_info(precondition_runs)")}
-    return " AND counts = 1" if "counts" in columns else ""
+    return " AND counts = 1" if _has(db, "counts") else ""
 
 
 def learned(rows, db, counting: str = "") -> None:

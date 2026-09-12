@@ -94,18 +94,19 @@ def test_the_three_phases_become_the_three_stages(upgraded: Database) -> None:
     """The old phases were 4h, 4h and 30m, fixed. Those are Deep, REM and Wake,
     so the temperatures Liam set carry over rather than reverting to defaults.
 
-    Drift is added in front of them and seeded from Deep, so the bed gets ready
-    thirty five minutes earlier and every temperature the old row held is still
-    the temperature at the same point in the night. A migration that moved Deep
-    to a number nobody chose would be worse than not migrating.
+    Drift is seeded from Deep and takes its thirty five minutes out of Deep, so
+    the night is the same length, bedtime does not move, and every temperature the
+    old row held is still the temperature at the same point in the night. Drift
+    and Deep share a number after this, so the curve really is identical.
     """
     stages = upgraded.load_schedule().stages
     assert [(s.stage, s.duration_minutes, s.temp_c) for s in stages] == [
         (Stage.DRIFT, 35, 19),
-        (Stage.DEEP, 240, 19),
+        (Stage.DEEP, 205, 19),
         (Stage.REM, 240, 21),
         (Stage.WAKE, 30, 26),
     ]
+    assert sum(s.duration_minutes for s in stages) == 510, "the night is unchanged"
 
 
 def test_a_saved_night_keeps_its_length_and_drift_comes_out_of_the_front(

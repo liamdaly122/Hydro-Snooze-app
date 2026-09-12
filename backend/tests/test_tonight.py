@@ -77,7 +77,7 @@ async def test_with_nothing_set_tonight_is_just_the_routine(service):
 
 
 async def test_a_stage_set_for_tonight_leaves_the_routine_alone(service):
-    service.set_stage_tonight(Stage.DEEP, 17)
+    await service.set_stage_tonight(Stage.DEEP, 17)
 
     assert running(service) == [19, 17, 22, 26]
     assert usual(service) == [19, 19, 22, 26], "next week is unchanged"
@@ -85,7 +85,7 @@ async def test_a_stage_set_for_tonight_leaves_the_routine_alone(service):
 
 async def test_it_expires_by_the_calendar_rather_than_by_tidying_up(service):
     """Nothing has to remember to clear it. A row for another night is spent."""
-    service.set_stage_tonight(Stage.DEEP, 17)
+    await service.set_stage_tonight(Stage.DEEP, 17)
     assert service.db.load_tonight(TONIGHT) is not None
     assert service.db.load_tonight(TONIGHT + timedelta(days=1)) is None
 
@@ -93,7 +93,7 @@ async def test_it_expires_by_the_calendar_rather_than_by_tidying_up(service):
 async def test_it_survives_a_restart(service, tmp_path):
     """The Pi restarts routinely, and forgetting tonight at 3am would put the bed
     back to a number already rejected."""
-    service.set_stage_tonight(Stage.REM, 24)
+    await service.set_stage_tonight(Stage.REM, 24)
     service.db.close()
 
     again = Service(Settings(db_path=str(tmp_path / "s.db")), clock=VirtualClock(NOW), echo=False)
@@ -111,14 +111,14 @@ async def test_a_nudge_cannot_move_the_switch_off(service):
     before = service.scheduler.night_date(service.schedule, NOW)
     was = service.tonight_now().wake_time
 
-    service.nudge_tonight(-1)
+    await service.nudge_tonight(-1)
 
     assert service.tonight_now().wake_time == was
     assert service.scheduler.night_date(service.schedule, NOW) == before
 
 
 async def test_a_nudge_lapses_on_its_own(service):
-    service.nudge_tonight(-1, minutes=30)
+    await service.nudge_tonight(-1, minutes=30)
     tonight = service.scheduler.tonight
 
     assert tonight.nudge_at(NOW + timedelta(minutes=29)) == -1
@@ -126,7 +126,7 @@ async def test_a_nudge_lapses_on_its_own(service):
 
 
 async def test_a_nudge_applies_to_what_the_plan_asks_for(service):
-    service.nudge_tonight(-1)
+    await service.nudge_tonight(-1)
     assert service._nudged(22, Mode.QUIET) == 21
 
     service.clock.advance(timedelta(hours=1))
@@ -137,15 +137,15 @@ async def test_a_nudge_is_one_degree_and_does_not_stack(service):
     """One degree, one period. A nudge that can be tapped up to four degrees is a
     temperature control with a timer on it, and there is already a temperature
     control."""
-    service.nudge_tonight(-40)
+    await service.nudge_tonight(-40)
     assert service.scheduler.tonight.nudge_c == -NUDGE_LIMIT_C == -1
 
-    service.nudge_tonight(-1)
+    await service.nudge_tonight(-1)
     assert service.scheduler.tonight.nudge_c == -1, "a second one does not double it"
 
 
 async def test_a_nudge_respects_the_safety_cap(service):
-    service.nudge_tonight(NUDGE_LIMIT_C)
+    await service.nudge_tonight(NUDGE_LIMIT_C)
     assert service._nudged(service.settings.max_temperature_c, Mode.WARMING) <= (
         service.settings.max_temperature_c
     )
@@ -214,7 +214,7 @@ async def test_tomorrow_runs_as_usual_after_a_skip(service):
 
 
 async def test_clearing_it_puts_the_night_back_to_the_routine(service):
-    service.set_stage_tonight(Stage.DEEP, 17)
+    await service.set_stage_tonight(Stage.DEEP, 17)
     service.shift_tonight(wake_minutes=60)
 
     service.clear_tonight()
@@ -225,7 +225,7 @@ async def test_clearing_it_puts_the_night_back_to_the_routine(service):
 
 
 async def test_saving_it_as_a_preference_is_the_deliberate_one(service):
-    service.set_stage_tonight(Stage.DEEP, 17)
+    await service.set_stage_tonight(Stage.DEEP, 17)
     assert usual(service) == [19, 19, 22, 26], "not yet"
 
     service._adopt_into_running_stage(Stage.DEEP, 17)

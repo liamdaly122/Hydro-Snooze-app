@@ -79,9 +79,15 @@ export function Home({
   }
 
   function setStageTemp(stage: Stage, tempC: number) {
+    // Tonight only, which is what the note under this card has said since the
+    // tonight controls went in. It called putSchedule, so tapping + on Deep at
+    // two in the morning rewrote the routine for every night after it, and the
+    // app said the opposite while doing it. The permanent change is Save as my
+    // preference on the Alarm card, and that is the only thing that should be.
+    //
     // Pre-conditioning used to have to be kept in step with this by hand. It is
     // derived from the first stage now, so changing a temperature is just that.
-    save({ stages: draft.stages.map((s) => (s.stage === stage ? { ...s, temp_c: tempC } : s)) })
+    onTonight(client.setStageTonight(stage, tempC))
   }
 
   return (
@@ -112,6 +118,21 @@ export function Home({
         maxC={maxC}
         onOpenProfiles={onOpenProfiles}
         onStageChange={setStageTemp}
+        keep={
+          tonight && (
+            <KeepTonight
+              tonight={tonight}
+              usualStages={schedule.stages}
+              onKeep={() => {
+                setError(null)
+                void client
+                  .keepTonight()
+                  .then(() => client.getTonight().then(setTonight))
+                  .catch((e: Error) => setError(e.message))
+              }}
+            />
+          )
+        }
         onSetNow={(targetC) => {
           void client
             .setTemperature(targetC)
@@ -130,19 +151,6 @@ export function Home({
             now={now}
             onNudge={(delta) => onTonight(client.nudgeTonight(delta))}
             onCancel={() => onTonight(client.nudgeTonight(0))}
-          />
-        )}
-        {tonight && (
-          <KeepTonight
-            tonight={tonight}
-            usualStages={schedule.stages}
-            onKeep={() => {
-              setError(null)
-              void client
-                .keepTonight()
-                .then(() => client.getTonight().then(setTonight))
-                .catch((e: Error) => setError(e.message))
-            }}
           />
         )}
       </TemperatureCard>

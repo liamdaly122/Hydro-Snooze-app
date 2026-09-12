@@ -35,6 +35,8 @@ interface Props {
    * under the card, because a nudge belongs with the temperature it nudges.
    */
   children?: React.ReactNode
+  /** Shown on every tab, unlike `children`. See the note by the slot. */
+  keep?: React.ReactNode
 }
 
 export function TemperatureCard({
@@ -45,6 +47,7 @@ export function TemperatureCard({
   onSetNow,
   onOpenProfiles,
   children,
+  keep,
 }: Props) {
   const [tab, setTab] = useState<TabKey>('now')
 
@@ -181,7 +184,14 @@ export function TemperatureCard({
           </button>
         </div>
 
+        {/*
+          The nudge is about the bed right now, so it belongs on Now and nowhere
+          else. `keep` is about the tab you are looking at: you change Deep on
+          the Deep tab, and offering to make that permanent on a different tab is
+          offering it where nobody will look.
+        */}
         {tab === 'now' && children}
+        {keep}
 
         <StageNote
           state={state}

@@ -318,6 +318,9 @@ class Database:
             ("end_c", "REAL"),
             ("room_c", "REAL"),
             ("decided_by", "TEXT"),
+            # What actually went over the infrared, which stops being the same as
+            # `target_c` the moment a correction is earned. See learned_offset_c.
+            ("sent_c", "REAL"),
             # Whether this run still teaches anything. "Start again" clears it
             # rather than deleting the row: the run happened, and a record of the
             # night is not the app's to throw away because somebody disliked what
@@ -684,6 +687,7 @@ class Database:
         start_c: float | None = None,
         end_c: float | None = None,
         room_c: float | None = None,
+        sent_c: float | None = None,
         decided_by: str | None = None,
     ) -> None:
         """One pre-conditioning run, and what it took.
@@ -695,8 +699,8 @@ class Database:
         """
         self._db.execute(
             "INSERT INTO precondition_runs "
-            "(at, mode, target_c, seconds, reached, start_c, end_c, room_c, decided_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(at, mode, target_c, seconds, reached, start_c, end_c, room_c, sent_c, decided_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 at.isoformat(),
                 mode,
@@ -706,6 +710,7 @@ class Database:
                 start_c,
                 end_c,
                 room_c,
+                sent_c,
                 decided_by,
             ),
         )
@@ -778,16 +783,26 @@ class Database:
 
         None until there are enough runs to be worth trusting. One night is an
         anecdote, and no correction is better than a confident wrong one.
+
+        **Measured against what was sent, not against what was asked for.** Those
+        are the same number only until this method first returns something. After
+        that the app asks for 28 and sends 30, and scoring the night against the
+        28 would read a working correction as no droop at all: the mean decays,
+        the correction shrinks, the bed goes cold, and it earns the correction
+        back. A slow oscillation with nothing in the log to explain it. Matching
+        still goes on `target_c`, because that is what the caller is asking about;
+        only the arithmetic uses `sent_c`. Rows written before the column existed
+        fall back to `target_c`, which is what they actually sent.
         """
         rows = self._db.execute(
-            "SELECT target_c, end_c FROM precondition_runs "
+            "SELECT COALESCE(sent_c, target_c) AS asked, end_c FROM precondition_runs "
             "WHERE mode = ? AND reached = 1 AND counts = 1 AND ABS(target_c - ?) <= ? "
             "AND end_c IS NOT NULL ORDER BY id DESC LIMIT 10",
             (mode, target_c, within_c),
         ).fetchall()
         if len(rows) < MIN_RUNS_TO_LEARN:
             return None
-        offsets = [r["end_c"] - r["target_c"] for r in rows]
+        offsets = [r["end_c"] - r["asked"] for r in rows]
         return round(sum(offsets) / len(offsets), 1)
 
     def learning_progress(self) -> list[dict[str, object]]:

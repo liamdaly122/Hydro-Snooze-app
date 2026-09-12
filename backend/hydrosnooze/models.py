@@ -626,6 +626,8 @@ def with_all_stages(stages: list[SleepStage]) -> list[SleepStage]:
     filled: list[SleepStage] = []
     for stage in STAGE_ORDER:
         if stage in by_stage:
+            # Read from the dict rather than the original list: an earlier
+            # insertion may have taken minutes out of this one.
             filled.append(by_stage[stage])
             continue
         # Seeded from a neighbour, so an inserted stage lands on a temperature
@@ -634,8 +636,21 @@ def with_all_stages(stages: list[SleepStage]) -> list[SleepStage]:
         order = list(STAGE_ORDER)
         near = [st for st in order[order.index(stage) + 1 :] if st in by_stage]
         near += [st for st in reversed(order[: order.index(stage)]) if st in by_stage]
-        temp_c = by_stage[near[0]].temp_c if near else defaults[stage].temp_c
-        filled.append(SleepStage(stage, defaults[stage].duration_minutes, temp_c))
+        minutes = defaults[stage].duration_minutes
+        if not near:
+            filled.append(SleepStage(stage, minutes, defaults[stage].temp_c))
+            continue
+
+        # Out of the neighbour it was seeded from, not out of the whole night.
+        # Rescaling everything to make room moved REM seventeen minutes and Wake
+        # two, which is not what "your night is unchanged" means. Drift and Deep
+        # share a temperature after this, so the curve really is identical.
+        donor = by_stage[near[0]]
+        minutes = min(minutes, max(0, donor.duration_minutes - MIN_STAGE_MINUTES))
+        by_stage[donor.stage] = replace(
+            donor, duration_minutes=donor.duration_minutes - minutes
+        )
+        filled.append(SleepStage(stage, minutes, donor.temp_c))
     return filled
 
 

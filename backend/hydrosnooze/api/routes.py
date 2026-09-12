@@ -177,8 +177,10 @@ class StageTonight(BaseModel):
 
 
 def _tonight(service: Service) -> dict[str, object]:
+    # tonight_state rather than scheduler.tonight: the second is whatever was last
+    # read off disk, and a row for a night that is over is spent.
     return tonight_json(
-        service.tonight_now(), service.scheduler.tonight, service.tonight_phase()
+        service.tonight_now(), service.tonight_state(), service.tonight_phase()
     )
 
 
@@ -203,7 +205,7 @@ async def post_tonight_stage(request: Request, body: StageTonight) -> dict[str, 
     # 500 on every request, which is what comes of not reading it.
     _guard_night(service, wanted, running.cooling_speed)
     try:
-        service.set_stage_tonight(body.stage, body.temp_c)
+        await service.set_stage_tonight(body.stage, body.temp_c)
     except CommandFailed as exc:
         raise HTTPException(409, str(exc)) from exc
     return _tonight(service)
@@ -218,7 +220,7 @@ async def post_tonight_nudge(request: Request, body: Nudge) -> dict[str, object]
     """
     service = _service(request)
     try:
-        service.nudge_tonight(body.delta_c, body.minutes)
+        await service.nudge_tonight(body.delta_c, body.minutes)
     except CommandFailed as exc:
         raise HTTPException(409, str(exc)) from exc
     return _tonight(service)

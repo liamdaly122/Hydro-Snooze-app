@@ -226,6 +226,12 @@ class PreconditionRun:
     started: datetime
     mode: Mode
     target_c: int
+    #: What actually went over the infrared, which is not `target_c` once a
+    #: measured correction is in force. Recorded apart from it because the droop
+    #: this teaches is the gap between the bed and what was *sent*. Scored against
+    #: what was asked for instead, a correction that works reads as no droop at
+    #: all, averages itself away, and the bed goes back to being two degrees cold.
+    sent_c: int | None = None
     #: What the bed read when the presses landed. None if the probes were quiet.
     start_c: float | None = None
     worked: bool = False
@@ -318,6 +324,9 @@ class Service:
 
         # When a mode was last changed by a correction rather than by a stage.
         self._mode_changed_at: datetime | None = None
+        #: When the running temperature was last re-asserted off the plan. Keeps
+        #: a blaster that has gone away from being retried on every sample.
+        self._followed_at: datetime | None = None
 
         # Whether the clock has been confirmed against the network yet, and when
         # this started waiting. A Pi has no clock of its own at boot; see
@@ -888,6 +897,7 @@ class Service:
             current_stage=step.stage if step and power is Power.ON else None,
         )
         await self._correct_mode(step, power, now)
+        await self._follow_the_plan(step, power, now)
         if watts is not None:
             self.db.add_power_sample(
                 now, watts, flow_c=flow, return_c=back, room_c=room
@@ -1089,8 +1099,52 @@ class Service:
             start_c=run.start_c,
             end_c=self.probes.bed_c,
             room_c=self.probes.room_c,
+            sent_c=run.sent_c,
             decided_by=decided_by,
         )
+
+    async def _follow_the_plan(
+        self, step: StageStep | None = None, power: Power | None = None, now: datetime | None = None
+    ) -> None:
+        """Put the bed where the running stage says it should be, now.
+
+        Everything else in this file acts at a boundary, which is right for a
+        night that runs to a plan. Two things cannot wait for the next one, and
+        both are the nudge: it is pressed because somebody is too warm at this
+        moment, and the screen has already promised it goes back in half an hour.
+        Storing a row and waiting for REM is not that feature.
+
+        So the temperature is checked against the plan on the sampling beat too,
+        and the same check serves a stage set for tonight only while that stage is
+        already running. Nothing is sent unless it differs from what was last
+        commanded, so the usual answer is silence.
+        """
+        now = now or self.clock.now()
+        if step is None:
+            step = self.scheduler.stage_now(self.schedule, now)
+        if power is None:
+            power = self.state.power
+        if step is None or power is not Power.ON:
+            return
+
+        mode = self.state.assumed_mode or step.mode
+        if self._nudged(step.temp_c, mode) == self.state.assumed_target_c:
+            return
+        # Never queue behind something else, and never hammer a blaster that has
+        # gone away: same reasoning as _correct_mode, one floor below.
+        if self._lock.locked():
+            return
+        if self._followed_at is not None and now - self._followed_at < MODE_DWELL:
+            return
+        self._followed_at = now
+
+        async with self._lock:
+            try:
+                await self._apply(mode, step.temp_c)
+            except CommandFailed as exc:
+                # Never fatal. The stage carries on at whatever it was last set
+                # to, which is a temperature somebody chose, just not this one.
+                self._fail(TONIGHT_KIND, exc)
 
     async def _correct_mode(self, step: StageStep | None, power: Power, now: datetime) -> None:
         """Swap the running mode for the quieter one when the bed allows it.
@@ -1242,7 +1296,11 @@ class Service:
             self.events.info("precool", pre.reason)
             return True
 
-        target = self.schedule.first_temp_c
+        # The plan's, not the saved schedule's. The plan was built over tonight,
+        # so `pre.mode` above already reflects a stage set for this night only,
+        # and reading the temperature from somewhere else made that worse than
+        # either: warming chosen for a 28C night and 21C sent.
+        target = plan.first_temp_c
         verb = "Pre-heating" if pre.mode is Mode.WARMING else "Pre-cooling"
         self.events.info(
             "precool",
@@ -1254,7 +1312,7 @@ class Service:
             try:
                 await self.commands.power_on()
                 self._set_state(power=Power.ON, current_stage=None)
-                await self._apply(mode, target)
+                sent = await self._apply(mode, target)
                 # From here the plug is timing it. The clock starts once the
                 # presses have landed, not when the job fired, because the thirty
                 # seconds of infrared is not the bed cooling.
@@ -1262,6 +1320,7 @@ class Service:
                     started=self.clock.now(),
                     mode=mode,
                     target_c=target,
+                    sent_c=sent,
                     start_c=self.probes.bed_c,
                 )
                 return True
@@ -1476,11 +1535,15 @@ class Service:
         await self.clock.sleep(REBOOT_SECONDS)
         await self.commands.power_off()
 
-    async def _apply(self, mode: Mode, target_c: int) -> None:
+    async def _apply(self, mode: Mode, target_c: int) -> int:
         """Put the unit into a mode at a temperature. The whole night is this.
 
         Every caller here is the plan speaking, so a nudge in force is applied on
         the way through. A temperature typed by hand does not come this way.
+
+        Returns the number that actually went over the infrared, which is not the
+        number on the screen once a correction is in force. Only one caller wants
+        it, and it wants it for a good reason: see record_precondition.
         """
         # Nudge first, because that is what somebody wants the bed to be. The
         # correction second, because that is how the unit is persuaded to do it.
@@ -1488,10 +1551,12 @@ class Service:
         if self.state.assumed_mode is not mode:
             await self.commands.set_mode(mode)
             self._set_state(assumed_mode=mode)
-        await self.commands.set_temperature(self._corrected(wanted, mode), mode)
+        sent = self._corrected(wanted, mode)
+        await self.commands.set_temperature(sent, mode)
         # What was asked for, not what was sent. The correction is invisible
         # everywhere above this line.
         self._set_state(assumed_target_c=wanted, last_command_at=self.clock.now())
+        return sent
 
     def _report_idle_preconditioning(self, plan: NightPlan) -> None:
         """Say so when the pre-conditioning run never actually did anything.
@@ -1677,7 +1742,7 @@ class Service:
         # separate tap that says so.
         if stage is not None:
             with contextlib.suppress(CommandFailed):
-                self.set_stage_tonight(stage, target_c)
+                await self.set_stage_tonight(stage, target_c)
 
     async def mute(self) -> None:
         """Toggle the unit's button beep.
@@ -1842,6 +1907,21 @@ class Service:
         # Far enough out and it is not tonight yet, it is just Tuesday.
         return "evening" if plan.starts_at - now <= TONIGHT_OPENS else "none"
 
+    def tonight_state(self) -> Tonight | None:
+        """Tonight's exceptions, if they belong to the night we are actually in.
+
+        `scheduler.tonight` is read once at startup and then only when something
+        changes it, so on a Pi that has been up for a week it can be holding a row
+        for a night that finished days ago. Everything that *acts* on it already
+        checks the date. The app read the object itself and drew "Skipped" over a
+        night that was going to run perfectly normally.
+        """
+        wake_on = self._tonight_date()
+        found = self.scheduler.tonight
+        if found is None or wake_on is None or not found.applies_on(wake_on):
+            return None
+        return found
+
     def tonight_now(self) -> Schedule:
         """The schedule as tonight is actually being run, for the app to show."""
         wake_on = self._tonight_date()
@@ -1849,7 +1929,7 @@ class Service:
             return self.schedule
         return self.scheduler.running(self.schedule, wake_on) or self.schedule
 
-    def set_stage_tonight(self, stage: Stage, target_c: int) -> Tonight:
+    async def set_stage_tonight(self, stage: Stage, target_c: int) -> Tonight:
         """Change one stage for this night, leaving the routine alone."""
         stages = tuple(
             replace(s, temp_c=target_c) if s.stage is stage else replace(s)
@@ -1861,9 +1941,13 @@ class Service:
             TONIGHT_KIND,
             f"{label} is {target_c}C tonight. Your usual {label} is untouched.",
         )
+        # If that stage is the one running, the bed should be at it now rather
+        # than from tomorrow. If it is not, this does nothing and says nothing.
+        self._followed_at = None
+        await self._follow_the_plan()
         return out
 
-    def nudge_tonight(self, delta_c: int, minutes: int = NUDGE_MINUTES) -> Tonight:
+    async def nudge_tonight(self, delta_c: int, minutes: int = NUDGE_MINUTES) -> Tonight:
         """A few degrees either way, for a while, then back to the plan.
 
         Degrees only. A nudge can never move bedtime, the alarm or the switch-off,
@@ -1872,7 +1956,9 @@ class Service:
         """
         delta = max(-NUDGE_LIMIT_C, min(NUDGE_LIMIT_C, delta_c))
         if not delta:
-            return self._change_tonight(nudge_c=0, nudge_until=None)
+            out = self._change_tonight(nudge_c=0, nudge_until=None)
+            await self._follow_the_plan()
+            return out
         until = self.clock.now() + timedelta(minutes=minutes)
         out = self._change_tonight(nudge_c=delta, nudge_until=until)
         way = "cooler" if delta < 0 else "warmer"
@@ -1880,6 +1966,11 @@ class Service:
             TONIGHT_KIND,
             f"{abs(delta)}C {way} until {until:%H:%M}, then back to the plan.",
         )
+        # Now, not at the next boundary. Pressed at two in the morning, the next
+        # boundary can be three hours off, and by then the half hour it was asked
+        # for has come and gone.
+        self._followed_at = None
+        await self._follow_the_plan()
         return out
 
     def shift_tonight(self, *, bed_minutes: int = 0, wake_minutes: int = 0) -> Tonight:
@@ -1934,7 +2025,7 @@ class Service:
         by hand is already what somebody wants and does not get adjusted towards
         what they wanted half an hour ago.
         """
-        tonight = self.scheduler.tonight
+        tonight = self.tonight_state()
         if tonight is None:
             return target_c
         delta = tonight.nudge_at(self.clock.now())

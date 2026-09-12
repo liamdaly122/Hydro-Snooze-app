@@ -200,11 +200,23 @@ class Scheduler:
             wake_on = (now + timedelta(days=offset)).date()
             if wake_on.weekday() not in schedule.days_of_week:
                 continue
-            running = self.running(schedule, wake_on)
-            if running is None:
-                continue  # skipped tonight, and the weekly routine is untouched
+            skipped = self.running(schedule, wake_on) is None
+            # A skipped night is still planned out, because a night that has
+            # already started has a unit running in it and a switch-off to
+            # perform. Tonight's own numbers are gone either way: `due` below
+            # serves only the finishing jobs once `only_finishing` is true.
+            running = schedule if skipped else self.running(schedule, wake_on)
+            assert running is not None
             plan = running.plan_for(wake_on, self.learned_lead, bed)
             if now < plan.wake_at + POWER_OFF_GRACE:
+                # Skipping is about a night that has not begun. Past its start
+                # it means the same as switching automation off mid-night: stop
+                # the stages, keep the promise. It used to drop the plan
+                # outright, and because the loop then carried on to *tomorrow*,
+                # the app was left holding a perfectly good plan for the wrong
+                # night while tonight's bed ran until the Shelly caught it.
+                if skipped and now < plan.starts_at:
+                    continue
                 # Switching automation off stops the next night. It does not
                 # abandon one already under way.
                 #
@@ -263,7 +275,12 @@ class Scheduler:
         toggle means; switching the unit off is not cancelled, because that is a
         promise rather than a preference.
         """
-        return not schedule.enabled and self.rehearsal is None
+        if self.rehearsal is not None:
+            return False
+        if not schedule.enabled:
+            return True
+        # And a night skipped after it began. Same rule, different control.
+        return self.tonight is not None and self.tonight.skip
 
     def last_finished(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The most recent night that is over, for the morning report to describe.
