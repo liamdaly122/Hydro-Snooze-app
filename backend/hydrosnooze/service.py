@@ -14,7 +14,10 @@ import logging
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+# `time` is already the stdlib module here, and this file calls
+# time.monotonic(). Aliased rather than shadowed.
+from datetime import date, datetime, timedelta
+from datetime import time as time_of_day
 from typing import Any, Callable
 
 from .adapters import build_adapters
@@ -25,6 +28,7 @@ from .config import Settings
 from .db import Database
 from .events import Event, EventLog
 from .models import (
+    MINUTES_IN_A_DAY,
     STAGE_LABEL,
     Activity,
     DeviceHealth,
@@ -34,9 +38,12 @@ from .models import (
     NightPlan,
     Power,
     Schedule,
+    NUDGE_LIMIT_C,
+    NUDGE_MINUTES,
     QUIET_KIND,
     Stage,
     StageStep,
+    Tonight,
     mode_for_target,
     quieter_mode,
     range_for,
@@ -72,6 +79,17 @@ RETRY_AFTER_POWER_OFF = timedelta(minutes=5)
 #: Restarting the board costs it fifteen seconds off the network, and is not
 #: something to reach for on the first try.
 REBOOT_AFTER_FAILURES = 2
+
+
+#: What a tonight-only change is logged under, so the morning report can tell a
+#: change you made for one night from the routine changing.
+TONIGHT_KIND = "tonight"
+
+
+def _shifted(at: time_of_day, minutes: int) -> time_of_day:
+    """A clock time moved by some minutes, wrapping midnight."""
+    total = (at.hour * 60 + at.minute + minutes) % MINUTES_IN_A_DAY
+    return time_of_day(total // 60, total % 60)
 
 
 def _retry_gap(job: Job) -> timedelta:
@@ -214,6 +232,11 @@ class Service:
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
 
         self.schedule: Schedule = self.db.load_schedule()
+        # Whatever is different about tonight, read back the same way, and after
+        # the schedule because finding which night we are in needs it. A restart
+        # is routine, and forgetting a sleep-in halfway through would put the
+        # switch-off back at the old alarm.
+        self.load_tonight()
         self.state = DeviceState()
         self.events.seed(self.db.recent_events(200))
 
@@ -1409,7 +1432,12 @@ class Service:
         await self.commands.power_off()
 
     async def _apply(self, mode: Mode, target_c: int) -> None:
-        """Put the unit into a mode at a temperature. The whole night is this."""
+        """Put the unit into a mode at a temperature. The whole night is this.
+
+        Every caller here is the plan speaking, so a nudge in force is applied on
+        the way through. A temperature typed by hand does not come this way.
+        """
+        target_c = self._nudged(target_c, mode)
         if self.state.assumed_mode is not mode:
             await self.commands.set_mode(mode)
             self._set_state(assumed_mode=mode)
@@ -1585,8 +1613,13 @@ class Service:
                 raise
 
         # Outside the lock: the presses have landed, and this is bookkeeping.
+        #
+        # Tonight only. It used to write straight into the saved routine, which
+        # made every 2am experiment permanent and silent. Making it stick is a
+        # separate tap that says so.
         if stage is not None:
-            self._adopt_into_running_stage(stage, target_c)
+            with contextlib.suppress(CommandFailed):
+                self.set_stage_tonight(stage, target_c)
 
     async def mute(self) -> None:
         """Toggle the unit's button beep.
@@ -1642,13 +1675,149 @@ class Service:
         self._push_schedule()
         return self.schedule
 
-    def _adopt_into_running_stage(self, stage: Stage, target_c: int) -> None:
-        """Remember a correction made in the middle of the night.
+    # --- Tonight only ---------------------------------------------------------
+    #
+    # The saved schedule is the routine: the nights you usually have. Tonight is
+    # the exception, and it expires with the night it belongs to.
+    #
+    # They used to be the same thing. Reaching for the temperature at 2am wrote
+    # the new number straight into the routine, so every experiment cost a
+    # permanent change and undoing it meant remembering what the number had been.
+    # "I was cold once" became "this is how I sleep". Now the cheap thing is the
+    # default and making it permanent is a separate, deliberate tap.
 
-        Reaching for the temperature at 2am is not a one-off. It is the answer to
-        "this stage is wrong", and the stage will be just as wrong tomorrow unless
-        something is done about it. So the schedule takes the new number and says
-        so. Changing it back is one tap on that stage's tab.
+    def _tonight_date(self) -> date | None:
+        return self.scheduler.night_date(self.schedule, self.clock.now())
+
+    def load_tonight(self) -> Tonight | None:
+        """Read tonight's exceptions back, and hand them to the scheduler.
+
+        Called on startup and after every change. A Tonight stored for any other
+        night is not returned, so it expires by the calendar moving rather than by
+        anything remembering to clear it.
+        """
+        wake_on = self._tonight_date()
+        found = self.db.load_tonight(wake_on) if wake_on else None
+        self.scheduler.tonight = found
+        return found
+
+    def _change_tonight(self, **patch: Any) -> Tonight:
+        """Apply one change to tonight, saving and publishing it."""
+        wake_on = self._tonight_date()
+        if wake_on is None:
+            raise CommandFailed("There is no night to change: the schedule is off.")
+        now = self.scheduler.tonight
+        base = now if now is not None and now.applies_on(wake_on) else Tonight(wake_on=wake_on)
+        changed = replace(base, **patch)
+        self.db.save_tonight(changed)
+        self.scheduler.tonight = changed
+        self._push_schedule()
+        return changed
+
+    def tonight_now(self) -> Schedule:
+        """The schedule as tonight is actually being run, for the app to show."""
+        wake_on = self._tonight_date()
+        if wake_on is None:
+            return self.schedule
+        return self.scheduler.running(self.schedule, wake_on) or self.schedule
+
+    def set_stage_tonight(self, stage: Stage, target_c: int) -> Tonight:
+        """Change one stage for this night, leaving the routine alone."""
+        stages = tuple(
+            replace(s, temp_c=target_c) if s.stage is stage else replace(s)
+            for s in self.tonight_now().stages
+        )
+        out = self._change_tonight(stages=stages)
+        label = STAGE_LABEL[stage]
+        self.events.info(
+            TONIGHT_KIND,
+            f"{label} is {target_c}C tonight. Your usual {label} is untouched.",
+        )
+        return out
+
+    def nudge_tonight(self, delta_c: int, minutes: int = NUDGE_MINUTES) -> Tonight:
+        """A few degrees either way, for a while, then back to the plan.
+
+        Degrees only. A nudge can never move bedtime, the alarm or the switch-off,
+        which is what keeps a clear shutdown deadline through any amount of
+        fiddling: the deadline is not something this can reach.
+        """
+        delta = max(-NUDGE_LIMIT_C, min(NUDGE_LIMIT_C, delta_c))
+        if not delta:
+            return self._change_tonight(nudge_c=0, nudge_until=None)
+        until = self.clock.now() + timedelta(minutes=minutes)
+        out = self._change_tonight(nudge_c=delta, nudge_until=until)
+        way = "cooler" if delta < 0 else "warmer"
+        self.events.info(
+            TONIGHT_KIND,
+            f"{abs(delta)}C {way} until {until:%H:%M}, then back to the plan.",
+        )
+        return out
+
+    def shift_tonight(self, *, bed_minutes: int = 0, wake_minutes: int = 0) -> Tonight:
+        """Going to bed early, or sleeping in.
+
+        Both move a real edge of the night, so both are stored rather than nudged,
+        and the stages refit themselves around the new length: a Schedule cannot
+        hold parts that do not add up to its whole. The switch-off follows the
+        alarm, which is the point of moving them together.
+        """
+        running = self.tonight_now()
+        patch: dict[str, Any] = {}
+        if bed_minutes:
+            patch["bed_time"] = _shifted(running.bed_time, bed_minutes)
+        if wake_minutes:
+            patch["wake_time"] = _shifted(running.wake_time, wake_minutes)
+        if not patch:
+            return self._change_tonight()
+
+        out = self._change_tonight(**patch)
+        after = self.tonight_now()
+        self.events.info(
+            TONIGHT_KIND,
+            f"Tonight runs {after.bed_time:%H:%M} to {after.wake_time:%H:%M}, "
+            f"{after.night_minutes // 60}h{after.night_minutes % 60:02d}. "
+            "The unit switches off at the new alarm. Your usual times are untouched.",
+        )
+        return out
+
+    def skip_tonight(self, skip: bool = True) -> Tonight:
+        """One night off, with the weekly routine untouched."""
+        out = self._change_tonight(skip=skip)
+        self.events.info(
+            TONIGHT_KIND,
+            "Not running tonight. Your usual nights are unchanged."
+            if skip
+            else "Back on for tonight.",
+        )
+        return out
+
+    def clear_tonight(self) -> None:
+        """Put tonight back to the routine."""
+        self.db.clear_tonight()
+        self.scheduler.tonight = None
+        self._push_schedule()
+        self.events.info(TONIGHT_KIND, "Tonight is back to your usual night.")
+
+    def _nudged(self, target_c: int, mode: Mode) -> int:
+        """A scheduled temperature with any nudge in force applied.
+
+        Only ever called where the number comes from the plan. A temperature typed
+        by hand is already what somebody wants and does not get adjusted towards
+        what they wanted half an hour ago.
+        """
+        tonight = self.scheduler.tonight
+        if tonight is None:
+            return target_c
+        delta = tonight.nudge_at(self.clock.now())
+        return self.settings.within(target_c + delta, mode) if delta else target_c
+
+    def _adopt_into_running_stage(self, stage: Stage, target_c: int) -> None:
+        """Make a correction stick for good. The deliberate one.
+
+        This used to happen on its own whenever the temperature was touched
+        mid-night. It is the right thing to *offer* and the wrong thing to
+        assume, so it is now what "save as my preference" calls and nothing else.
         """
         current = next((s for s in self.schedule.stages if s.stage is stage), None)
         if current is None or current.temp_c == target_c:

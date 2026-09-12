@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, time
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -22,6 +22,7 @@ from .models import (
     Schedule,
     SleepStage,
     Stage,
+    Tonight,
     default_stages,
 )
 
@@ -171,6 +172,27 @@ CREATE TABLE IF NOT EXISTS profiles (
 -- `reached` is false when it never got there, which is worth keeping rather than
 -- discarding: a run that never settled means the target was not achievable that
 -- night, and that is the more useful thing to know.
+-- What is different about one particular night.
+--
+-- One row, carrying the wake morning it belongs to. That is what makes it expire
+-- without anything having to tidy up: a row for any other night is spent, and the
+-- next thing to write here overwrites it.
+--
+-- The saved schedule is the routine. This is the exception, and keeping the two
+-- apart is the whole point. Reaching for the temperature at 2am used to write the
+-- new number straight into the routine, so "I was cold once" became "this is how
+-- I sleep" and undoing it meant remembering what the number had been.
+CREATE TABLE IF NOT EXISTS tonight (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    wake_on     TEXT    NOT NULL,
+    skip        INTEGER NOT NULL DEFAULT 0,
+    stages      TEXT,
+    wake_time   TEXT,
+    bed_time    TEXT,
+    nudge_c     INTEGER NOT NULL DEFAULT 0,
+    nudge_until TEXT
+);
+
 CREATE TABLE IF NOT EXISTS precondition_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT    NOT NULL,
@@ -405,6 +427,75 @@ class Database:
             self.save_schedule(schedule)
             return schedule
         return _schedule_from(row)
+
+    def load_tonight(self, wake_on: date) -> Tonight | None:
+        """Tonight's exceptions, if the stored ones are for tonight.
+
+        A row for any other night is spent and is not handed back, so a Tonight
+        expires by the calendar moving rather than by anything remembering to
+        clear it. It is left in place: one stale row costs nothing and the next
+        write overwrites it.
+        """
+        row = self._db.execute("SELECT * FROM tonight WHERE id = 1").fetchone()
+        if row is None or row["wake_on"] != wake_on.isoformat():
+            return None
+        return Tonight(
+            wake_on=wake_on,
+            skip=bool(row["skip"]),
+            stages=(
+                tuple(
+                    SleepStage(Stage(x["stage"]), x["duration_minutes"], x["temp_c"])
+                    for x in json.loads(row["stages"])
+                )
+                if row["stages"]
+                else None
+            ),
+            wake_time=_time_from(row["wake_time"]) if row["wake_time"] else None,
+            bed_time=_time_from(row["bed_time"]) if row["bed_time"] else None,
+            nudge_c=row["nudge_c"] or 0,
+            nudge_until=_parse(row["nudge_until"]),
+        )
+
+    def save_tonight(self, tonight: Tonight) -> None:
+        self._db.execute(
+            """
+            INSERT INTO tonight (id, wake_on, skip, stages, wake_time, bed_time,
+                                 nudge_c, nudge_until)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                wake_on=excluded.wake_on, skip=excluded.skip,
+                stages=excluded.stages, wake_time=excluded.wake_time,
+                bed_time=excluded.bed_time, nudge_c=excluded.nudge_c,
+                nudge_until=excluded.nudge_until
+            """,
+            (
+                tonight.wake_on.isoformat(),
+                int(tonight.skip),
+                (
+                    json.dumps(
+                        [
+                            {
+                                "stage": x.stage.value,
+                                "duration_minutes": x.duration_minutes,
+                                "temp_c": x.temp_c,
+                            }
+                            for x in tonight.stages
+                        ]
+                    )
+                    if tonight.stages is not None
+                    else None
+                ),
+                tonight.wake_time.strftime("%H:%M") if tonight.wake_time else None,
+                tonight.bed_time.strftime("%H:%M") if tonight.bed_time else None,
+                tonight.nudge_c,
+                _iso(tonight.nudge_until),
+            ),
+        )
+        self._db.commit()
+
+    def clear_tonight(self) -> None:
+        self._db.execute("DELETE FROM tonight WHERE id = 1")
+        self._db.commit()
 
     def save_schedule(self, schedule: Schedule) -> None:
         self._db.execute(

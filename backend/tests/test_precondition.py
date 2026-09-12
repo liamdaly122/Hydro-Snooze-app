@@ -346,8 +346,14 @@ async def test_setting_a_higher_temperature_by_hand_still_warms(service):
 
 # --- Reaching for the temperature in the middle of the night --------------------
 #
-# A change made at 2am is not a one-off. It is the answer to "this stage is
-# wrong", and the stage will be just as wrong tomorrow unless something is done.
+# A change made at 2am is about tonight. It might be the answer to "this stage is
+# wrong" for good, but it might equally be one cold Tuesday, and the app cannot
+# tell the two apart from a tap on a plus button.
+#
+# So it used to guess, and it guessed "for good" every time. Every experiment cost
+# a permanent change, silently, and undoing it meant remembering what the number
+# had been. It writes to tonight now, and making it permanent is a separate tap
+# that says so.
 
 
 def _running(service, stage: Stage, temp: int) -> None:
@@ -358,37 +364,52 @@ def _running(service, stage: Stage, temp: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_change_during_a_stage_becomes_that_stage_from_now_on(service):
+async def test_a_change_during_a_stage_is_for_tonight(service):
     service.schedule = _schedule()  # deep 17, rem 20, wake 26
     _running(service, Stage.DEEP, 17)
 
     await service.set_temperature(22)
 
-    deep = next(s for s in service.schedule.stages if s.stage is Stage.DEEP)
-    assert deep.temp_c == 22, "tomorrow's Deep takes tonight's correction"
-    assert [s.temp_c for s in service.schedule.stages] == [22, 20, 26], "only that stage moves"
+    assert [s.temp_c for s in service.tonight_now().stages] == [22, 20, 26], "tonight moves"
+    assert [s.temp_c for s in service.schedule.stages] == [17, 20, 26], "the routine does not"
 
 
 @pytest.mark.asyncio
-async def test_it_says_what_it_changed_and_how_to_undo_it(service):
+async def test_it_says_it_was_only_for_tonight(service):
     service.schedule = _schedule()
     _running(service, Stage.REM, 20)
 
     await service.set_temperature(24)
 
     messages = [e.message for e in service.events.recent(50)]
-    assert any("REM changed from 20C to 24C" in m for m in messages)
-    assert any("REM tab" in m for m in messages), "a way back, not just a notification"
+    assert any("REM is 24C tonight" in m for m in messages)
+    assert any("usual REM is untouched" in m for m in messages), "and says the routine is safe"
 
 
 @pytest.mark.asyncio
-async def test_the_correction_survives_a_restart(service):
+async def test_tonights_change_survives_a_restart(service):
+    """The Pi restarts routinely. Losing a 2am correction at 3am would put the
+    bed back to a number somebody had already rejected."""
     service.schedule = _schedule()
     _running(service, Stage.DEEP, 17)
     await service.set_temperature(22)
 
-    reloaded = service.db.load_schedule()
-    assert next(s for s in reloaded.stages if s.stage is Stage.DEEP).temp_c == 22
+    stored = service.db.load_tonight(service._tonight_date())
+    assert stored is not None
+    assert [s.temp_c for s in stored.stages] == [22, 20, 26]
+    assert [s.temp_c for s in service.db.load_schedule().stages] == [17, 20, 26]
+
+
+@pytest.mark.asyncio
+async def test_making_it_permanent_is_a_separate_deliberate_thing(service):
+    """The old behaviour, still available, now only when it is asked for."""
+    service.schedule = _schedule()
+    _running(service, Stage.DEEP, 17)
+    await service.set_temperature(22)
+
+    service._adopt_into_running_stage(Stage.DEEP, 22)
+
+    assert [s.temp_c for s in service.db.load_schedule().stages] == [22, 20, 26]
 
 
 @pytest.mark.asyncio

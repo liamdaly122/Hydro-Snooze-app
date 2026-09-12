@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Callable, Literal
 
-from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep
+from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep, Tonight
 
 log = logging.getLogger(__name__)
 
@@ -171,6 +171,8 @@ class Scheduler:
     #: How long this bed has really taken, when there is enough history to say.
     #: Set by the service; the scheduler itself stays free of side effects.
     learned_lead: LearnedLead | None = None
+    #: The exception to the routine, for one night. None most of the time.
+    tonight: Tonight | None = None
     #: What the hose probes read right now, or None when they are not reporting.
     #:
     #: A callable rather than a number, because the plan is worked out fresh on
@@ -198,7 +200,10 @@ class Scheduler:
             wake_on = (now + timedelta(days=offset)).date()
             if wake_on.weekday() not in schedule.days_of_week:
                 continue
-            plan = schedule.plan_for(wake_on, self.learned_lead, bed)
+            running = self.running(schedule, wake_on)
+            if running is None:
+                continue  # skipped tonight, and the weekly routine is untouched
+            plan = running.plan_for(wake_on, self.learned_lead, bed)
             if now < plan.wake_at + POWER_OFF_GRACE:
                 # Switching automation off stops the next night. It does not
                 # abandon one already under way.
@@ -215,6 +220,40 @@ class Scheduler:
                     return None
                 return plan
         return None
+
+    def night_date(self, schedule: Schedule, now: datetime) -> date | None:
+        """Which night we are inside, or heading for, as a calendar date.
+
+        Worked out from the **saved** schedule rather than from tonight's version
+        of it, which is what stops this and Tonight chasing each other: you need
+        the date to look tonight up, so the date cannot depend on what tonight
+        says. Sleeping in moves the hour and almost never the date, and skipping a
+        night still needs the date to know which night is being skipped.
+        """
+        if not schedule.days_of_week or not schedule.stages:
+            return None
+        for offset in range(-1, 8):
+            wake_on = (now + timedelta(days=offset)).date()
+            if wake_on.weekday() not in schedule.days_of_week:
+                continue
+            if now < schedule.plan_for(wake_on, self.learned_lead).wake_at + POWER_OFF_GRACE:
+                return wake_on
+        return None
+
+    def running(self, schedule: Schedule, wake_on: date) -> Schedule | None:
+        """The schedule as this particular night is being run.
+
+        The saved one most nights, and the saved one with tonight's exceptions
+        laid over it when there are any. None when the night is being skipped,
+        which leaves the weekly routine exactly as it was: skipping a Tuesday is
+        not the same as deciding you no longer sleep on Tuesdays.
+        """
+        tonight = self.tonight
+        if tonight is None or not tonight.applies_on(wake_on):
+            return schedule
+        if tonight.skip:
+            return None
+        return tonight.over(schedule)
 
     def only_finishing(self, schedule: Schedule) -> bool:
         """Whether tonight is being wound up rather than run.
@@ -242,7 +281,10 @@ class Scheduler:
             wake_on = (now - timedelta(days=back)).date()
             if wake_on.weekday() not in schedule.days_of_week:
                 continue
-            plan = schedule.plan_for(wake_on, self.learned_lead)
+            running = self.running(schedule, wake_on)
+            if running is None:
+                continue  # a skipped night has nothing to report
+            plan = running.plan_for(wake_on, self.learned_lead)
             if plan.wake_at < now:
                 return plan
         return None

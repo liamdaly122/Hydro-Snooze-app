@@ -595,6 +595,99 @@ class NightPlan:
         return self.steps[0].temp_c if self.steps else 20
 
 
+#: How long a nudge lasts by default. "Cooler for half an hour" is the control it
+#: exists for, and half an hour is long enough to tell whether it helped.
+NUDGE_MINUTES = 30
+
+#: The most a nudge may move the bed in either direction.
+#:
+#: Two degrees, because a nudge is a fidget rather than a decision. Anything
+#: bigger is a change of mind about the night, and there is a control for that
+#: which says so and shows up in the morning report.
+NUDGE_LIMIT_C = 3
+
+
+@dataclass(frozen=True)
+class Tonight:
+    """What is different about this one night, and nothing beyond it.
+
+    The Schedule is the routine: the nights you usually have. This is the
+    exception to it, and it expires with the night it belongs to.
+
+    Before this existed there was no difference between the two. Reaching for the
+    temperature at 2am wrote the new number straight into the schedule, so every
+    experiment cost a permanent change and undoing it meant remembering what the
+    number used to be. "I was cold once" became "this is how I sleep".
+
+    It is a **lens rather than a branch**: `over()` hands back the schedule as
+    tonight is actually being run, and everything downstream keeps taking a
+    plain Schedule. The scheduler, the plan, the stage arithmetic and every test
+    of them are untouched by the whole feature, which is the reason it is shaped
+    this way.
+
+    The one thing a nudge may never do is move a time. Bedtime, the alarm and the
+    switch-off are settled by the moment a night starts, and a temporary change
+    to how warm the bed is has no business touching when it ends. That is what
+    keeps a clear shutdown deadline through any amount of fiddling: the deadline
+    is not in here.
+    """
+
+    #: The wake morning this belongs to. A Tonight for any other night is spent,
+    #: which is what makes it expire without anything having to tidy it up.
+    wake_on: date
+
+    #: Not tonight. The weekly routine is untouched; this one night is off.
+    skip: bool = False
+
+    #: Tonight's temperatures, when they differ from the usual ones.
+    stages: tuple[SleepStage, ...] | None = None
+
+    #: A later alarm, or an earlier bedtime. Both move the night's real edges,
+    #: so both belong here rather than in a nudge.
+    wake_time: time | None = None
+    bed_time: time | None = None
+
+    #: A temporary offset on whatever stage is running, and when it lapses.
+    #: Degrees only. See the note above about times.
+    nudge_c: int = 0
+    nudge_until: datetime | None = None
+
+    def applies_on(self, wake_on: date) -> bool:
+        return wake_on == self.wake_on
+
+    def over(self, schedule: Schedule) -> Schedule:
+        """The schedule as tonight is actually being run.
+
+        Note what is *not* in here: the nudge. A nudge changes what gets pressed,
+        not what the night is, so it is applied where a temperature is commanded
+        and never where a plan is built.
+        """
+        patch: dict[str, object] = {}
+        if self.stages is not None:
+            patch["stages"] = [replace(s) for s in self.stages]
+        if self.wake_time is not None:
+            patch["wake_time"] = self.wake_time
+        if self.bed_time is not None:
+            patch["bed_time"] = self.bed_time
+        return replace(schedule, **patch) if patch else schedule
+
+    def nudge_at(self, now: datetime) -> int:
+        """The offset in force, which is none once it has lapsed."""
+        if not self.nudge_c or self.nudge_until is None or now >= self.nudge_until:
+            return 0
+        return self.nudge_c
+
+    def anything_to_say(self) -> bool:
+        """Whether this is worth showing or storing at all."""
+        return bool(
+            self.skip
+            or self.stages is not None
+            or self.wake_time is not None
+            or self.bed_time is not None
+            or self.nudge_c
+        )
+
+
 def plan_for_wake(
     wake_on: date,
     wake_time: time,

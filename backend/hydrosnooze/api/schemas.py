@@ -196,3 +196,24 @@ def autopilot_json(night) -> dict[str, object]:
         "energy_kwh": night.energy_kwh,
         "notes": night.notes,
     }
+
+
+def tonight_json(schedule, tonight) -> dict[str, object]:
+    """What is different about this one night, and what it adds up to.
+
+    `running` is the whole point: the schedule as tonight is actually being run,
+    so the app draws one thing rather than a routine plus a list of amendments to
+    apply in its head. `changes` is there so it can say *that* something is
+    different without working it out again.
+    """
+    return {
+        "running": schedule_json(schedule),
+        "changed": tonight is not None and tonight.anything_to_say(),
+        "skip": bool(tonight and tonight.skip),
+        "stages_changed": bool(tonight and tonight.stages is not None),
+        "times_changed": bool(tonight and (tonight.wake_time or tonight.bed_time)),
+        "nudge_c": (tonight.nudge_c if tonight else 0),
+        "nudge_until": (
+            tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None
+        ),
+    }

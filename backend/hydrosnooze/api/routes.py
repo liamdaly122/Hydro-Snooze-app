@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from ..models import (
     MIN_STAGE_MINUTES,
+    NUDGE_MINUTES,
     Mode,
     SleepStage,
     Stage,
@@ -19,7 +20,14 @@ from ..models import (
 )
 from ..sequences import CommandFailed
 from ..service import Service
-from .schemas import autopilot_json, health_json, profile_json, state_json
+from .schemas import (
+    autopilot_json,
+    schedule_json,
+    health_json,
+    profile_json,
+    state_json,
+    tonight_json,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -131,6 +139,109 @@ async def get_power(request: Request, hours: int = 24) -> list[dict[str, object]
         }
         for s in service.db.night_history(since)
     ]
+
+
+# --- Tonight only -------------------------------------------------------------
+#
+# The saved schedule is the routine. These change one night and expire with it,
+# so an experiment costs nothing to undo and nothing to remember.
+#
+# None of them may move the switch-off except the two that say they do. See
+# models.Tonight.
+
+
+class Nudge(BaseModel):
+    delta_c: int = Field(description="Degrees, either way. Clamped to a few.")
+    minutes: int = Field(default=NUDGE_MINUTES, ge=5, le=240)
+
+
+class Shift(BaseModel):
+    bed_minutes: int = Field(default=0, ge=-240, le=240)
+    wake_minutes: int = Field(default=0, ge=-240, le=240)
+
+
+class StageTonight(BaseModel):
+    stage: Stage
+    temp_c: int
+
+
+def _tonight(service: Service) -> dict[str, object]:
+    return tonight_json(service.tonight_now(), service.scheduler.tonight)
+
+
+@router.get("/tonight")
+async def get_tonight(request: Request) -> dict[str, object]:
+    return _tonight(_service(request))
+
+
+@router.post("/tonight/stage")
+async def post_tonight_stage(request: Request, body: StageTonight) -> dict[str, object]:
+    """One stage, for this night only."""
+    service = _service(request)
+    _guard_temperature(service, body.temp_c)
+    try:
+        service.set_stage_tonight(body.stage, body.temp_c)
+    except CommandFailed as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _tonight(service)
+
+
+@router.post("/tonight/nudge")
+async def post_tonight_nudge(request: Request, body: Nudge) -> dict[str, object]:
+    """A few degrees either way for a while, then back to the plan.
+
+    Degrees only. This is the control that must not be able to move the
+    switch-off, and the only way to guarantee that is for it to hold no times.
+    """
+    service = _service(request)
+    try:
+        service.nudge_tonight(body.delta_c, body.minutes)
+    except CommandFailed as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _tonight(service)
+
+
+@router.post("/tonight/shift")
+async def post_tonight_shift(request: Request, body: Shift) -> dict[str, object]:
+    """Going to bed early, or sleeping in. Moves the switch-off with the alarm."""
+    service = _service(request)
+    try:
+        service.shift_tonight(bed_minutes=body.bed_minutes, wake_minutes=body.wake_minutes)
+    except CommandFailed as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _tonight(service)
+
+
+@router.post("/tonight/skip")
+async def post_tonight_skip(request: Request, skip: bool = True) -> dict[str, object]:
+    """One night off, with the weekly routine untouched."""
+    service = _service(request)
+    try:
+        service.skip_tonight(skip)
+    except CommandFailed as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _tonight(service)
+
+
+@router.delete("/tonight")
+async def delete_tonight(request: Request) -> dict[str, object]:
+    """Put tonight back to the usual night."""
+    service = _service(request)
+    service.clear_tonight()
+    return _tonight(service)
+
+
+@router.post("/tonight/keep")
+async def post_tonight_keep(request: Request) -> dict[str, object]:
+    """Save as my preference: make tonight's temperatures the usual ones.
+
+    The old automatic behaviour, now only when it is asked for. Times are not
+    included: sleeping in once is never a new alarm.
+    """
+    service = _service(request)
+    for stage in service.tonight_now().stages:
+        service._adopt_into_running_stage(stage.stage, stage.temp_c)
+    return schedule_json(service.schedule)
 
 
 @router.get("/autopilot")

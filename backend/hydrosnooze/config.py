@@ -141,12 +141,25 @@ class Settings(BaseSettings):
     def save_wait_s(self) -> float:
         return self.save_wait_ms / 1000
 
-    def cap(self, target_c: int, mode: Mode) -> int:
+    def ceiling(self, mode: Mode) -> int:
         """The highest temperature allowed in this mode, safety cap included."""
         from .models import range_for
 
         _, high = range_for(mode)
         return min(high, self.max_temperature_c)
+
+    def within(self, target_c: int, mode: Mode) -> int:
+        """A temperature clamped into what this mode can express.
+
+        This used to be `cap(target_c, mode)`, which ignored `target_c` entirely
+        and handed back the ceiling. It read exactly like a clamp and was not one:
+        the first thing to call it expecting a clamp asked for 20C and got 35C
+        back. Two names now, each doing the one thing it says.
+        """
+        from .models import range_for
+
+        low, _ = range_for(mode)
+        return max(low, min(self.ceiling(mode), target_c))
 
 
 _settings: Settings | None = None
