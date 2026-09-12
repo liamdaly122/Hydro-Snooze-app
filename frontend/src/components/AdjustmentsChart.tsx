@@ -3,15 +3,21 @@ import type { AutopilotBand, AutopilotMark, AutopilotPoint, AdjustmentKind } fro
 /**
  * Every adjustment Autopilot made last night, on the line it made it to.
  *
- * The y axis is **distance from setpoint**, not temperature. A night that steps
- * from 19° to 26° has no single line to be near, and drawing it against one
- * makes a night that went perfectly look like a climb. Zero is the bed being
- * exactly where it was asked to be, which is the thing worth seeing at a glance,
- * and it gets the dashed rule across the middle.
+ * Two lines, both in degrees: what was asked for, and what the bed did. The
+ * gap between them is the story, and it is a gap you can read off the axis
+ * rather than a number you have to take on trust.
+ *
+ * It used to draw one line of *offsets* from the setpoint, on the argument that
+ * a night stepping 19° to 26° has no single line to be near. True, and the cost
+ * was worse: a step in that line could be the bed moving or the target moving,
+ * which are opposite kinds of news, and nothing on the chart said which. The
+ * target is drawn as a staircase, holding its value until it actually changes,
+ * because a sloped line between two setpoints would be a temperature nobody
+ * ever asked for.
  *
  * The dots are where the service did something, coloured by why. They sit on the
- * line rather than beside it, so the shape of the night and the reasons for it
- * are the same picture.
+ * bed line rather than beside it, so the shape of the night and the reasons for
+ * it are the same picture.
  */
 
 export const KIND_COLOUR: Record<AdjustmentKind, string> = {
@@ -21,33 +27,55 @@ export const KIND_COLOUR: Record<AdjustmentKind, string> = {
   manual: '#ffb340',
 }
 
-/** Half the smallest range the axis will draw. See `scale`. */
-const MIN_HALF_C = 1.5
-
-/** Above this share of readings, the rest is allowed off the top. See `scale`. */
-const KEEP = 0.94
+/** The smallest span of degrees the axis will draw. See `bounds`. */
+const MIN_SPAN_C = 4
 
 /**
- * The range to draw: symmetrical about zero, never tighter than ±1.5°, and fitted
- * to almost all of the night rather than to all of it.
+ * The degrees to draw, covering both lines with a little air.
  *
- * Symmetrical because the dashed rule has to sit in the middle to read as "on
- * target". Floored because a bed that held within a tenth of a degree all night
- * is the best possible result and, scaled to fill the box, looks like a
- * seismograph.
+ * Floored at four degrees because a night that held one setpoint within a tenth
+ * of a degree is the best possible result and, scaled to fill the box, looks
+ * like a seismograph.
  *
- * And fitted to 94% because the first half hour is the bed arriving at
- * temperature from wherever the room left it, which is several degrees out and
- * is *supposed* to be. Scaling to that squashes the eight hours that follow into
- * a flat line through the middle, so the one stretch of the night nothing was
- * controlling gets to decide how the rest of it looks. It runs off the top
- * instead, which is the honest picture of it.
+ * Rounded outwards to whole degrees so the gridlines land on numbers somebody
+ * would say out loud, which is most of the point of drawing this in degrees at
+ * all.
  */
-function scale(values: number[]): number {
-  if (!values.length) return MIN_HALF_C
-  const sorted = values.map(Math.abs).sort((a, b) => a - b)
-  const kept = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * KEEP))]!
-  return Math.max(MIN_HALF_C, Math.ceil(kept * 2) / 2)
+function bounds(values: number[]): [number, number] {
+  if (!values.length) return [18, 18 + MIN_SPAN_C]
+  let low = Math.floor(Math.min(...values))
+  let high = Math.ceil(Math.max(...values))
+  const short = MIN_SPAN_C - (high - low)
+  if (short > 0) {
+    low -= Math.floor(short / 2)
+    high += Math.ceil(short / 2)
+  }
+  return [low, high]
+}
+
+/**
+ * The target as a staircase: each reading holds the previous value until the
+ * moment it changes, so a stage boundary is a vertical edge rather than a ramp.
+ *
+ * A straight line between 19° and 26° would draw every temperature in between as
+ * though it had been asked for, and none of them were.
+ */
+function staircase(
+  track: AutopilotPoint[],
+  x: (at: string) => number,
+  y: (c: number) => number,
+): string {
+  const parts: string[] = []
+  let held: number | null = null
+  for (const p of track) {
+    const at = x(p.at).toFixed(1)
+    if (held === null) parts.push(`M${at} ${y(p.target_c).toFixed(1)}`)
+    else if (p.target_c !== held) parts.push(`L${at} ${y(held).toFixed(1)}`, `L${at} ${y(p.target_c).toFixed(1)}`)
+    held = p.target_c
+  }
+  const last = track[track.length - 1]
+  if (last) parts.push(`L${x(last.at).toFixed(1)} ${y(last.target_c).toFixed(1)}`)
+  return parts.join(' ')
 }
 
 function clock(at: number): string {
@@ -76,7 +104,11 @@ export function AdjustmentsChart({
   const firstAt = new Date(track[0]!.at).getTime()
   const lastAt = new Date(track[track.length - 1]!.at).getTime()
   const span = Math.max(1, lastAt - firstAt)
-  const half = scale(track.map((p) => p.offset_c))
+  const [low, high] = bounds([
+    ...track.map((p) => p.bed_c),
+    ...track.map((p) => p.target_c),
+  ])
+  const degrees = Math.max(1, high - low)
 
   // Inset by a hair at both ends, so a dot on the very first or very last reading
   // sits inside the box instead of hanging half of itself over the edge. The
@@ -88,19 +120,25 @@ export function AdjustmentsChart({
   // Clamped, so a reading past the top of the axis runs along the edge instead
   // of being drawn somewhere off the chart with a line shooting up to meet it.
   const y = (c: number) =>
-    height / 2 - (Math.max(-half, Math.min(half, c)) / half) * (height / 2 - 10)
+    height - 10 - ((Math.max(low, Math.min(high, c)) - low) / degrees) * (height - 20)
 
-  const line = track.map((p, i) => `${i ? 'L' : 'M'}${x(p.at).toFixed(1)} ${y(p.offset_c).toFixed(1)}`).join(' ')
+  const bedLine = track
+    .map((p, i) => `${i ? 'L' : 'M'}${x(p.at).toFixed(1)} ${y(p.bed_c).toFixed(1)}`)
+    .join(' ')
+  const wantedLine = staircase(track, x, y)
 
   // Only the marks that landed inside the window and have somewhere to sit. A
   // dot at an invented height would be the chart making something up, which is
   // the one thing this project does not do.
   const dots = marks.filter((m) => {
     const at = new Date(m.at).getTime()
-    return m.offset_c !== null && at >= firstAt && at <= lastAt
+    return m.bed_c !== null && at >= firstAt && at <= lastAt
   })
 
-  const rules = [half, half / 2, 0, -half / 2, -half]
+  // Whole degrees, at most five of them, so the labels stay readable on a phone.
+  const stride = Math.max(1, Math.ceil(degrees / 4))
+  const rules: number[] = []
+  for (let c = low; c <= high; c += stride) rules.push(c)
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => firstAt + span * f)
 
   return (
@@ -111,7 +149,7 @@ export function AdjustmentsChart({
           viewBox={`0 0 ${width} ${height}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label={`${dots.length} adjustments through the night, against how far the bed sat from its setpoint`}
+          aria-label={`${dots.length} adjustments through the night, with the bed temperature against the temperature asked for`}
         >
           {/*
             The stages behind everything, alternating so the boundaries are
@@ -138,17 +176,30 @@ export function AdjustmentsChart({
               x2={width}
               y1={y(c)}
               y2={y(c)}
-              stroke={c === 0 ? 'rgb(255 255 255 / 0.35)' : 'rgb(255 255 255 / 0.07)'}
+              stroke="rgb(255 255 255 / 0.07)"
               strokeWidth={1}
-              strokeDasharray={c === 0 ? '6 6' : undefined}
               vectorEffect="non-scaling-stroke"
             />
           ))}
 
+          {/* Asked for, underneath. Dashed, because it is an instruction rather
+              than a measurement, and every other dashed thing in this app means
+              the same. */}
           <path
-            d={line}
+            d={wantedLine}
             fill="none"
-            stroke="rgb(255 255 255 / 0.55)"
+            stroke="rgb(120 160 255 / 0.75)"
+            strokeWidth={1.5}
+            strokeDasharray="5 4"
+            strokeLinejoin="miter"
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {/* Measured, on top, solid and brighter. */}
+          <path
+            d={bedLine}
+            fill="none"
+            stroke="rgb(255 255 255 / 0.75)"
             strokeWidth={1.5}
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -169,7 +220,7 @@ export function AdjustmentsChart({
               className={`apchart__dot apchart__dot--${m.kind}`}
               style={{
                 left: `${(x(m.at) / width) * 100}%`,
-                top: `${(y(m.offset_c!) / height) * 100}%`,
+                top: `${(y(m.bed_c!) / height) * 100}%`,
                 borderColor: KIND_COLOUR[m.kind],
               }}
               title={`${clock(new Date(m.at).getTime())} · ${m.detail}`}
@@ -180,7 +231,7 @@ export function AdjustmentsChart({
         <div className="apchart__scale" aria-hidden="true">
           {rules.map((c) => (
             <span key={c} style={{ top: `${(y(c) / height) * 100}%` }}>
-              {c > 0 ? `+${c}` : c}
+              {c}&deg;
             </span>
           ))}
         </div>

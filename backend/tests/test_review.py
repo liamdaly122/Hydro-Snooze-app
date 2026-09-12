@@ -18,7 +18,7 @@ import pytest
 
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
-from hydrosnooze.db import MIN_RUNS_TO_LEARN, Database
+from hydrosnooze.db import MIN_RUNS_TO_LEARN, Database, Sample
 from hydrosnooze.models import (
     DRIFT_MINUTES,
     Mode,
@@ -324,3 +324,98 @@ async def test_editing_a_running_stage_into_the_other_mode_works(service):
     await service.set_stage_tonight(Stage.DEEP, 40)
     assert service.state.assumed_mode is Mode.WARMING
     assert service.state.assumed_target_c == 40
+
+
+# --- The third round: the Autopilot chart ----------------------------------------
+
+
+def _night(temps=(21, 19, 22, 26), wake=time(7, 30)) -> Schedule:
+    return Schedule(
+        wake_time=wake,
+        bed_time=time(22, 30),
+        days_of_week=[0, 1, 2, 3, 4, 5, 6],
+        stages=[
+            SleepStage(Stage.DRIFT, DRIFT_MINUTES, temps[0]),
+            SleepStage(Stage.DEEP, 240, temps[1]),
+            SleepStage(Stage.REM, 210, temps[2]),
+            SleepStage(Stage.WAKE, 60, temps[3]),
+        ],
+    )
+
+
+def test_last_nights_report_does_not_change_when_the_schedule_does():
+    """The one Codex reproduced: an unchanged reading going from perfect to
+    nothing because somebody edited their routine the next morning.
+
+    The report rebuilt the night from the schedule as it stands *now*, so every
+    reading was scored against a number that may never have been asked for. A
+    tonight row expires by the calendar as well, so by breakfast even last
+    night's own corrections were gone from the reconstruction.
+    """
+    from hydrosnooze import autopilot
+
+    plan = _night().plan_for(TONIGHT)
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    samples = [
+        Sample(deep.starts_at + timedelta(minutes=i), 160.0, 19.0, 19.0, 19.5, target_c=19)
+        for i in range(0, 120, 5)
+    ]
+
+    perfect = autopilot.build(plan, samples, [], set(), None)
+    assert perfect.on_target == 100, "the bed sat exactly where it was asked to"
+
+    # Next morning, the routine is edited. Same readings, same night.
+    edited = _night(temps=(21, 25, 22, 26)).plan_for(TONIGHT)
+    after = autopilot.build(edited, samples, [], set(), None)
+    assert after.on_target == 100, "a night that happened does not change"
+
+
+def test_a_nudge_is_part_of_what_was_asked_for():
+    """A nudge changes what the unit is sent and is deliberately not part of the
+    plan, so a night spent a degree cooler than the routine scored as a degree
+    off it. The bed did what it was told."""
+    from hydrosnooze import autopilot
+
+    plan = _night().plan_for(TONIGHT)
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    samples = [
+        Sample(deep.starts_at + timedelta(minutes=i), 160.0, 18.0, 18.0, 19.5, target_c=18)
+        for i in range(0, 60, 5)
+    ]
+    assert autopilot.build(plan, samples, [], set(), None).on_target == 100
+
+
+def test_getting_ready_is_not_scored_as_part_of_the_night():
+    """The stretch before bedtime is the bed on its way to the number, not the
+    bed failing to hold it. Counting it means a slow pre-heat reads as a bad
+    night, which is the opposite of what it is."""
+    from hydrosnooze import autopilot
+
+    plan = _night(temps=(16, 19, 22, 26)).plan_for(TONIGHT)
+    assert plan.precool_at is not None
+    getting_ready = [
+        Sample(plan.precool_at + timedelta(minutes=i), 300.0, 24.0, 24.0, 19.5, target_c=16)
+        for i in range(0, 20, 5)
+    ]
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    asleep = [
+        Sample(deep.starts_at + timedelta(minutes=i), 160.0, 19.0, 19.0, 19.5, target_c=19)
+        for i in range(0, 60, 5)
+    ]
+
+    night = autopilot.build(plan, getting_ready + asleep, [], set(), None)
+    assert night.on_target == 100, "the night held; getting there is reported on its own"
+
+
+def test_the_chart_carries_both_temperatures_in_degrees():
+    """A single line of offsets cannot say whether a jump was the bed moving or
+    the target moving, and those are opposite kinds of news."""
+    from hydrosnooze import autopilot
+
+    plan = _night().plan_for(TONIGHT)
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    samples = [Sample(deep.starts_at, 160.0, 19.4, 19.4, 19.5, target_c=19)]
+
+    point = autopilot.build(plan, samples, [], set(), None).track[0]
+    assert point.bed_c == 19.4
+    assert point.target_c == 19

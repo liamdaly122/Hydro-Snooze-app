@@ -161,11 +161,16 @@ def autopilot_json(night) -> dict[str, object]:
                 "kind": m.kind,
                 "label": m.label,
                 "detail": m.detail,
-                "offset_c": m.offset_c,
+                "bed_c": m.bed_c,
             }
             for m in night.marks
         ],
-        "track": [{"at": p.at.isoformat(), "offset_c": p.offset_c} for p in night.track],
+        # Both in degrees, and both drawn. An offset on its own cannot say
+        # whether a step was the bed moving or the target moving.
+        "track": [
+            {"at": p.at.isoformat(), "bed_c": p.bed_c, "target_c": p.target_c}
+            for p in night.track
+        ],
         "bands": [
             {
                 "label": b.label,

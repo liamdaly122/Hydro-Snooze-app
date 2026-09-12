@@ -674,13 +674,17 @@ function seedNight(): AutopilotNight {
     const target = band ? band.temp_c : bands[0]!.temp_c
     bed += on ? (target - bed) * 0.06 : (20.5 - bed) * 0.01
     const shown = bed + Math.sin(i / 37) * 0.28
-    track.push({ at: new Date(ms).toISOString(), offset_c: Math.round((shown - target) * 100) / 100 })
+    track.push({
+      at: new Date(ms).toISOString(),
+      bed_c: Math.round(shown * 100) / 100,
+      target_c: target,
+    })
   }
 
-  const offsetAt = (ms: number) =>
+  const bedAt = (ms: number) =>
     track.reduce((best, p) =>
       Math.abs(new Date(p.at).getTime() - ms) < Math.abs(new Date(best.at).getTime() - ms) ? p : best,
-    ).offset_c
+    ).bed_c
 
   // The nine a real night produces: a mode press and a rail-and-count at each
   // boundary, two for getting the bed ready, two for the one drift correction.
@@ -701,10 +705,15 @@ function seedNight(): AutopilotNight {
     kind,
     label: { phase: 'Phase & mode change', precool: 'Getting the bed ready', quiet: 'Drift response', manual: 'Set by hand' }[kind],
     detail,
-    offset_c: offsetAt(when.getTime()),
+    bed_c: bedAt(when.getTime()),
   }))
 
-  const off = track.map((p) => Math.abs(p.offset_c))
+  // Only the night itself, the way the service scores it: before bedtime the bed
+  // is on its way to the number rather than failing to hold it.
+  const overnight = bands[0]!.starts_at.getTime()
+  const off = track
+    .filter((p) => new Date(p.at).getTime() >= overnight)
+    .map((p) => Math.abs(p.bed_c - p.target_c))
   return {
     wake_at: wake.toISOString(),
     starts_at: at(21, 30).toISOString(),

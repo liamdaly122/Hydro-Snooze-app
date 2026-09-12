@@ -239,13 +239,18 @@ export interface AutopilotMark {
   kind: AdjustmentKind
   label: string
   detail: string
-  /** Bed minus setpoint at that moment, or null if the probes were quiet. */
-  offset_c: number | null
+  /** What the bed read at that moment, so the dot sits on the line the chart
+   *  draws. Null if the probes were quiet, and then it has nowhere to sit. */
+  bed_c: number | null
 }
 
 export interface AutopilotPoint {
   at: string
-  offset_c: number
+  /** What the probes read. */
+  bed_c: number
+  /** What was being asked for at that moment, recorded then rather than worked
+   *  out now. Includes nudges and anything set by hand. */
+  target_c: number
 }
 
 export interface AutopilotBand {
@@ -308,7 +313,8 @@ export interface AutopilotNight {
   bands: AutopilotBand[]
   boosts: AutopilotBoost[]
   stages: { landed: number; total: number; missed: string[] }
-  /** Share of the night the bed sat within half a degree of its setpoint. */
+  /** Share of the night proper, after bedtime, that the bed sat within half a
+   *  degree of its setpoint. Getting ready is reported separately in `ready`. */
   on_target: number | null
   bed: { low_c: number | null; high_c: number | null; typical_off_c: number | null }
   ready: {

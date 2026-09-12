@@ -1626,10 +1626,19 @@ button:disabled {
   flex: none;
 }
 
+/* The two lines on the chart, drawn the way the chart draws them: the dashed
+   blue one is what was asked for, the solid white one is what the bed did. */
 .ap-key__dash {
   width: 12px;
   height: 0;
-  border-top: 1px dashed rgb(255 255 255 / 0.45);
+  border-top: 1.5px dashed rgb(120 160 255 / 0.75);
+  flex: none;
+}
+
+.ap-key__solid {
+  width: 12px;
+  height: 0;
+  border-top: 1.5px solid rgb(255 255 255 / 0.75);
   flex: none;
 }
 

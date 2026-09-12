@@ -180,7 +180,7 @@ def test_a_dot_with_nothing_measuring_it_has_nowhere_to_sit(plan):
     """Rather than being drawn at an invented height."""
     at = plan.steps[0].starts_at
     night = build(plan, [ev(at, PHASE_KIND), ev(at, "temperature")])
-    assert night.marks[0].offset_c is None
+    assert night.marks[0].bed_c is None
 
 
 def test_a_night_with_no_probe_readings_still_counts_what_it_did(plan):

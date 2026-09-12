@@ -125,15 +125,29 @@ class Mark:
     kind: str
     label: str
     detail: str
-    #: Bed temperature minus the setpoint in force at that moment. None whenever
-    #: the probes were quiet, which is also when the dot has nowhere to sit.
-    offset_c: float | None
+    #: What the bed read at that moment, so the dot sits on the line the chart
+    #: actually draws. None whenever the probes were quiet, which is also when
+    #: the dot has nowhere to sit.
+    bed_c: float | None
 
 
 @dataclass(frozen=True)
 class Point:
+    """One reading, with the number it was being measured against.
+
+    Both in degrees, because the chart draws both. A single line of offsets
+    cannot say whether a jump was the bed moving or the target moving, and those
+    are opposite kinds of news: one is the unit struggling, the other is the
+    schedule doing exactly what it was told.
+    """
+
     at: datetime
-    offset_c: float
+    bed_c: float
+    target_c: int
+
+    @property
+    def offset_c(self) -> float:
+        return round(self.bed_c - self.target_c, 2)
 
 
 @dataclass(frozen=True)
@@ -199,11 +213,19 @@ def _step_at(plan: NightPlan, when: datetime) -> StageStep | None:
 
 
 def _target_at(plan: NightPlan, when: datetime) -> int | None:
-    """What the bed was being asked for at a given moment.
+    """What the bed was being asked for at a given moment, reconstructed.
+
+    The fallback, for readings taken before the target was written down beside
+    them. Reconstruction is the thing this used to do for every reading, and it
+    is wrong in three ways at once: a nudge is deliberately not part of a plan,
+    a temperature set by hand rewrites the whole stage it landed in, and the plan
+    itself is rebuilt from the schedule as it stands at breakfast. Editing a
+    routine in the morning could take a night that held perfectly and score it
+    at nothing, without a single reading having changed.
 
     Before the first stage opens there is no step, but there is still a target:
     pre-conditioning aims at the first stage's temperature, and the whole point
-    of that stretch is watching the bed arrive at it. So it counts.
+    of that stretch is watching the bed arrive at it.
     """
     step = _step_at(plan, when)
     if step is not None:
@@ -225,15 +247,17 @@ def _track(plan: NightPlan, samples: list[Sample]) -> list[Point]:
     for sample in samples:
         if sample.return_c is None:
             continue
-        target = _target_at(plan, sample.at)
+        # What was recorded at the time, and only otherwise what can be worked
+        # out now. A record beats a reconstruction whenever there is one.
+        target = sample.target_c if sample.target_c is not None else _target_at(plan, sample.at)
         if target is None:
             continue
-        out.append(Point(at=sample.at, offset_c=round(sample.return_c - target, 2)))
+        out.append(Point(at=sample.at, bed_c=sample.return_c, target_c=target))
     return out
 
 
-def _offset_near(track: list[Point], when: datetime) -> float | None:
-    """The bed's offset at a moment, from the nearest reading within a few beats.
+def _near(track: list[Point], when: datetime) -> Point | None:
+    """The reading nearest a moment, if one is near enough to mean anything.
 
     Nearest rather than interpolated: these are readings on a thirty second beat
     and a dot belongs on one of them, not on a number invented between two.
@@ -243,7 +267,7 @@ def _offset_near(track: list[Point], when: datetime) -> float | None:
     best = min(track, key=lambda p: abs((p.at - when).total_seconds()))
     if abs((best.at - when).total_seconds()) > FALLBACK_SAMPLE_S * 4:
         return None
-    return best.offset_c
+    return best
 
 
 def _marks(plan: NightPlan, events: list[Event], track: list[Point]) -> list[Mark]:
@@ -284,7 +308,7 @@ def _marks(plan: NightPlan, events: list[Event], track: list[Point]) -> list[Mar
                 kind=kind,
                 label=LABELS[kind],
                 detail=event.message,
-                offset_c=_offset_near(track, event.at),
+                bed_c=(near.bed_c if (near := _near(track, event.at)) else None),
             )
         )
     return out
@@ -370,7 +394,12 @@ def build(
     missed = [s.label for s in plan.steps if f"stage:{s.stage.value}" not in fired]
     track = _track(plan, samples)
     bed = [s.return_c for s in samples if s.return_c is not None]
-    off = [abs(p.offset_c) for p in track]
+    # Only the night itself. Before the first stage opens, the bed is on its way
+    # to the number rather than failing to hold it, so counting that stretch made
+    # a slow pre-heat read as a bad night, which is the opposite of what it is.
+    # How getting ready went is its own figure, and `ready` below carries it.
+    overnight = plan.steps[0].starts_at if plan.steps else plan.bedtime_at
+    off = [abs(p.offset_c) for p in track if p.at >= overnight]
 
     return Night(
         wake_at=plan.wake_at,

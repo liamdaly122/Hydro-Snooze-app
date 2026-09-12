@@ -50,6 +50,14 @@ class Sample(NamedTuple):
 
     The degrees are None on any beat the probe board was quiet, and on every beat
     recorded before the probes existed.
+
+    `target_c` is what the bed was being asked for at that moment, written down
+    rather than worked out again afterwards. The morning report used to rebuild
+    the night from the schedule as it stands *then*, so editing a routine over
+    breakfast rescored the night behind it, a nudge never appeared at all, and a
+    perfect night could read as a total failure without a single reading having
+    changed. A measurement and the thing it was measured against belong on the
+    same row.
     """
 
     at: datetime
@@ -57,6 +65,7 @@ class Sample(NamedTuple):
     flow_c: float | None = None
     return_c: float | None = None
     room_c: float | None = None
+    target_c: int | None = None
 
 
 class PreconditionRow(NamedTuple):
@@ -309,6 +318,10 @@ class Database:
         for name in ("flow_c", "return_c", "room_c"):
             if name not in cols:
                 self._db.execute(f"ALTER TABLE power_samples ADD COLUMN {name} REAL")
+        # What the bed was being asked for on that beat. NULL on every row older
+        # than this column, and the report falls back to reconstructing those.
+        if "target_c" not in cols:
+            self._db.execute("ALTER TABLE power_samples ADD COLUMN target_c INTEGER")
 
         # The probe columns. Older rows keep NULL, which is honest: those runs
         # were decided off the plug and no temperature was measured.
@@ -642,8 +655,9 @@ class Database:
         flow_c: float | None = None,
         return_c: float | None = None,
         room_c: float | None = None,
+        target_c: int | None = None,
     ) -> None:
-        self._pending_power.append((at.isoformat(), watts, flow_c, return_c, room_c))
+        self._pending_power.append((at.isoformat(), watts, flow_c, return_c, room_c, target_c))
         if len(self._pending_power) >= POWER_BATCH:
             self.flush_power()
 
@@ -655,7 +669,7 @@ class Database:
         with self._db:
             self._db.executemany(
                 "INSERT OR REPLACE INTO power_samples "
-                "(at, watts, flow_c, return_c, room_c) VALUES (?, ?, ?, ?, ?)",
+                "(at, watts, flow_c, return_c, room_c, target_c) VALUES (?, ?, ?, ?, ?, ?)",
                 self._pending_power,
             )
         self._pending_power.clear()
@@ -678,7 +692,7 @@ class Database:
         """
         self.flush_power()
         rows = self._db.execute(
-            "SELECT at, watts, flow_c, return_c, room_c FROM power_samples "
+            "SELECT at, watts, flow_c, return_c, room_c, target_c FROM power_samples "
             "WHERE at >= ? ORDER BY at",
             (since.isoformat(),),
         ).fetchall()
@@ -689,6 +703,7 @@ class Database:
                 r["flow_c"],
                 r["return_c"],
                 r["room_c"],
+                None if r["target_c"] is None else int(r["target_c"]),
             )
             for r in rows
         ]

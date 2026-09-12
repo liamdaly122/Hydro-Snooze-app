@@ -51,10 +51,10 @@ function nightLabel(startsAt: string, wakeAt: string): string {
 /** "Perfect", or how far off it typically sat. Never a bare number with no verdict. */
 function howItHeld(off: number | null): string {
   if (off === null) return 'No probe readings for this night'
-  if (off <= 0.3) return 'Held its setpoint all night'
-  if (off <= 0.8) return `Typically ${off.toFixed(1)}° off its setpoint`
-  if (off <= 2.0) return `Ran ${off.toFixed(1)}° off its setpoint on average`
-  return `Drifted ${off.toFixed(1)}° off its setpoint on average`
+  if (off <= 0.3) return 'Held its setpoint all night, once you were in bed'
+  if (off <= 0.8) return `Typically ${off.toFixed(1)}° off its setpoint after lights out`
+  if (off <= 2.0) return `Ran ${off.toFixed(1)}° off its setpoint on average after lights out`
+  return `Drifted ${off.toFixed(1)}° off its setpoint on average after lights out`
 }
 
 export function Autopilot({ client }: { client: ApiClient }) {
@@ -160,6 +160,12 @@ export function Autopilot({ client }: { client: ApiClient }) {
             worked, and the chart underneath is a picture of exactly this.
           */}
           <div className="ap-split__total">
+            {/*
+              After lights out, not from the moment the bed started getting
+              ready. That stretch is the bed on its way to the number rather than
+              failing to hold it, and counting it made a slow pre-heat read as a
+              bad night. How getting ready went is its own line further down.
+            */}
             <p className="ap-sublabel">On target</p>
             <p className="ap-total">{night.on_target === null ? '—' : `${night.on_target}%`}</p>
           </div>
@@ -191,7 +197,11 @@ export function Autopilot({ client }: { client: ApiClient }) {
           ))}
           <span className="ap-key__item ap-key__item--rule">
             <span className="ap-key__dash" />
-            On setpoint
+            Asked for
+          </span>
+          <span className="ap-key__item ap-key__item--rule">
+            <span className="ap-key__solid" />
+            Bed
           </span>
         </div>
       </section>

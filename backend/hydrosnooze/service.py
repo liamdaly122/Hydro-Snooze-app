@@ -900,7 +900,16 @@ class Service:
         await self._follow_the_plan(step, power, now)
         if watts is not None:
             self.db.add_power_sample(
-                now, watts, flow_c=flow, return_c=back, room_c=room
+                now,
+                watts,
+                flow_c=flow,
+                return_c=back,
+                room_c=room,
+                # What was asked for, not what was sent: the correction is
+                # invisible everywhere above _corrected, and the chart is one of
+                # the places it has to stay invisible. Written down here so the
+                # morning has a record rather than a reconstruction.
+                target_c=self.state.assumed_target_c,
             )
             # Once an hour, on the hour. Both tables grow every night forever
             # otherwise, on an SD card that is already the likeliest thing in the
