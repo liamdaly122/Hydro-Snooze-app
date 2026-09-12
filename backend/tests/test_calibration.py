@@ -163,3 +163,31 @@ def test_it_says_once_a_night_that_the_two_numbers_differ(service):
     assert len(said) == 1
     assert "Sending 30C to get a 28C bed" in said[0]
     assert "measured on recent nights" in said[0]
+
+
+# --- The script that reports all this ---------------------------------------------
+
+
+def test_the_script_uses_the_same_rules_as_the_service():
+    """`scripts/calibration.py` keeps its own copies of these so it can run on any
+    machine with nothing but Python: no virtualenv, no package, just the database.
+
+    That is worth having and it is a drift risk, so this is the thing that fails
+    when somebody changes one and not the other. A script that reports "2 more
+    nights" against a service that wants three is worse than no script.
+    """
+    import re
+    from pathlib import Path
+
+    from hydrosnooze import db as real
+
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "calibration.py").read_text()
+
+    def declared(name: str) -> float:
+        found = re.search(rf"^{name} = ([\d.]+)$", source, re.M)
+        assert found, f"{name} is not declared in the script any more"
+        return float(found.group(1))
+
+    assert declared("MIN_RUNS_TO_LEARN") == real.MIN_RUNS_TO_LEARN
+    assert declared("MIN_LEARNABLE_GAP_C") == real.MIN_LEARNABLE_GAP_C
+    assert declared("LEARNED_BASE_MINUTES") == real.LEARNED_BASE_MINUTES

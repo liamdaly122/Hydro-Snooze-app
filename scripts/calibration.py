@@ -37,6 +37,13 @@ from pathlib import Path
 
 DEFAULT_DB = "/opt/hydrosnooze/data/hydrosnooze.db"
 
+# Copies of the service's own rules, so this can run on any machine with nothing
+# but Python. backend/tests/test_calibration.py fails if they ever drift from
+# backend/hydrosnooze/db.py, which is where the real ones live.
+MIN_RUNS_TO_LEARN = 3
+MIN_LEARNABLE_GAP_C = 2.0
+LEARNED_BASE_MINUTES = 5
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
@@ -87,12 +94,69 @@ def main() -> int:
         note = "" if len(offs) >= 3 else "   (one or two runs is an anecdote)"
         print(f"    {mode:9} {mean:+.1f}C over {len(offs)} runs, spread {spread:.1f}C{note}")
 
+    learned(rows, db)
+
     print()
     print("  A negative number means the bed ends up cooler than the app asked for.")
     print("  If the two modes disagree in sign, that is the hose run losing heat")
     print("  both ways rather than the unit being wrong, and one flat correction")
     print("  will not fix both.")
     return 0
+
+
+def learned(rows, db) -> None:
+    """What the two learned things currently have, and what they still need.
+
+    The question anyone actually asks is "will tonight be different", and the
+    answer is a pair of counts. Both need three qualifying runs before they
+    replace an estimate with a measurement, because one night is an anecdote.
+
+    They qualify differently, which is why they are counted separately:
+
+        the lead time    needs a run that actually travelled two degrees or
+                         more, because a run that started at its target reached
+                         it at once and that is not a speed
+        the correction   needs any finished run near the same target, because
+                         what it wants is where the bed settled, not how long
+                         it took to get there
+    """
+    print()
+    print("  What it has learned so far")
+    print()
+
+    targets = sorted({(r["mode"], r["target_c"]) for r in rows})
+    for mode, target in targets:
+        near = [
+            r
+            for r in db.execute(
+                "SELECT seconds, start_c, end_c FROM precondition_runs "
+                "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= 3 "
+                "AND end_c IS NOT NULL",
+                (mode, target),
+            ).fetchall()
+        ]
+        travelled = [
+            r for r in near if r["start_c"] is not None
+            and abs(r["end_c"] - r["start_c"]) >= MIN_LEARNABLE_GAP_C
+        ]
+
+        print(f"    {mode} to about {target}C")
+        _line("how long it takes", len(travelled))
+        _line("how far the bed lands from the setting", len(near))
+        print()
+
+    print(f"  Three runs of each and it stops estimating. Only runs the probes")
+    print(f"  decided count, so leave the probe board up through the evening.")
+
+
+def _line(what: str, have: int) -> None:
+    need = MIN_RUNS_TO_LEARN
+    if have >= need:
+        print(f"      {what:40} {have} runs, measured")
+    else:
+        short = need - have
+        night = "night" if short == 1 else "nights"
+        print(f"      {what:40} {have} of {need}, {short} more {night}")
 
 
 if __name__ == "__main__":
