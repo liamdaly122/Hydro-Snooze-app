@@ -92,6 +92,16 @@ TONIGHT_KIND = "tonight"
 #: worth six controls on the home screen all day to allow.
 TONIGHT_OPENS = timedelta(hours=6)
 
+#: The most the measured correction may move a setting, either way.
+#:
+#: Four degrees. Past that something has gone wrong with the measurement rather
+#: than with the bed, and a runaway correction on a heater under a mattress is
+#: the one failure in this project worth a hard limit rather than a warning.
+CORRECTION_LIMIT_C = 4
+
+#: "Not said yet", distinct from "said, on a day with no night". See Service.
+_UNTOLD = object()
+
 
 def _shifted(at: time_of_day, minutes: int) -> time_of_day:
     """A clock time moved by some minutes, wrapping midnight."""
@@ -274,6 +284,12 @@ class Service:
         #: fault that persists, not to the first sign of one.
         self._power_off_night: datetime | None = None
         self._power_off_fails = 0
+        #: The night whose correction has already been mentioned. See _corrected.
+        #:
+        #: A sentinel rather than None, because None is also a real answer here:
+        #: it is what _tonight_date gives on a day with no night, and starting at
+        #: None would mean a correction applied then was never mentioned at all.
+        self._correction_told: object = _UNTOLD
 
         # Whether the probe board was last heard from, and when it went quiet.
         # None means never asked, which is not the same as not answering.
@@ -1444,12 +1460,16 @@ class Service:
         Every caller here is the plan speaking, so a nudge in force is applied on
         the way through. A temperature typed by hand does not come this way.
         """
-        target_c = self._nudged(target_c, mode)
+        # Nudge first, because that is what somebody wants the bed to be. The
+        # correction second, because that is how the unit is persuaded to do it.
+        wanted = self._nudged(target_c, mode)
         if self.state.assumed_mode is not mode:
             await self.commands.set_mode(mode)
             self._set_state(assumed_mode=mode)
-        await self.commands.set_temperature(target_c, mode)
-        self._set_state(assumed_target_c=target_c, last_command_at=self.clock.now())
+        await self.commands.set_temperature(self._corrected(wanted, mode), mode)
+        # What was asked for, not what was sent. The correction is invisible
+        # everywhere above this line.
+        self._set_state(assumed_target_c=wanted, last_command_at=self.clock.now())
 
     def _report_idle_preconditioning(self, plan: NightPlan) -> None:
         """Say so when the pre-conditioning run never actually did anything.
@@ -1613,7 +1633,16 @@ class Service:
                 if self.state.assumed_mode is not mode:
                     await self.commands.set_mode(mode)
                     self._set_state(assumed_mode=mode)
-                await self.commands.set_temperature(target_c, mode)
+                # Corrected here too, and for the same reason as everywhere else:
+                # 30 means a 30 degree bed whether the plan asked for it or
+                # somebody typed it. A correction that applied only to scheduled
+                # temperatures would make the dial and the night disagree, which
+                # is worse than no correction at all.
+                #
+                # Deliberately not nudged. A nudge is an adjustment to what the
+                # plan wants; a number typed by hand is already what somebody
+                # wants, and nudging it would move it away from what they asked.
+                await self.commands.set_temperature(self._corrected(target_c, mode), mode)
                 self._set_state(assumed_target_c=target_c, last_command_at=self.clock.now())
             except CommandFailed as exc:
                 self._fail("temperature", exc, assumed_target_c=None)
@@ -1843,6 +1872,51 @@ class Service:
             return target_c
         delta = tonight.nudge_at(self.clock.now())
         return self.settings.within(target_c + delta, mode) if delta else target_c
+
+    # --- The bed, not the dial -------------------------------------------------
+
+    def _corrected(self, wanted_c: int, mode: Mode) -> int:
+        """What to actually send so the bed lands on `wanted_c`.
+
+        Liam measured the gap on 12 September: ask for 28 in warming and the bed
+        settles at 25.9. The unit heats water at its own outlet and the probes sit
+        on the hose at the bed, so heat leaks in between, and how much depends on
+        the mode: turbo drives the water hard and holds the bed close, warming is
+        gentler and lets it sag five times further.
+
+        **Invisible on purpose.** The number on the screen is the bed, which is
+        the thing anyone actually cares about; this is how it gets there. So the
+        correction is applied here, on the way out, and nothing upstream of it
+        ever sees the adjusted figure: `assumed_target_c` stays what was asked
+        for, and so does the schedule, the profile and the chart.
+
+        No correction at all until the bed has been measured enough times to have
+        earned one. No correction is better than a confident wrong one.
+        """
+        off = self.db.learned_offset_c(mode.value, wanted_c)
+        if off is None or abs(off) < 0.5:
+            return wanted_c
+
+        # Away from the bed's drift: it lands 2.1 low, so send 2 high.
+        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, round(-off)))
+        send = self.settings.within(wanted_c + shift, mode)
+        if send == wanted_c:
+            return wanted_c
+
+        # Said once a night rather than at every boundary. It is worth knowing
+        # that the number being sent is not the number on the screen, and not
+        # worth saying four times before breakfast.
+        night = self._tonight_date()
+        if self._correction_told != night:
+            self._correction_told = night
+            short = "" if send == wanted_c + shift else " (clipped by the safety cap)"
+            self.events.info(
+                "temperature",
+                f"Sending {send}C to get a {wanted_c}C bed: this bed settles "
+                f"{abs(off):.1f}C below the setting in {mode.value}, measured on "
+                f"recent nights{short}.",
+            )
+        return send
 
     def _adopt_into_running_stage(self, stage: Stage, target_c: int) -> None:
         """Make a correction stick for good. The deliberate one.

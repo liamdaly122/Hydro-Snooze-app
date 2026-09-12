@@ -743,6 +743,43 @@ class Database:
             return None
         return max(1, round(LEARNED_BASE_MINUTES + abs(gap_c) * (sum(rates) / len(rates))))
 
+    def learned_offset_c(
+        self, mode: str, target_c: int, *, within_c: int = 3
+    ) -> float | None:
+        """How far this bed usually ends up from what the unit was asked for.
+
+        Measured on 12 September, from runs the probes decided, with nobody in
+        the bed: warming to 28C in a 20.6C room settled at 25.9, and turbo to 27C
+        in a 20.5C room settled at 26.6. Two degrees out one way and less than
+        half the other, at almost the same target in almost the same room.
+
+        That is not the unit being wrong. The unit heats water at its own outlet
+        and the probes sit on the hose at the bed, so heat leaks in between. What
+        differs between the two is how hard each mode circulates: turbo drives it
+        and holds the bed near the setpoint, warming is gentler and lets it sag.
+        So the correction is learned per mode, and per target, because the loss
+        also grows with how far the water is from the room.
+
+        A **mean** here, deliberately, where the lead time learns a rate. There
+        the distances varied sixteenfold, so a duration meant nothing without
+        one. Here every target sits in the narrow band somebody sleeps in and the
+        room barely moves, so the gap is near enough constant across the runs
+        being averaged, and dividing by it would only amplify the noise.
+
+        None until there are enough runs to be worth trusting. One night is an
+        anecdote, and no correction is better than a confident wrong one.
+        """
+        rows = self._db.execute(
+            "SELECT target_c, end_c FROM precondition_runs "
+            "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= ? "
+            "AND end_c IS NOT NULL ORDER BY id DESC LIMIT 10",
+            (mode, target_c, within_c),
+        ).fetchall()
+        if len(rows) < MIN_RUNS_TO_LEARN:
+            return None
+        offsets = [r["end_c"] - r["target_c"] for r in rows]
+        return round(sum(offsets) / len(offsets), 1)
+
     def precondition_runs(self, limit: int = 20) -> list[PreconditionRow]:
         rows = self._db.execute(
             "SELECT * FROM precondition_runs ORDER BY id DESC LIMIT ?", (limit,)
