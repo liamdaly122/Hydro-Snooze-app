@@ -316,6 +316,9 @@ export interface AutopilotNight {
   /** Share of the night proper, after bedtime, that the bed sat within half a
    *  degree of its setpoint. Getting ready is reported separately in `ready`. */
   on_target: number | null
+  /** Whether the score came from what the app wrote down at the time. False for
+   *  nights recorded before it started, which are still reconstructed. */
+  from_record: boolean
   bed: { low_c: number | null; high_c: number | null; typical_off_c: number | null }
   ready: {
     minutes: number

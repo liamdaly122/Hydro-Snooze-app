@@ -419,3 +419,25 @@ def test_the_chart_carries_both_temperatures_in_degrees():
     point = autopilot.build(plan, samples, [], set(), None).track[0]
     assert point.bed_c == 19.4
     assert point.target_c == 19
+
+
+def test_a_night_recorded_before_the_column_says_it_was_reconstructed():
+    """The one that caused this confusion. Pulling the fix does not fix last
+    night: those readings were written before the app started noting down what it
+    was asking for, so the score behind them is still a reconstruction.
+
+    It can say so. A number dressed up as a measurement is the one thing this
+    project does not do, and for six nights this is exactly that.
+    """
+    from hydrosnooze import autopilot
+
+    plan = _night().plan_for(TONIGHT)
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    old = [
+        Sample(deep.starts_at + timedelta(minutes=i), 160.0, 19.0, 19.0, 19.5)
+        for i in range(0, 60, 5)
+    ]
+    assert autopilot.build(plan, old, [], set(), None).from_record is False
+
+    fresh = [s._replace(target_c=19) for s in old]
+    assert autopilot.build(plan, fresh, [], set(), None).from_record is True

@@ -190,6 +190,7 @@ def autopilot_json(night) -> dict[str, object]:
             "missed": night.missed,
         },
         "on_target": night.on_target,
+        "from_record": night.from_record,
         "bed": {
             "low_c": night.low_c,
             "high_c": night.high_c,

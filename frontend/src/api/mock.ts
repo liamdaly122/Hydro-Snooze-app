@@ -744,6 +744,8 @@ function seedNight(): AutopilotNight {
     ],
     stages: { landed: 3, total: 3, missed: [] },
     on_target: Math.round((100 * off.filter((o) => o <= 0.5).length) / off.length),
+    // Seed data is written as though the app had always recorded its target.
+    from_record: true,
     bed: {
       low_c: 18.7,
       high_c: 25.7,

@@ -144,6 +144,10 @@ class Point:
     at: datetime
     bed_c: float
     target_c: int
+    #: Whether `target_c` was written down at the time or worked out afterwards.
+    #: False for every reading taken before the column existed, and the screen
+    #: says so rather than presenting a reconstruction as a measurement.
+    recorded: bool = True
 
     @property
     def offset_c(self) -> float:
@@ -180,6 +184,10 @@ class Night:
     missed: list[str]
     energy_kwh: float
     on_target: int | None
+    #: Whether the score above came from what the app wrote down at the time. A
+    #: night from before it started doing that is still reconstructed from the
+    #: schedule, which is the thing that was wrong, so the screen labels it.
+    from_record: bool
     low_c: float | None
     high_c: float | None
     typical_off_c: float | None
@@ -249,10 +257,13 @@ def _track(plan: NightPlan, samples: list[Sample]) -> list[Point]:
             continue
         # What was recorded at the time, and only otherwise what can be worked
         # out now. A record beats a reconstruction whenever there is one.
-        target = sample.target_c if sample.target_c is not None else _target_at(plan, sample.at)
+        recorded = sample.target_c is not None
+        target = sample.target_c if recorded else _target_at(plan, sample.at)
         if target is None:
             continue
-        out.append(Point(at=sample.at, bed_c=sample.return_c, target_c=target))
+        out.append(
+            Point(at=sample.at, bed_c=sample.return_c, target_c=target, recorded=recorded)
+        )
     return out
 
 
@@ -399,7 +410,8 @@ def build(
     # a slow pre-heat read as a bad night, which is the opposite of what it is.
     # How getting ready went is its own figure, and `ready` below carries it.
     overnight = plan.steps[0].starts_at if plan.steps else plan.bedtime_at
-    off = [abs(p.offset_c) for p in track if p.at >= overnight]
+    scored = [p for p in track if p.at >= overnight]
+    off = [abs(p.offset_c) for p in scored]
 
     return Night(
         wake_at=plan.wake_at,
@@ -416,6 +428,7 @@ def build(
         # headline count says how often Autopilot acted; this says whether it
         # worked, which is the more interesting of the two and the one the
         # chart underneath is a picture of.
+        from_record=bool(scored) and all(p.recorded for p in scored),
         on_target=(
             round(100 * sum(1 for o in off if o <= ON_TARGET_C) / len(off)) if off else None
         ),

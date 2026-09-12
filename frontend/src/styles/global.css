@@ -1642,6 +1642,18 @@ button:disabled {
   flex: none;
 }
 
+/* Said when a figure on this screen is worked out rather than measured. Amber
+   like every other "this is not what it looks like" in the app. */
+.ap-note {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(255 179 64 / 0.1);
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* --- The measured half ------------------------------------------------------ */
 
 /* A grid rather than flex. Three flex children with nowrap values will happily

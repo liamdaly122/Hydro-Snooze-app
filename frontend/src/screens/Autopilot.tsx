@@ -188,6 +188,15 @@ export function Autopilot({ client }: { client: ApiClient }) {
 
         <AdjustmentsChart track={night.track} marks={night.marks} bands={night.bands} />
 
+        {!night.from_record && (
+          <p className="ap-note">
+            This night was recorded before the app started writing down what it was asking for,
+            so the dashed line and the percentage are worked out backwards from your schedule
+            rather than from what actually happened. Editing your routine moves them. Nights from
+            here on carry their own record.
+          </p>
+        )}
+
         <div className="ap-key">
           {night.breakdown.filter((row) => row.count > 0).map((row) => (
             <span key={row.kind} className="ap-key__item">
