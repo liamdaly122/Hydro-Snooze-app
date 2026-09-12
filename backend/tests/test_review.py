@@ -223,3 +223,104 @@ def test_drift_comes_out_of_deep_rather_than_out_of_the_whole_night():
     assert got[Stage.DEEP] == 240 - DRIFT_MINUTES, "taken from the stage it was seeded from"
     assert got[Stage.REM] == 210, "and from nowhere else"
     assert got[Stage.WAKE] == 30
+
+
+# --- The second round, on de3aba5 -------------------------------------------------
+#
+# Three of these four are regressions in the fixes above, which is its own lesson:
+# a fix written against one failing test passes that test and is not thereby
+# correct. The skip fix in particular traded one lost shutdown for two others.
+
+
+def test_a_lie_in_survives_a_restart(service):
+    """The Pi restarts routinely and the deadline has to come back with it.
+
+    `night_date` works out which night we are in from the **saved** schedule, on
+    purpose: you need the date to look tonight up, so the date cannot depend on
+    what tonight says. But the saved alarm is not tonight's alarm during a lie-in,
+    so past the saved one the lookup moved on to the next night, found nothing
+    stored for it, and tonight's shift went with it. Four hours is what the app
+    lets somebody ask for.
+    """
+    service.shift_tonight(wake_minutes=240)
+    assert service.tonight_now().wake_time == time(11, 30)
+
+    # Ten in the morning: past the usual 07:30 alarm and its grace, still an hour
+    # and a half before the one that was actually asked for.
+    service.clock.jump_to(datetime(2026, 9, 13, 10, 0))
+    again = Service(
+        Settings(db_path=service.settings.db_path), clock=VirtualClock(service.clock.now()),
+        echo=False,
+    )
+    try:
+        again.schedule = service.schedule
+        again.load_tonight()
+        assert again.tonight_now().wake_time == time(11, 30), "the lie-in is still on"
+        plan = again.scheduler.plan_in_progress(again.schedule, again.clock.now())
+        assert plan is not None
+        assert plan.wake_at == datetime(2026, 9, 13, 11, 30), "and so is its switch-off"
+    finally:
+        again.db.close()
+
+
+def test_skipping_keeps_the_deadline_that_was_actually_set(service):
+    """Skip says do not run tonight. It does not say forget that the alarm moved:
+    the unit is on, and the time it has to be off by is the one that was asked
+    for, not the one on the saved routine."""
+    service.clock.jump_to(datetime(2026, 9, 13, 1, 0))
+    service.shift_tonight(wake_minutes=120)
+    service.skip_tonight(True)
+
+    plan = service.scheduler.plan_in_progress(service.schedule, service.clock.now())
+    assert plan is not None
+    assert plan.wake_at == datetime(2026, 9, 13, 9, 30), "tonight's deadline, not the usual one"
+
+
+def test_last_nights_skip_does_not_cancel_tonight(service):
+    """only_finishing was taught about skip and not about the calendar, so a Pi
+    holding a spent row cancelled every stage of a night that was going to run.
+    Worse than the bug it was added to fix: that one lost a switch-off, this one
+    loses the whole night and leaves the bed wherever it was."""
+    service.skip_tonight(True)
+
+    # Five minutes past the next night's bedtime, so a stage really is due rather
+    # than mostly over. Thirty minutes into a thirty five minute Drift is past
+    # STAGE_GRACE, and a test that read None there would be reading the wrong rule.
+    service.clock.jump_to(datetime(2026, 9, 13, 22, 35))
+    assert service.scheduler.only_finishing(service.schedule, service.clock.now()) is False
+    job = service.scheduler.due(service.schedule, service.clock.now())
+    assert job is not None and job.kind == "stage", "tomorrow night runs normally"
+    assert job.step is not None and job.step.stage is Stage.DRIFT
+
+
+async def test_cancelling_a_nudge_puts_the_bed_back_at_once(service):
+    """The cross on the nudge row is an undo, and an undo that leaves the bed a
+    degree out for another half hour is not one. The cooldown that stops a dead
+    blaster being hammered was being applied to the very next thing somebody
+    asked for."""
+    plan = service.schedule.plan_for(TONIGHT)
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    service.clock.jump_to(deep.starts_at + timedelta(hours=1))
+    await service._run_stage(plan, deep)
+
+    await service.nudge_tonight(-1)
+    assert service.state.assumed_target_c == 18
+
+    await service.nudge_tonight(0)
+    assert service.state.assumed_target_c == 19, "back now, not in half an hour"
+
+
+async def test_editing_a_running_stage_into_the_other_mode_works(service):
+    """Deep is cooling at 19. Ask for 40 and the unit has to warm: cooling tops
+    out at 35 and cannot express it at all. The running mode was being kept
+    whatever was asked for, so a legal request failed and said so only in a log
+    nobody was reading."""
+    plan = service.schedule.plan_for(TONIGHT)
+    deep = next(s for s in plan.steps if s.stage is Stage.DEEP)
+    service.clock.jump_to(deep.starts_at + timedelta(hours=1))
+    await service._run_stage(plan, deep)
+    assert service.state.assumed_mode is not Mode.WARMING
+
+    await service.set_stage_tonight(Stage.DEEP, 40)
+    assert service.state.assumed_mode is Mode.WARMING
+    assert service.state.assumed_target_c == 40

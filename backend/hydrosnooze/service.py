@@ -1104,7 +1104,12 @@ class Service:
         )
 
     async def _follow_the_plan(
-        self, step: StageStep | None = None, power: Power | None = None, now: datetime | None = None
+        self,
+        step: StageStep | None = None,
+        power: Power | None = None,
+        now: datetime | None = None,
+        *,
+        loud: bool = False,
     ) -> None:
         """Put the bed where the running stage says it should be, now.
 
@@ -1127,7 +1132,16 @@ class Service:
         if step is None or power is not Power.ON:
             return
 
-        mode = self.state.assumed_mode or step.mode
+        # The plan's mode, unless the one actually running can reach the number
+        # too. Keeping the running mode preserves whatever _correct_mode swapped
+        # to for quiet; keeping it when it cannot express the target means a legal
+        # request fails, because cooling stops at 35 and warming starts at 25.
+        mode = step.mode
+        was = self.state.assumed_mode
+        if was is not None:
+            low, high = range_for(was)
+            if low <= step.temp_c <= high:
+                mode = was
         if self._nudged(step.temp_c, mode) == self.state.assumed_target_c:
             return
         # Never queue behind something else, and never hammer a blaster that has
@@ -1142,9 +1156,15 @@ class Service:
             try:
                 await self._apply(mode, step.temp_c)
             except CommandFailed as exc:
-                # Never fatal. The stage carries on at whatever it was last set
-                # to, which is a temperature somebody chose, just not this one.
+                # Never fatal on the sampling beat: the stage carries on at
+                # whatever it was last set to, which is a temperature somebody
+                # chose, just not this one. Raised when somebody has just asked
+                # for it, because a request that did not reach the bed and said
+                # so only in a log nobody reads is a request that looked like it
+                # worked.
                 self._fail(TONIGHT_KIND, exc)
+                if loud:
+                    raise
 
     async def _correct_mode(self, step: StageStep | None, power: Power, now: datetime) -> None:
         """Swap the running mode for the quieter one when the bed allows it.
@@ -1819,6 +1839,12 @@ class Service:
         night is not returned, so it expires by the calendar moving rather than by
         anything remembering to clear it.
         """
+        # Seeded first, then checked. Which night we are in is worked out from
+        # the saved alarm, and during a lie-in that is not the alarm tonight will
+        # use, so the scheduler has to be able to see a stored shift before it
+        # can answer. Whatever comes back is then discarded unless it really is
+        # for the night we turn out to be in.
+        self.scheduler.tonight = self.db.stored_tonight()
         wake_on = self._tonight_date()
         found = self.db.load_tonight(wake_on) if wake_on else None
         self.scheduler.tonight = found
@@ -1944,7 +1970,7 @@ class Service:
         # If that stage is the one running, the bed should be at it now rather
         # than from tomorrow. If it is not, this does nothing and says nothing.
         self._followed_at = None
-        await self._follow_the_plan()
+        await self._follow_the_plan(loud=True)
         return out
 
     async def nudge_tonight(self, delta_c: int, minutes: int = NUDGE_MINUTES) -> Tonight:
@@ -1955,9 +1981,15 @@ class Service:
         fiddling: the deadline is not something this can reach.
         """
         delta = max(-NUDGE_LIMIT_C, min(NUDGE_LIMIT_C, delta_c))
+        # Above the branch, so cancelling clears it too. The cooldown exists to
+        # stop a blaster that has gone away being retried on every sample; it has
+        # no business sitting in front of the next thing somebody asks for, and
+        # the cross on the nudge row is an undo. An undo that leaves the bed a
+        # degree out for another half hour is not one.
+        self._followed_at = None
         if not delta:
             out = self._change_tonight(nudge_c=0, nudge_until=None)
-            await self._follow_the_plan()
+            await self._follow_the_plan(loud=True)
             return out
         until = self.clock.now() + timedelta(minutes=minutes)
         out = self._change_tonight(nudge_c=delta, nudge_until=until)
@@ -1969,8 +2001,7 @@ class Service:
         # Now, not at the next boundary. Pressed at two in the morning, the next
         # boundary can be three hours off, and by then the half hour it was asked
         # for has come and gone.
-        self._followed_at = None
-        await self._follow_the_plan()
+        await self._follow_the_plan(loud=True)
         return out
 
     def shift_tonight(self, *, bed_minutes: int = 0, wake_minutes: int = 0) -> Tonight:

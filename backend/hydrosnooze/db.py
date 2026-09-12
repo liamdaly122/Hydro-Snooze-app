@@ -448,6 +448,19 @@ class Database:
             return schedule
         return _schedule_from(row)
 
+    def stored_tonight(self) -> Tonight | None:
+        """Whatever row is there, whichever night it is for.
+
+        Only one caller, and it needs it for a circular reason worth spelling
+        out: which night we are in is worked out from the saved alarm, and during
+        a lie-in that is not the alarm tonight will actually use. So the stored
+        row has to be readable *before* the date is known, or a long enough
+        lie-in plus a restart loses the night it belongs to.
+        """
+        return self._tonight_from(self._db.execute(
+            "SELECT * FROM tonight WHERE id = 1"
+        ).fetchone())
+
     def load_tonight(self, wake_on: date) -> Tonight | None:
         """Tonight's exceptions, if the stored ones are for tonight.
 
@@ -459,8 +472,14 @@ class Database:
         row = self._db.execute("SELECT * FROM tonight WHERE id = 1").fetchone()
         if row is None or row["wake_on"] != wake_on.isoformat():
             return None
+        return self._tonight_from(row)
+
+    @staticmethod
+    def _tonight_from(row: sqlite3.Row | None) -> Tonight | None:
+        if row is None:
+            return None
         return Tonight(
-            wake_on=wake_on,
+            wake_on=date.fromisoformat(row["wake_on"]),
             skip=bool(row["skip"]),
             stages=(tuple(saved) if (saved := stages_from_json(row["stages"])) else None),
             wake_time=_time_from(row["wake_time"]) if row["wake_time"] else None,

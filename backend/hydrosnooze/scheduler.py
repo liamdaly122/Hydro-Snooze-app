@@ -203,11 +203,10 @@ class Scheduler:
             skipped = self.running(schedule, wake_on) is None
             # A skipped night is still planned out, because a night that has
             # already started has a unit running in it and a switch-off to
-            # perform. Tonight's own numbers are gone either way: `due` below
-            # serves only the finishing jobs once `only_finishing` is true.
-            running = schedule if skipped else self.running(schedule, wake_on)
-            assert running is not None
-            plan = running.plan_for(wake_on, self.learned_lead, bed)
+            # perform. Over tonight either way, so skipping does not also undo a
+            # lie-in: the stages are what skip cancels, not the deadline. `due`
+            # below serves only the finishing jobs once `only_finishing` is true.
+            plan = self.shape(schedule, wake_on).plan_for(wake_on, self.learned_lead, bed)
             if now < plan.wake_at + POWER_OFF_GRACE:
                 # Skipping is about a night that has not begun. Past its start
                 # it means the same as switching automation off mid-night: stop
@@ -248,9 +247,28 @@ class Scheduler:
             wake_on = (now + timedelta(days=offset)).date()
             if wake_on.weekday() not in schedule.days_of_week:
                 continue
-            if now < schedule.plan_for(wake_on, self.learned_lead).wake_at + POWER_OFF_GRACE:
+            # The date still comes from the saved schedule, so this cannot chase
+            # tonight round in a circle. Only the window does: during a lie-in
+            # the saved alarm is not the alarm tonight will use, and closing at
+            # the old one moved the lookup on to the next night, found nothing
+            # stored for it, and took the shift with it on the next restart.
+            closes = self.shape(schedule, wake_on).plan_for(wake_on, self.learned_lead).wake_at
+            if now < closes + POWER_OFF_GRACE:
                 return wake_on
         return None
+
+    def shape(self, schedule: Schedule, wake_on: date) -> Schedule:
+        """The night's shape, whether or not it is being skipped.
+
+        `running` answers "what should this night do", and for a skipped night
+        that is nothing. This answers "how long is it and when does it end",
+        which a skipped night still has: the unit may be on, and the time it has
+        to be off by is the one that was asked for, not the one on the routine.
+        """
+        tonight = self.tonight
+        if tonight is None or not tonight.applies_on(wake_on):
+            return schedule
+        return tonight.over(schedule)
 
     def running(self, schedule: Schedule, wake_on: date) -> Schedule | None:
         """The schedule as this particular night is being run.
@@ -267,20 +285,32 @@ class Scheduler:
             return None
         return tonight.over(schedule)
 
-    def only_finishing(self, schedule: Schedule) -> bool:
+    def only_finishing(self, schedule: Schedule, now: datetime) -> bool:
         """Whether tonight is being wound up rather than run.
 
         True once automation has been switched off part way through a night. The
         stage changes still to come are cancelled, because that is what the
         toggle means; switching the unit off is not cancelled, because that is a
         promise rather than a preference.
+
+        Skip says the same thing about one night, and it has to be asked with a
+        date in hand. Taught about skip and not about the calendar, a Pi still
+        holding last night's row cancelled every stage of a night that was going
+        to run perfectly well, which is a worse failure than the one that change
+        was made to fix: that lost a switch-off, this loses the whole night.
         """
         if self.rehearsal is not None:
             return False
         if not schedule.enabled:
             return True
-        # And a night skipped after it began. Same rule, different control.
-        return self.tonight is not None and self.tonight.skip
+        wake_on = self.night_date(schedule, now)
+        tonight = self.tonight
+        return (
+            wake_on is not None
+            and tonight is not None
+            and tonight.applies_on(wake_on)
+            and tonight.skip
+        )
 
     def last_finished(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The most recent night that is over, for the morning report to describe.
@@ -312,7 +342,7 @@ class Scheduler:
         if plan is None:
             return None
 
-        if self.only_finishing(schedule):
+        if self.only_finishing(schedule, now):
             return self._winding_up(plan, now)
 
         # Before anything else tonight, and before the first press that matters.
