@@ -9,7 +9,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..models import DeviceHealth, DeviceState, LearnedLead, Profile, Schedule, modes_for
+from ..models import (
+    DeviceHealth,
+    DeviceState,
+    LearnedLead,
+    Mode,
+    Profile,
+    Schedule,
+    modes_for,
+)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -218,3 +226,91 @@ def tonight_json(schedule, tonight, phase: str = "none") -> dict[str, object]:
             tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None
         ),
     }
+
+
+def learning_json(learning: dict[str, Any]) -> dict[str, Any]:
+    """The unlock card: what the bed has taught the app, and what it still needs.
+
+    Two things are learned from the same nights and they are shown apart, because
+    they qualify apart. How fast the bed moves needs nights that actually
+    travelled; where it settles needs any finished night near the target.
+
+    Every sentence here carries a measured number, which is why the sentences are
+    written here and not in the app. A screen handed a figure and left to write
+    its own sentence around it is a screen that can eventually describe a
+    correction that is not happening. The app draws what it is given.
+    """
+    from ..db import MIN_LEARNABLE_GAP_C
+
+    on = bool(learning["on"])
+    gap = f"{MIN_LEARNABLE_GAP_C:g}"
+    modes: list[dict[str, Any]] = []
+
+    for row in learning["modes"]:  # type: ignore[union-attr]
+        mode = Mode(str(row["mode"]))
+        needed = int(row["needed"])
+        target_c = int(row["target_c"])
+        moves = "warms" if mode is Mode.WARMING else "cools"
+        skills = [
+            _skill(
+                "pace",
+                f"How fast your bed {moves}",
+                runs=int(row["pace_runs"]),
+                needed=needed,
+                detail=(
+                    f"Timed from this bed rather than estimated: about "
+                    f"{row['pace_minutes']} minutes of head start from 10° away."
+                    if row["pace_minutes"] is not None
+                    else f"Until then the head start is an estimate. Nights that "
+                    f"move the bed at least {gap}° count towards this."
+                ),
+            ),
+            _skill(
+                "settle",
+                "Where your bed settles",
+                runs=int(row["settle_runs"]),
+                needed=needed,
+                detail=_settles(row, target_c, on),
+            ),
+        ]
+        modes.append(
+            {
+                "mode": mode.value,
+                "target_c": target_c,
+                "needed": needed,
+                "unlocked": sum(1 for s in skills if s["unlocked"]),
+                "skills": skills,
+            }
+        )
+
+    return {"on": on, "modes": modes}
+
+
+def _skill(key: str, title: str, *, runs: int, needed: int, detail: str) -> dict[str, Any]:
+    #: `runs` can pass `needed` once it is measured, and the card should not draw
+    #: four dots out of three. It stops counting at the point it stopped mattering.
+    return {
+        "key": key,
+        "title": title,
+        "runs": min(runs, needed),
+        "needed": needed,
+        "unlocked": runs >= needed,
+        "detail": detail,
+    }
+
+
+def _settles(row: dict[str, Any], target_c: int, on: bool) -> str:
+    """The one line that can describe something the unit is actually being sent."""
+    drift = row["settle_c"]
+    if drift is None:
+        return "Until then the number you ask for is the number that gets sent."
+
+    way = "below" if drift < 0 else "above"
+    lands = f"Lands {abs(drift):.1f}° {way} the setting"
+    if not on:
+        return f"{lands}. Not being corrected, because learning is switched off."
+
+    sends = int(row["sends_c"])
+    if sends == target_c:
+        return f"{lands}, which is close enough to leave alone."
+    return f"{lands}, so it sends {sends}° for a {target_c}° bed."

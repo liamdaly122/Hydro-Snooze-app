@@ -22,6 +22,7 @@ from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import (
     autopilot_json,
+    learning_json,
     schedule_json,
     health_json,
     profile_json,
@@ -67,6 +68,16 @@ class RehearsalBody(BaseModel):
     #: Bounded at both ends. Below the floor the stages cannot finish their own
     #: presses; above it this stops being a test you stand and watch.
     seconds: int = Field(default=300, ge=120, le=1800)
+
+
+class LearningBody(BaseModel):
+    on: bool
+
+
+class ForgetBody(BaseModel):
+    #: None means every mode. A mode on its own is the common case: the pre-heat
+    #: got it wrong in warming and cooling has nothing to do with it.
+    mode: Mode | None = None
 
 
 class NewProfile(BaseModel):
@@ -273,6 +284,12 @@ async def get_autopilot(request: Request) -> dict[str, object]:
     if plan is None:
         raise HTTPException(404, "No finished night to report on yet.")
     return autopilot_json(service.night_report(plan))
+
+
+@router.get("/learning")
+async def get_learning(request: Request) -> dict[str, object]:
+    """What the bed has taught the app, and how far off the rest of it is."""
+    return learning_json(_service(request).learning())
 
 
 # --- Writes -------------------------------------------------------------------
@@ -526,6 +543,33 @@ async def post_mode(request: Request, body: ModeBody) -> dict[str, object]:
     except CommandFailed as exc:
         raise HTTPException(502, str(exc)) from exc
     return state_json(service.state)
+
+
+@router.post("/learning")
+async def post_learning(request: Request, body: LearningBody) -> dict[str, object]:
+    """The switch. Off puts the head start back to estimating and stops correcting.
+
+    Worth having as a control rather than a code change, because the correction is
+    the one learned thing that alters what the bed actually does. Nothing is
+    deleted by switching it off; the nights carry on being recorded and the card
+    carries on saying what they measured.
+    """
+    service = _service(request)
+    service.set_learning(body.on)
+    return learning_json(service.learning())
+
+
+@router.post("/learning/forget")
+async def post_learning_forget(request: Request, body: ForgetBody) -> dict[str, object]:
+    """Start again, for one mode or all of them.
+
+    The nights are kept. They stop counting towards what is measured, which is the
+    thing being disagreed with, and the Autopilot chart still has every one of
+    them to draw. Nothing in this app deletes a record of a night that happened.
+    """
+    service = _service(request)
+    service.forget_learning(None if body.mode is None else body.mode.value)
+    return learning_json(service.learning())
 
 
 def _profiles_json(service: Service) -> list[dict[str, object]]:

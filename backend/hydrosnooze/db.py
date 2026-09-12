@@ -193,6 +193,17 @@ CREATE TABLE IF NOT EXISTS tonight (
     nudge_until TEXT
 );
 
+-- The handful of settings that are not part of a schedule.
+--
+-- One row. `learning_on` is the switch behind "use what it has learned": off, and
+-- the pre-heat goes back to estimating and nothing corrects the temperature. It
+-- exists because the correction is the one learned thing that changes what the
+-- bed actually does, and a way out of that should not require SSH.
+CREATE TABLE IF NOT EXISTS preferences (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    learning_on INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS precondition_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT    NOT NULL,
@@ -303,6 +314,11 @@ class Database:
             ("end_c", "REAL"),
             ("room_c", "REAL"),
             ("decided_by", "TEXT"),
+            # Whether this run still teaches anything. "Start again" clears it
+            # rather than deleting the row: the run happened, and a record of the
+            # night is not the app's to throw away because somebody disliked what
+            # it concluded from it.
+            ("counts", "INTEGER NOT NULL DEFAULT 1"),
         ):
             if name not in pre:
                 self._db.execute(f"ALTER TABLE precondition_runs ADD COLUMN {name} {kind}")
@@ -728,7 +744,7 @@ class Database:
         """
         rows = self._db.execute(
             "SELECT seconds, start_c, end_c FROM precondition_runs "
-            "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= ? "
+            "WHERE mode = ? AND reached = 1 AND counts = 1 AND ABS(target_c - ?) <= ? "
             "AND start_c IS NOT NULL AND end_c IS NOT NULL "
             "ORDER BY id DESC LIMIT 10",
             (mode, target_c, within_c),
@@ -771,7 +787,7 @@ class Database:
         """
         rows = self._db.execute(
             "SELECT target_c, end_c FROM precondition_runs "
-            "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= ? "
+            "WHERE mode = ? AND reached = 1 AND counts = 1 AND ABS(target_c - ?) <= ? "
             "AND end_c IS NOT NULL ORDER BY id DESC LIMIT 10",
             (mode, target_c, within_c),
         ).fetchall()
@@ -779,6 +795,99 @@ class Database:
             return None
         offsets = [r["end_c"] - r["target_c"] for r in rows]
         return round(sum(offsets) / len(offsets), 1)
+
+    def learning_progress(self) -> list[dict[str, object]]:
+        """How close each mode is to being measured rather than estimated.
+
+        Two things are learned from the same runs and they qualify differently, so
+        they are counted apart: how fast this bed moves needs a run that actually
+        travelled, and where it settles needs any finished run near the target.
+
+        Grouped by mode rather than by target. The windows overlap, because a run
+        at 27C teaches the app about 28C too, so listing every target separately
+        would show the same three runs under three headings and make it look like
+        nine. Each mode reports against its most recent target, which is the one
+        tonight will use unless the schedule has changed.
+
+        Only runs the probes decided appear here. A run the plug timed says the
+        machine stopped working; it never says where the bed ended up, so it
+        teaches neither of these.
+        """
+        # Which modes to list, and this one deliberately does not filter `counts`.
+        # Start again sets a mode back to nought; it should not make the mode
+        # vanish off the card. A section that disappears reads as the app having
+        # deleted the nights, which is the one thing it promises it did not do.
+        modes = self._db.execute(
+            "SELECT mode, MAX(id) AS newest FROM precondition_runs "
+            "WHERE reached = 1 AND end_c IS NOT NULL GROUP BY mode "
+            # Most recently used first, which is the mode last night ran in and
+            # so the one anybody reading this in the morning came here about.
+            "ORDER BY newest DESC"
+        ).fetchall()
+
+        out: list[dict[str, object]] = []
+        for row in modes:
+            latest = self._db.execute(
+                "SELECT target_c FROM precondition_runs WHERE id = ?", (row["newest"],)
+            ).fetchone()
+            out.append(self.learning_for(row["mode"], latest["target_c"]))
+        return out
+
+    def learning_for(self, mode: str, target_c: int, *, within_c: int = 3) -> dict[str, object]:
+        """One mode's progress, and what it has measured if it is there yet."""
+        rows = self._db.execute(
+            "SELECT seconds, start_c, end_c FROM precondition_runs "
+            "WHERE mode = ? AND reached = 1 AND counts = 1 AND ABS(target_c - ?) <= ? "
+            "AND end_c IS NOT NULL ORDER BY id DESC LIMIT 10",
+            (mode, target_c, within_c),
+        ).fetchall()
+        travelled = [
+            r
+            for r in rows
+            if r["start_c"] is not None
+            and abs(r["end_c"] - r["start_c"]) >= MIN_LEARNABLE_GAP_C
+        ]
+        return {
+            "mode": mode,
+            "target_c": target_c,
+            "needed": MIN_RUNS_TO_LEARN,
+            "pace_runs": len(travelled),
+            "settle_runs": len(rows),
+            # The measured figures, or None while it is still estimating. Asked
+            # through the same methods the service uses, so the card can never
+            # claim something the unit is not actually being sent.
+            "pace_minutes": self.learned_lead_minutes(mode, target_c, 10.0),
+            "settle_c": self.learned_offset_c(mode, target_c),
+        }
+
+    def learning_on(self) -> bool:
+        row = self._db.execute("SELECT learning_on FROM preferences WHERE id = 1").fetchone()
+        return True if row is None else bool(row["learning_on"])
+
+    def set_learning_on(self, on: bool) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, learning_on) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET learning_on = excluded.learning_on",
+            (int(on),),
+        )
+        self._db.commit()
+
+    def forget_learning(self, mode: str | None = None) -> int:
+        """Start again, for one mode or for all of them.
+
+        The rows stay. `counts` goes to zero, so they stop teaching and remain a
+        record of what happened on those nights. A night is not the app's to
+        delete because somebody disliked the conclusion it drew from it, and the
+        Autopilot chart reads the same table.
+        """
+        if mode is None:
+            cursor = self._db.execute("UPDATE precondition_runs SET counts = 0 WHERE counts = 1")
+        else:
+            cursor = self._db.execute(
+                "UPDATE precondition_runs SET counts = 0 WHERE counts = 1 AND mode = ?", (mode,)
+            )
+        self._db.commit()
+        return cursor.rowcount
 
     def precondition_runs(self, limit: int = 20) -> list[PreconditionRow]:
         rows = self._db.execute(

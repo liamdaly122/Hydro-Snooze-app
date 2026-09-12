@@ -185,3 +185,46 @@ def test_pruning_a_small_log_does_nothing():
     db.add_event(Event(id=0, at=datetime(2026, 9, 8, 21, 0), level="info", kind="t", message="only"))
     db.prune_events(keep=100)
     assert len(db.recent_events(10)) == 1
+
+
+#: precondition_runs as it was before Start again existed. Liam's Pi has weeks of
+#: rows in this shape, and they have to carry on teaching after the upgrade.
+LEGACY_RUNS = """
+CREATE TABLE precondition_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT    NOT NULL,
+    mode        TEXT    NOT NULL,
+    target_c    INTEGER NOT NULL,
+    seconds     INTEGER NOT NULL,
+    reached     INTEGER NOT NULL,
+    start_c     REAL,
+    end_c       REAL,
+    room_c      REAL,
+    decided_by  TEXT
+);
+"""
+
+
+def test_nights_recorded_before_start_again_existed_still_count(tmp_path) -> None:
+    """The column is added with a default of 1, so every night already on record
+    carries on counting. Defaulting it the other way would have quietly set aside
+    weeks of measurements on upgrade, and the app would have gone back to
+    estimating without saying so."""
+    path = tmp_path / "runs.db"
+    old = sqlite3.connect(path)
+    old.executescript(LEGACY_RUNS)
+    for bed in (25.9, 26.1, 25.8):
+        old.execute(
+            "INSERT INTO precondition_runs (at, mode, target_c, seconds, reached,"
+            " start_c, end_c, decided_by) VALUES (?, 'warming', 28, 1500, 1, 21.0, ?, 'probes')",
+            ("2026-09-10T21:00:00", bed),
+        )
+    old.commit()
+    old.close()
+
+    db = Database(path)
+    try:
+        assert db.learned_offset_c("warming", 28) == -2.1
+        assert db.learning_for("warming", 28)["settle_runs"] == 3
+    finally:
+        db.close()

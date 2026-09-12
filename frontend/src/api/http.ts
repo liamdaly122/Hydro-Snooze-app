@@ -14,6 +14,7 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  Learning,
   Mode,
   PowerSample,
   Profile,
@@ -118,6 +119,20 @@ export class HttpApiClient implements ApiClient {
   keepTonight = () => request<Schedule>('/api/tonight/keep', { method: 'POST' })
 
   getAutopilot = () => request<AutopilotNight>('/api/autopilot')
+
+  getLearning = () => request<Learning>('/api/learning')
+
+  setLearning = (on: boolean) =>
+    request<Learning>('/api/learning', {
+      method: 'POST',
+      body: JSON.stringify({ on }),
+    })
+
+  forgetLearning = (mode?: Mode) =>
+    request<Learning>('/api/learning/forget', {
+      method: 'POST',
+      body: JSON.stringify({ mode: mode ?? null }),
+    })
 
   getProfiles = () => request<Profile[]>('/api/profiles')
 

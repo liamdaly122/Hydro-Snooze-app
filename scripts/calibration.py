@@ -58,9 +58,10 @@ def main() -> int:
 
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
+    counting = _counting(db)
     rows = db.execute(
         "SELECT at, mode, target_c, end_c, room_c, decided_by FROM precondition_runs "
-        "WHERE reached = 1 AND end_c IS NOT NULL ORDER BY at"
+        f"WHERE reached = 1{counting} AND end_c IS NOT NULL ORDER BY at"
     ).fetchall()
 
     if not rows:
@@ -94,7 +95,16 @@ def main() -> int:
         note = "" if len(offs) >= 3 else "   (one or two runs is an anecdote)"
         print(f"    {mode:9} {mean:+.1f}C over {len(offs)} runs, spread {spread:.1f}C{note}")
 
-    learned(rows, db)
+    learned(rows, db, counting)
+
+    if counting:
+        aside = db.execute(
+            "SELECT COUNT(*) AS n FROM precondition_runs WHERE counts = 0"
+        ).fetchone()["n"]
+        if aside:
+            print()
+            print(f"  {aside} runs were set aside by Start again and are not counted")
+            print("  above. They are still in the table and Autopilot still draws them.")
 
     print()
     print("  A negative number means the bed ends up cooler than the app asked for.")
@@ -104,7 +114,20 @@ def main() -> int:
     return 0
 
 
-def learned(rows, db) -> None:
+def _counting(db) -> str:
+    """`AND counts = 1`, when the column is there to filter on.
+
+    Start again sets that column to nought rather than deleting the night, so
+    this has to skip the same rows the app does or it reports progress the app
+    does not have. The column is newer than some databases this may be pointed
+    at, and read-only means it cannot be added here. Missing means nothing has
+    ever been set aside, which comes to the same answer.
+    """
+    columns = {r["name"] for r in db.execute("PRAGMA table_info(precondition_runs)")}
+    return " AND counts = 1" if "counts" in columns else ""
+
+
+def learned(rows, db, counting: str = "") -> None:
     """What the two learned things currently have, and what they still need.
 
     The question anyone actually asks is "will tonight be different", and the
@@ -130,7 +153,7 @@ def learned(rows, db) -> None:
             r
             for r in db.execute(
                 "SELECT seconds, start_c, end_c FROM precondition_runs "
-                "WHERE mode = ? AND reached = 1 AND ABS(target_c - ?) <= 3 "
+                f"WHERE mode = ? AND reached = 1{counting} AND ABS(target_c - ?) <= 3 "
                 "AND end_c IS NOT NULL",
                 (mode, target),
             ).fetchall()

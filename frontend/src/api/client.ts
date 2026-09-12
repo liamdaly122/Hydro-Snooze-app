@@ -12,6 +12,7 @@
 
 import type {
   AutopilotNight,
+  Learning,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -65,6 +66,19 @@ export interface ApiClient {
    * morning after a day the schedule was off.
    */
   getAutopilot(): Promise<AutopilotNight>
+
+  /**
+   * What the bed has taught the app, and how many nights the rest of it needs.
+   *
+   * Separate from getAutopilot on purpose. That one has nothing to say until a
+   * night has finished, and this one matters most on the first evening, when the
+   * honest answer is "nothing measured yet, three nights to go".
+   */
+  getLearning(): Promise<Learning>
+  /** The switch. Off returns to estimating and stops correcting temperatures. */
+  setLearning(on: boolean): Promise<Learning>
+  /** Start again. The nights are kept; they stop counting towards what is measured. */
+  forgetLearning(mode?: Mode): Promise<Learning>
 
   /** Whether we are talking to a simulated unit, and the safety cap in force. */
   info(): Promise<ServiceInfo>

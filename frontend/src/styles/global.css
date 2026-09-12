@@ -1896,3 +1896,180 @@ button:disabled {
 .skip__title { font-size: 14px; font-weight: 500; }
 .skip__sub { font-size: 12px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
 .skip .pill { flex: none; width: auto; padding: 10px 14px; }
+
+/* --- Learning ---------------------------------------------------------------
+   The unlock card. Restrained on purpose: this is a progress display for
+   something that genuinely cannot be known yet, not a reward for using the app,
+   and anything that looked like a trophy would be a lie about what it measures.
+   The one flourish is the Autopilot mark replacing the dots when a row lands,
+   which is the same mark the hero uses and means the same thing. */
+
+.learn .card__head {
+  margin-bottom: 14px;
+}
+
+.learn-lead {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.learn-lead b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.learn-off {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(255 179 64 / 0.1);
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.learn-mode {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.learn-mode__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 26px;
+}
+
+.learn-mode__name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-label);
+}
+
+.learn-again,
+.learn-confirm__no {
+  flex: none;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.learn-confirm {
+  display: flex;
+  gap: 8px;
+}
+
+.learn-confirm__yes {
+  flex: none;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgb(255 107 107 / 0.16);
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.learn-warn {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.learn-skill {
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.learn-skill__mark {
+  flex: none;
+  /* Pinned to the title line rather than centred down the row. Stretched, it
+     centres itself against a three-line detail and ends up alongside the wrong
+     sentence. */
+  align-self: flex-start;
+  width: 34px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.learn-skill--on .learn-skill__mark {
+  color: #8fb2ff;
+}
+
+.learn-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.learn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* Hollow rather than dim, so a night still to come reads as an outline waiting
+     to be filled rather than as a dot somebody turned down. */
+  border: 1px solid var(--hairline);
+}
+
+.learn-dot--on {
+  background: var(--text-mid);
+  border-color: var(--text-mid);
+}
+
+.learn-skill__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.learn-skill__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.learn-skill--on .learn-skill__title {
+  color: var(--text);
+}
+
+.learn-skill__state {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.learn-skill--on .learn-skill__state {
+  color: #8fb2ff;
+}
+
+.learn-skill__detail {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.learn-skill--on .learn-skill__detail {
+  color: var(--text-dim);
+}
+
+.learn .footnote {
+  margin: 16px 0 0;
+}

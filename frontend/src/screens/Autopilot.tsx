@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { AdjustmentsChart, KIND_COLOUR } from '../components/AdjustmentsChart'
 import { Moon, Sparkle } from '../components/Icons'
+import { LearningCard } from '../components/LearningCard'
 import type { ApiClient } from '../api/client'
-import type { AutopilotNight } from '../types'
+import type { AutopilotNight, Learning, Mode } from '../types'
 
 /**
  * What the bed did last night.
@@ -59,6 +60,8 @@ function howItHeld(off: number | null): string {
 export function Autopilot({ client }: { client: ApiClient }) {
   const [night, setNight] = useState<AutopilotNight | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [learning, setLearning] = useState<Learning | null>(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -66,20 +69,45 @@ export function Autopilot({ client }: { client: ApiClient }) {
       .getAutopilot()
       .then((n) => live && setNight(n))
       .catch((e: Error) => live && setError(e.message))
+    // Fetched apart from the report, and drawn even when there is no report to
+    // draw. The first evening is exactly when "nothing measured yet, three
+    // nights to go" is the most useful thing this screen can say, and that is
+    // the morning getAutopilot has nothing for.
+    void client.getLearning().then((l) => live && setLearning(l))
     return () => {
       live = false
     }
   }, [client])
 
+  const change = (next: Promise<Learning>) => {
+    setBusy(true)
+    void next
+      .then(setLearning)
+      .catch(() => undefined)
+      .finally(() => setBusy(false))
+  }
+
+  const learnCard = learning && (
+    <LearningCard
+      learning={learning}
+      busy={busy}
+      onSwitch={(on) => change(client.setLearning(on))}
+      onForget={(mode: Mode) => change(client.forgetLearning(mode))}
+    />
+  )
+
   if (error) {
     return (
-      <section className="card">
-        <p className="empty">{error}</p>
-        <p className="footnote">
-          A report appears the morning after a night has finished. There is nothing to draw until
-          then.
-        </p>
-      </section>
+      <>
+        <section className="card">
+          <p className="empty">{error}</p>
+          <p className="footnote">
+            A report appears the morning after a night has finished. There is nothing to draw
+            until then.
+          </p>
+        </section>
+        {learnCard}
+      </>
     )
   }
 
@@ -237,6 +265,8 @@ export function Autopilot({ client }: { client: ApiClient }) {
         Rebuilt from what was recorded while the night happened, so it says what the service did
         rather than what it meant to do.
       </p>
+
+      {learnCard}
     </>
   )
 }

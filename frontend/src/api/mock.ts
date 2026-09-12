@@ -17,6 +17,8 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  Learning,
+  LearningMode,
   Mode,
   PowerSample,
   Preconditioning,
@@ -263,6 +265,28 @@ export class MockApiClient implements ApiClient {
     nudge_until: null as string | null,
   }
 
+  private learningOn = true
+
+  /**
+   * Two modes at different points on the loop, so the card can be judged in both
+   * states at once: warming measured, cooling still counting. `?nights=` on the
+   * URL moves warming along, which is how the dots were chosen.
+   */
+  private nightsLearned = [
+    {
+      mode: 'warming' as Mode,
+      target_c: 28,
+      nights: Number(new URLSearchParams(location.search).get('nights') ?? 3),
+      drift_c: -2.1,
+    },
+    {
+      mode: 'turbo' as Mode,
+      target_c: 24,
+      nights: Number(new URLSearchParams(location.search).get('cool') ?? 1),
+      drift_c: -0.4,
+    },
+  ]
+
   private tonightJson(): TonightState {
     const t = this.tonightState
     const wake_time = t.wake_time ?? this.schedule.wake_time
@@ -364,6 +388,79 @@ export class MockApiClient implements ApiClient {
   async getAutopilot(): Promise<AutopilotNight> {
     await sleep(120)
     return seedNight()
+  }
+
+  async getLearning(): Promise<Learning> {
+    await sleep(120)
+    return this.learningJson()
+  }
+
+  async setLearning(on: boolean): Promise<Learning> {
+    await sleep(140)
+    this.learningOn = on
+    return this.learningJson()
+  }
+
+  async forgetLearning(mode?: Mode): Promise<Learning> {
+    await sleep(160)
+    for (const row of this.nightsLearned) {
+      if (mode === undefined || row.mode === mode) row.nights = 0
+    }
+    return this.learningJson()
+  }
+
+  /**
+   * The same shape learning_json builds, and deliberately the same sentences.
+   *
+   * Mirrored rather than shared, which is the cost of the mock existing at all.
+   * Worth it: the unlock card is a thing to judge by eye at five different
+   * counts, and waiting three real nights between looks is not a design process.
+   */
+  private learningJson(): Learning {
+    const mode = (m: Mode, targetC: number, nights: number, driftC: number): LearningMode => {
+      const needed = 3
+      const measured = nights >= needed
+      const moves = m === 'warming' ? 'warms' : 'cools'
+      const sends = Math.round(targetC - driftC)
+      return {
+        mode: m,
+        target_c: targetC,
+        needed,
+        unlocked: measured ? 2 : 0,
+        skills: [
+          {
+            key: 'pace',
+            title: `How fast your bed ${moves}`,
+            runs: Math.min(nights, needed),
+            needed,
+            unlocked: measured,
+            detail: measured
+              ? `Timed from this bed rather than estimated: about ${
+                  m === 'warming' ? 91 : 47
+                } minutes of head start from 10° away.`
+              : 'Until then the head start is an estimate. Nights that move the bed at least 2° count towards this.',
+          },
+          {
+            key: 'settle',
+            title: 'Where your bed settles',
+            runs: Math.min(nights, needed),
+            needed,
+            unlocked: measured,
+            detail: !measured
+              ? 'Until then the number you ask for is the number that gets sent.'
+              : !this.learningOn
+                ? `Lands ${Math.abs(driftC).toFixed(1)}° below the setting. Not being corrected, because learning is switched off.`
+                : sends === targetC
+                  ? `Lands ${Math.abs(driftC).toFixed(1)}° below the setting, which is close enough to leave alone.`
+                  : `Lands ${Math.abs(driftC).toFixed(1)}° below the setting, so it sends ${sends}° for a ${targetC}° bed.`,
+          },
+        ],
+      }
+    }
+    return {
+      on: this.learningOn,
+      modes: this.nightsLearned.map((r) => mode(r.mode, r.target_c, r.nights, r.drift_c)),
+    }
   }
 
   async getProfiles(): Promise<Profile[]> {

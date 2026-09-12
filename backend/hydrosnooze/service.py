@@ -85,6 +85,10 @@ REBOOT_AFTER_FAILURES = 2
 #: change you made for one night from the routine changing.
 TONIGHT_KIND = "tonight"
 
+#: The switch and the reset. Both change what the unit will be sent on future
+#: nights without anybody pressing a button, so both belong in the journal.
+LEARNING_KIND = "learning"
+
 #: How long before a night starts that its controls appear.
 #:
 #: Six hours, so they turn up in the evening rather than over breakfast. Setting
@@ -191,6 +195,22 @@ REBOOT_SECONDS = 15.0
 #: either way.
 WORKING_DELTA_C = 1.0
 SETTLED_DELTA_C = 0.4
+
+
+@dataclass(frozen=True)
+class Correction:
+    """What the measured drift does to one temperature, before it is sent.
+
+    Three fields because the log line needs all three: the number that goes out,
+    the drift it came from, and whether the safety cap took a bite out of it. A
+    correction quietly clipped and reported as if it were not would be the sort
+    of half-truth this project exists to avoid.
+    """
+
+    send_c: int
+    #: How far the bed lands from the setting, measured. None while estimating.
+    drift_c: float | None
+    capped: bool
 
 
 @dataclass
@@ -1180,6 +1200,8 @@ class Service:
         self._push_state()
 
     def _learned_lead(self, mode: Mode, target_c: int, gap_c: float) -> int | None:
+        if not self.db.learning_on():
+            return None
         return self.db.learned_lead_minutes(mode.value, target_c, gap_c)
 
     def _bed_now(self) -> float | None:
@@ -1750,6 +1772,51 @@ class Service:
         self._push_schedule()
         return changed
 
+    def learning(self) -> dict[str, object]:
+        """What the bed has taught the app, and what it still needs.
+
+        The unlock loop the app draws. Honest by construction: every number in it
+        comes from the same methods that decide what the unit is actually sent, so
+        the card cannot claim a measurement that is not being used.
+        """
+        rows = self.db.learning_progress()
+        # Whatever tonight will use, even with nothing recorded for it yet, so the
+        # first night is a row at nought rather than an empty card.
+        plan = self.scheduler.plan_in_progress(self.schedule, self.clock.now())
+        if plan is not None and plan.preconditioning.mode is not None:
+            mode = plan.preconditioning.mode.value
+            if not any(r["mode"] == mode for r in rows):
+                rows.append(self.db.learning_for(mode, self.tonight_now().first_temp_c))
+        for row in rows:
+            # Not the drift, which is a measurement, but what the unit is actually
+            # being sent because of it. Through the same method the sequences call,
+            # so the card cannot show a correction that is not happening.
+            row["sends_c"] = self._correction(
+                int(row["target_c"]), Mode(str(row["mode"]))
+            ).send_c
+        return {"on": self.db.learning_on(), "modes": rows}
+
+    def set_learning(self, on: bool) -> bool:
+        self.db.set_learning_on(on)
+        self.events.info(
+            LEARNING_KIND,
+            "Using what it has measured about this bed."
+            if on
+            else "Back to estimating: the measured timings and corrections are ignored.",
+        )
+        return on
+
+    def forget_learning(self, mode: str | None = None) -> int:
+        """Start again. The nights stay; they just stop teaching."""
+        cleared = self.db.forget_learning(mode)
+        which = "every mode" if mode is None else mode
+        self.events.info(
+            LEARNING_KIND,
+            f"Starting again on {which}: {cleared} measured "
+            f"{'night' if cleared == 1 else 'nights'} set aside. The nights themselves are kept.",
+        )
+        return cleared
+
     def tonight_phase(self) -> str:
         """Which controls make sense right now.
 
@@ -1875,6 +1942,25 @@ class Service:
 
     # --- The bed, not the dial -------------------------------------------------
 
+    def _correction(self, wanted_c: int, mode: Mode) -> Correction:
+        """The arithmetic on its own: what to send, and the drift behind it.
+
+        Split out of `_corrected` so the Learning card can show what the
+        correction is doing without a screen being read writing a line into the
+        night's log. Nothing here has a side effect.
+        """
+        # The switch gates both learned things, and it is checked here rather
+        # than somewhere clever, because this is the one that changes what the bed
+        # does. Off means send exactly what was asked for.
+        off = self.db.learned_offset_c(mode.value, wanted_c) if self.db.learning_on() else None
+        if off is None or abs(off) < 0.5:
+            return Correction(wanted_c, off, capped=False)
+
+        # Away from the bed's drift: it lands 2.1 low, so send 2 high.
+        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, round(-off)))
+        send = self.settings.within(wanted_c + shift, mode)
+        return Correction(send, off, capped=send != wanted_c + shift)
+
     def _corrected(self, wanted_c: int, mode: Mode) -> int:
         """What to actually send so the bed lands on `wanted_c`.
 
@@ -1893,14 +1979,9 @@ class Service:
         No correction at all until the bed has been measured enough times to have
         earned one. No correction is better than a confident wrong one.
         """
-        off = self.db.learned_offset_c(mode.value, wanted_c)
-        if off is None or abs(off) < 0.5:
-            return wanted_c
-
-        # Away from the bed's drift: it lands 2.1 low, so send 2 high.
-        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, round(-off)))
-        send = self.settings.within(wanted_c + shift, mode)
-        if send == wanted_c:
+        correction = self._correction(wanted_c, mode)
+        send, off = correction.send_c, correction.drift_c
+        if send == wanted_c or off is None:
             return wanted_c
 
         # Said once a night rather than at every boundary. It is worth knowing
@@ -1909,7 +1990,7 @@ class Service:
         night = self._tonight_date()
         if self._correction_told != night:
             self._correction_told = night
-            short = "" if send == wanted_c + shift else " (clipped by the safety cap)"
+            short = " (clipped by the safety cap)" if correction.capped else ""
             self.events.info(
                 "temperature",
                 f"Sending {send}C to get a {wanted_c}C bed: this bed settles "

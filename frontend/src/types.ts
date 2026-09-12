@@ -251,6 +251,39 @@ export interface AutopilotBoost {
   for_fun: boolean
 }
 
+/**
+ * One of the two things a mode can learn, and how close it is to knowing it.
+ *
+ * The sentence comes from the service rather than being assembled here. Every
+ * one of them carries a measured number, and a screen that writes its own
+ * sentence around a figure it was handed is a screen that can eventually
+ * describe a correction that is not happening.
+ */
+export interface LearningSkill {
+  key: 'pace' | 'settle'
+  title: string
+  /** Nights counted so far, never past `needed`. */
+  runs: number
+  needed: number
+  unlocked: boolean
+  detail: string
+}
+
+export interface LearningMode {
+  mode: Mode
+  target_c: number
+  needed: number
+  /** How many of this mode's skills are measured. Out of `skills.length`. */
+  unlocked: number
+  skills: LearningSkill[]
+}
+
+export interface Learning {
+  /** The switch. Off means estimate the head start and send what was asked for. */
+  on: boolean
+  modes: LearningMode[]
+}
+
 export interface AutopilotNight {
   wake_at: string
   starts_at: string

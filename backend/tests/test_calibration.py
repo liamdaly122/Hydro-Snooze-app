@@ -191,3 +191,50 @@ def test_the_script_uses_the_same_rules_as_the_service():
     assert declared("MIN_RUNS_TO_LEARN") == real.MIN_RUNS_TO_LEARN
     assert declared("MIN_LEARNABLE_GAP_C") == real.MIN_LEARNABLE_GAP_C
     assert declared("LEARNED_BASE_MINUTES") == real.LEARNED_BASE_MINUTES
+
+
+def _script():
+    """The script, loaded as a module. It has no package to import it from."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "calibration.py"
+    spec = importlib.util.spec_from_file_location("calibration", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_script_skips_the_nights_start_again_set_aside(db, capsys):
+    """It reads the same table the app learns from, so it has to skip the same
+    rows. A script saying "measured" about nights the app has set aside is the
+    one thing worse than no script."""
+    import sqlite3
+
+    for bed in (25.9, 26.1, 25.8):
+        ran(db, "warming", 28, bed)
+    db.forget_learning()
+
+    raw = sqlite3.connect(":memory:")
+    raw.row_factory = sqlite3.Row
+    db._db.backup(raw)
+
+    script = _script()
+    counting = script._counting(raw)
+    assert counting == " AND counts = 1"
+
+    script.learned([{"mode": "warming", "target_c": 28}], raw, counting)
+    said = capsys.readouterr().out
+    assert "0 of 3" in said
+    assert "measured" not in said
+
+
+def test_the_script_still_runs_against_a_database_older_than_start_again():
+    """The column is newer than some copies this may be pointed at, and read-only
+    means it cannot be added. No column means nothing was ever set aside."""
+    import sqlite3
+
+    raw = sqlite3.connect(":memory:")
+    raw.row_factory = sqlite3.Row
+    raw.execute("CREATE TABLE precondition_runs (mode TEXT, target_c INT, end_c REAL)")
+    assert _script()._counting(raw) == ""
