@@ -19,6 +19,8 @@ import type {
   Profile,
   Schedule,
   ServiceInfo,
+  Stage,
+  TonightState,
 } from '../types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -87,6 +89,33 @@ export class HttpApiClient implements ApiClient {
       body: JSON.stringify({ target_c: targetC }),
     })
   }
+
+  getTonight = () => request<TonightState>('/api/tonight')
+
+  setStageTonight = (stage: Stage, temp_c: number) =>
+    request<TonightState>('/api/tonight/stage', {
+      method: 'POST',
+      body: JSON.stringify({ stage, temp_c }),
+    })
+
+  nudgeTonight = (delta_c: number) =>
+    request<TonightState>('/api/tonight/nudge', {
+      method: 'POST',
+      body: JSON.stringify({ delta_c }),
+    })
+
+  shiftTonight = (patch: { bed_minutes?: number; wake_minutes?: number }) =>
+    request<TonightState>('/api/tonight/shift', {
+      method: 'POST',
+      body: JSON.stringify({ bed_minutes: 0, wake_minutes: 0, ...patch }),
+    })
+
+  skipTonight = (skip: boolean) =>
+    request<TonightState>(`/api/tonight/skip?skip=${skip}`, { method: 'POST' })
+
+  clearTonight = () => request<TonightState>('/api/tonight', { method: 'DELETE' })
+
+  keepTonight = () => request<Schedule>('/api/tonight/keep', { method: 'POST' })
 
   getAutopilot = () => request<AutopilotNight>('/api/autopilot')
 

@@ -101,33 +101,37 @@ async def test_a_nudge_cannot_move_the_switch_off(service):
     before = service.scheduler.night_date(service.schedule, NOW)
     was = service.tonight_now().wake_time
 
-    service.nudge_tonight(-2)
+    service.nudge_tonight(-1)
 
     assert service.tonight_now().wake_time == was
     assert service.scheduler.night_date(service.schedule, NOW) == before
 
 
 async def test_a_nudge_lapses_on_its_own(service):
-    service.nudge_tonight(-2, minutes=30)
+    service.nudge_tonight(-1, minutes=30)
     tonight = service.scheduler.tonight
 
-    assert tonight.nudge_at(NOW + timedelta(minutes=29)) == -2
+    assert tonight.nudge_at(NOW + timedelta(minutes=29)) == -1
     assert tonight.nudge_at(NOW + timedelta(minutes=31)) == 0, "back to the plan"
 
 
 async def test_a_nudge_applies_to_what_the_plan_asks_for(service):
-    service.nudge_tonight(-2)
-    assert service._nudged(22, Mode.QUIET) == 20
+    service.nudge_tonight(-1)
+    assert service._nudged(22, Mode.QUIET) == 21
 
     service.clock.advance(timedelta(hours=1))
     assert service._nudged(22, Mode.QUIET) == 22, "and stops when it lapses"
 
 
-async def test_a_nudge_is_a_fidget_not_a_decision(service):
-    """Bigger than a few degrees is a change of mind about the night, and there
-    is a control for that which says so."""
+async def test_a_nudge_is_one_degree_and_does_not_stack(service):
+    """One degree, one period. A nudge that can be tapped up to four degrees is a
+    temperature control with a timer on it, and there is already a temperature
+    control."""
     service.nudge_tonight(-40)
-    assert service.scheduler.tonight.nudge_c == -NUDGE_LIMIT_C
+    assert service.scheduler.tonight.nudge_c == -NUDGE_LIMIT_C == -1
+
+    service.nudge_tonight(-1)
+    assert service.scheduler.tonight.nudge_c == -1, "a second one does not double it"
 
 
 async def test_a_nudge_respects_the_safety_cap(service):
@@ -216,3 +220,31 @@ async def test_saving_it_as_a_preference_is_the_deliberate_one(service):
 
     service._adopt_into_running_stage(Stage.DEEP, 17)
     assert usual(service) == [17, 22, 26], "now"
+
+
+# --- Which controls make sense right now ------------------------------------------
+
+
+async def test_the_controls_follow_where_you_are_in_the_night(service):
+    """They do not share one window. Shaping a night happens before it starts and
+    nudging one happens from inside it, so offering all six all the time would put
+    "going to bed early" in front of somebody already in bed."""
+    plan = service.scheduler.plan_in_progress(service.schedule, NOW)
+
+    for when, expected in [
+        (plan.starts_at - timedelta(hours=9), "none"),
+        (plan.starts_at - timedelta(hours=2), "evening"),
+        (plan.starts_at + timedelta(minutes=5), "running"),
+        (plan.wake_at - timedelta(hours=1), "running"),
+        (plan.wake_at + timedelta(minutes=5), "after"),
+    ]:
+        service.clock.jump_to(when)
+        assert service.tonight_phase() == expected, f"at {when:%H:%M}"
+
+
+async def test_nothing_is_offered_while_automation_is_off(service):
+    from dataclasses import replace as _replace
+
+    service.schedule = _replace(service.schedule, enabled=False)
+    service.clock.jump_to(NOW)
+    assert service.tonight_phase() == "none"

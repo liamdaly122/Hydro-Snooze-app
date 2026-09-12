@@ -85,6 +85,13 @@ REBOOT_AFTER_FAILURES = 2
 #: change you made for one night from the routine changing.
 TONIGHT_KIND = "tonight"
 
+#: How long before a night starts that its controls appear.
+#:
+#: Six hours, so they turn up in the evening rather than over breakfast. Setting
+#: a lie-in at ten in the morning is a thing somebody might want and not a thing
+#: worth six controls on the home screen all day to allow.
+TONIGHT_OPENS = timedelta(hours=6)
+
 
 def _shifted(at: time_of_day, minutes: int) -> time_of_day:
     """A clock time moved by some minutes, wrapping midnight."""
@@ -1713,6 +1720,31 @@ class Service:
         self.scheduler.tonight = changed
         self._push_schedule()
         return changed
+
+    def tonight_phase(self) -> str:
+        """Which controls make sense right now.
+
+        The six tonight-only controls do not share one window. Shaping a night is
+        something you do before it starts; nudging one is something you do from
+        inside it. Offering all six all the time would put "going to bed early"
+        in front of somebody already in bed, and "cooler for half an hour" in
+        front of a unit that is switched off.
+
+            none      no night to change: automation off, or hours away
+            evening   the night is ahead. Its shape is still yours to set
+            running   you are in it. The shape is settled; nudging is not
+            after     it is over, and Autopilot is the screen for it
+        """
+        now = self.clock.now()
+        plan = self.scheduler.plan_in_progress(self.schedule, now)
+        if plan is None:
+            return "none"
+        if now >= plan.wake_at:
+            return "after"
+        if now >= plan.starts_at:
+            return "running"
+        # Far enough out and it is not tonight yet, it is just Tuesday.
+        return "evening" if plan.starts_at - now <= TONIGHT_OPENS else "none"
 
     def tonight_now(self) -> Schedule:
         """The schedule as tonight is actually being run, for the app to show."""

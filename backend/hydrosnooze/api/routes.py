@@ -166,7 +166,9 @@ class StageTonight(BaseModel):
 
 
 def _tonight(service: Service) -> dict[str, object]:
-    return tonight_json(service.tonight_now(), service.scheduler.tonight)
+    return tonight_json(
+        service.tonight_now(), service.scheduler.tonight, service.tonight_phase()
+    )
 
 
 @router.get("/tonight")
@@ -178,7 +180,17 @@ async def get_tonight(request: Request) -> dict[str, object]:
 async def post_tonight_stage(request: Request, body: StageTonight) -> dict[str, object]:
     """One stage, for this night only."""
     service = _service(request)
-    _guard_temperature(service, body.temp_c)
+    running = service.tonight_now()
+    wanted = [
+        replace(st, temp_c=body.temp_c) if st.stage is body.stage else st
+        for st in running.stages
+    ]
+    # The whole night, not the one stage. Inside the 25 to 35 overlap a stage's
+    # mode depends on the temperature before it, so a stage can only be judged in
+    # the sequence it sits in. _guard_night's docstring is where that is argued;
+    # this used to call _guard_temperature with two of its three arguments and
+    # 500 on every request, which is what comes of not reading it.
+    _guard_night(service, wanted, running.cooling_speed)
     try:
         service.set_stage_tonight(body.stage, body.temp_c)
     except CommandFailed as exc:

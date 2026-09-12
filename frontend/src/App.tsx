@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BottomNav, type Screen } from './components/BottomNav'
 import { ChevronRight } from './components/Icons'
 import { PowerButton } from './components/PowerButton'
@@ -11,7 +11,7 @@ import { Schedule } from './screens/Schedule'
 import { Dev } from './screens/Dev'
 import { useService } from './useService'
 import type { ApiClient } from './api/client'
-import { MAX_TEMPERATURE_C, type Schedule as ScheduleType } from './types'
+import { MAX_TEMPERATURE_C, type Schedule as ScheduleType, type TonightState } from './types'
 
 export function App({ client }: { client: ApiClient }) {
   const [screen, setScreen] = useState<Screen>('home')
@@ -24,11 +24,27 @@ export function App({ client }: { client: ApiClient }) {
   const [inProfiles, setInProfiles] = useState(false)
   // Pushed the same way, from the card at the top of the home screen.
   const [inAutopilot, setInAutopilot] = useState(false)
+  // Only the Schedule screen needs this, but App is where it is fetched because
+  // Home fetches its own copy and the two must not disagree about whether
+  // tonight is being skipped.
+  const [tonight, setTonight] = useState<TonightState | null>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
+
   const [powerError, setPowerError] = useState<string | null>(null)
   const { info, state, schedule, events, power, health, connected } = useService(client)
 
   const ready = state !== null && schedule !== null
+
+  useEffect(() => {
+    let live = true
+    void client
+      .getTonight()
+      .then((t) => live && setTonight(t))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [client, schedule])
 
   function saveSchedule(patch: Partial<ScheduleType>) {
     setScheduleError(null)
@@ -107,6 +123,14 @@ export function App({ client }: { client: ApiClient }) {
             onStopRehearsal={() =>
               client.stopRehearsal().catch((e: Error) => setScheduleError(e.message))
             }
+            skippingTonight={tonight && tonight.phase !== 'none' ? tonight.skip : null}
+            onSkipTonight={(skip) => {
+              setScheduleError(null)
+              void client
+                .skipTonight(skip)
+                .then(setTonight)
+                .catch((e: Error) => setScheduleError(e.message))
+            }}
           />
         ) : (
           <Home

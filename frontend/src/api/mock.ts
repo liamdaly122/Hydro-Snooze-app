@@ -24,6 +24,9 @@ import type {
   Schedule,
   ServiceInfo,
   SleepStage,
+  Stage,
+  TonightPhase,
+  TonightState,
 } from '../types'
 import { MAX_TEMPERATURE_C, MIN_STAGE_MINUTES, MODE_RANGE, WARMING_FLOOR_C } from '../types'
 
@@ -239,6 +242,123 @@ export class MockApiClient implements ApiClient {
       const mine = this.schedule.stages[i]
       return mine && mine.stage === stage.stage && mine.temp_c === stage.temp_c
     })
+  }
+
+  /**
+   * Tonight, in the mock. Held in memory the way the service holds it in a row,
+   * so the seed site behaves like the real thing rather than pretending.
+   *
+   * The phase can be forced with `?phase=` so a state a real evening takes hours
+   * to reach can be looked at now.
+   */
+  private tonightPhase: TonightPhase =
+    (new URLSearchParams(location.search).get('phase') as TonightPhase) || 'running'
+
+  private tonightState = {
+    skip: false,
+    stages: null as SleepStage[] | null,
+    wake_time: null as string | null,
+    bed_time: null as string | null,
+    nudge_c: 0,
+    nudge_until: null as string | null,
+  }
+
+  private tonightJson(): TonightState {
+    const t = this.tonightState
+    const wake_time = t.wake_time ?? this.schedule.wake_time
+    const bed_time = t.bed_time ?? this.schedule.bed_time
+    // The night's length follows its two edges and the stages refit to it, the
+    // same way Schedule.__post_init__ does on the service. Spreading the old
+    // night_minutes instead made an hour's lie-in read as a later bedtime.
+    const night_minutes = minutesBetween(bed_time, wake_time)
+    const running: Schedule = {
+      ...this.schedule,
+      wake_time,
+      bed_time,
+      night_minutes,
+      stages: fitStages((t.stages ?? this.schedule.stages).map((s) => ({ ...s })), night_minutes),
+    }
+    return {
+      phase: this.tonightPhase,
+      running,
+      // Not the nudge: it is visible where it happens and lapses on its own.
+      changed: t.skip || t.stages !== null || t.wake_time !== null || t.bed_time !== null,
+      skip: t.skip,
+      stages_changed: t.stages !== null,
+      times_changed: t.wake_time !== null || t.bed_time !== null,
+      nudge_c: t.nudge_c,
+      nudge_until: t.nudge_until,
+    }
+  }
+
+  async getTonight(): Promise<TonightState> {
+    await sleep(80)
+    return this.tonightJson()
+  }
+
+  async setStageTonight(stage: Stage, temp_c: number): Promise<TonightState> {
+    await sleep(120)
+    const base = this.tonightState.stages ?? this.schedule.stages
+    this.tonightState.stages = base.map((s) => (s.stage === stage ? { ...s, temp_c } : { ...s }))
+    return this.tonightJson()
+  }
+
+  async nudgeTonight(delta_c: number): Promise<TonightState> {
+    await sleep(120)
+    const d = Math.max(-1, Math.min(1, delta_c))
+    this.tonightState.nudge_c = d
+    this.tonightState.nudge_until = d ? new Date(Date.now() + 30 * 60_000).toISOString() : null
+    return this.tonightJson()
+  }
+
+  async shiftTonight(patch: { bed_minutes?: number; wake_minutes?: number }): Promise<TonightState> {
+    await sleep(120)
+    const shift = (hhmm: string, by: number) => {
+      const [h, m] = hhmm.split(':').map(Number)
+      const total = (((h! * 60 + m! + by) % 1440) + 1440) % 1440
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`
+    }
+    if (patch.bed_minutes) {
+      this.tonightState.bed_time = shift(
+        this.tonightState.bed_time ?? this.schedule.bed_time,
+        patch.bed_minutes,
+      )
+    }
+    if (patch.wake_minutes) {
+      this.tonightState.wake_time = shift(
+        this.tonightState.wake_time ?? this.schedule.wake_time,
+        patch.wake_minutes,
+      )
+    }
+    return this.tonightJson()
+  }
+
+  async skipTonight(skip: boolean): Promise<TonightState> {
+    await sleep(120)
+    this.tonightState.skip = skip
+    return this.tonightJson()
+  }
+
+  async clearTonight(): Promise<TonightState> {
+    await sleep(120)
+    this.tonightState = {
+      skip: false,
+      stages: null,
+      wake_time: null,
+      bed_time: null,
+      nudge_c: 0,
+      nudge_until: null,
+    }
+    return this.tonightJson()
+  }
+
+  async keepTonight(): Promise<Schedule> {
+    await sleep(160)
+    const running = this.tonightJson().running
+    this.schedule = { ...this.schedule, stages: running.stages.map((s) => ({ ...s })) }
+    this.tonightState.stages = null
+    return this.schedule
   }
 
   async getAutopilot(): Promise<AutopilotNight> {

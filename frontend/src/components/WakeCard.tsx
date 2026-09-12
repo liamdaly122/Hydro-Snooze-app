@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Card } from './Card'
 import { Toggle } from './Toggle'
 import { Clock, Flame, Snowflake, Waves } from './Icons'
@@ -5,9 +6,13 @@ import { formatDayTime, formatDays, formatDuration, formatTime, nextPlan, tint }
 import type { Schedule } from '../types'
 
 interface Props {
+  /** The night as it is actually being run, which is not always the routine. */
   draft: Schedule
+  /** The routine, so a changed time can say what it usually is. */
+  usual?: Schedule
   onDraftChange: (patch: Partial<Schedule>) => void
   onOpen: () => void
+  children?: ReactNode
 }
 
 /**
@@ -18,7 +23,7 @@ interface Props {
  * stopped being a choice, which leaves the question the card is actually for:
  * when does it wake me, is it on, and when does the unit switch itself on.
  */
-export function WakeCard({ draft, onDraftChange, onOpen }: Props) {
+export function WakeCard({ draft, usual, onDraftChange, onOpen, children }: Props) {
   const plan = nextPlan(draft)
   const firstTemp = draft.stages[0]?.temp_c ?? 20
   const warming = draft.preconditioning.mode === 'warming'
@@ -37,6 +42,15 @@ export function WakeCard({ draft, onDraftChange, onOpen }: Props) {
       <div className="wake__row">
         <div className={`wake__time${draft.enabled ? '' : ' wake__time--off'}`}>
           {draft.wake_time}
+          {/*
+            A changed time has to say it is changed, or it reads as the routine
+            and the next question is why the alarm moved on its own.
+          */}
+          {usual && usual.wake_time !== draft.wake_time && (
+            <span className="wake__only">
+              Tonight only &middot; usually {usual.wake_time.slice(0, 5)}
+            </span>
+          )}
         </div>
         <Toggle
           on={draft.enabled}
@@ -68,6 +82,8 @@ export function WakeCard({ draft, onDraftChange, onOpen }: Props) {
           </span>
         </span>
       </div>
+
+      {children}
     </Card>
   )
 }

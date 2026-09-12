@@ -599,12 +599,14 @@ class NightPlan:
 #: exists for, and half an hour is long enough to tell whether it helped.
 NUDGE_MINUTES = 30
 
-#: The most a nudge may move the bed in either direction.
+#: How far a nudge moves the bed. Not a maximum: the whole range.
 #:
-#: Two degrees, because a nudge is a fidget rather than a decision. Anything
-#: bigger is a change of mind about the night, and there is a control for that
-#: which says so and shows up in the morning report.
-NUDGE_LIMIT_C = 3
+#: One degree, one period, and no stacking. Liam was firm about that and he is
+#: right: a nudge that can be tapped up to four degrees is a temperature control
+#: with a timer on it, and there is already a temperature control. This one is a
+#: fidget. The app never offers a second tap either, because the two pills are
+#: replaced by the live row the moment one is running.
+NUDGE_LIMIT_C = 1
 
 
 @dataclass(frozen=True)
@@ -678,13 +680,18 @@ class Tonight:
         return self.nudge_c
 
     def anything_to_say(self) -> bool:
-        """Whether this is worth showing or storing at all."""
+        """Whether tonight differs in a way worth announcing.
+
+        Deliberately not the nudge. A nudge is visible where it happens, counts
+        itself down in front of you, and lapses on its own; raising a banner for
+        it would be the app telling you something you are already looking at.
+        This is for the changes that outlast a glance.
+        """
         return bool(
             self.skip
             or self.stages is not None
             or self.wake_time is not None
             or self.bed_time is not None
-            or self.nudge_c
         )
 
 

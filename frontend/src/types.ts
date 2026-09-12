@@ -276,3 +276,28 @@ export interface AutopilotNight {
   energy_kwh: number
   notes: string[]
 }
+
+
+/* --- Tonight only -------------------------------------------------------------
+ *
+ * The saved Schedule is the routine: the nights you usually have. This is the one
+ * you are actually having, and it expires with the morning it belongs to.
+ *
+ * `phase` is the service saying which controls make sense right now, rather than
+ * the app working it out again from a clock and a plan. The six do not share one
+ * window: shaping a night happens before it starts, nudging one happens from
+ * inside it.
+ */
+export type TonightPhase = 'none' | 'evening' | 'running' | 'after'
+
+export interface TonightState {
+  phase: TonightPhase
+  /** The schedule as tonight is actually being run. Draw this, not the routine. */
+  running: Schedule
+  changed: boolean
+  skip: boolean
+  stages_changed: boolean
+  times_changed: boolean
+  nudge_c: number
+  nudge_until: string | null
+}

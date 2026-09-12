@@ -30,6 +30,11 @@ interface Props {
   /** Opens the saved nights. The card is where a whole night's temperatures live,
    *  so it is where saving and loading a set of them belongs. */
   onOpenProfiles?: () => void
+  /**
+   * The tonight-only controls. Inside the glow with the big number rather than
+   * under the card, because a nudge belongs with the temperature it nudges.
+   */
+  children?: React.ReactNode
 }
 
 export function TemperatureCard({
@@ -39,6 +44,7 @@ export function TemperatureCard({
   onStageChange,
   onSetNow,
   onOpenProfiles,
+  children,
 }: Props) {
   const [tab, setTab] = useState<TabKey>('now')
 
@@ -132,17 +138,18 @@ export function TemperatureCard({
           } as React.CSSProperties
         }
       >
-        <button
-          type="button"
-          className="step"
-          onClick={() => step(-1)}
-          disabled={!canEdit || atFloor}
-          aria-label="Colder"
-        >
-          <Minus />
-        </button>
+        <div className="stage__row">
+          <button
+            type="button"
+            className="step"
+            onClick={() => step(-1)}
+            disabled={!canEdit || atFloor}
+            aria-label="Colder"
+          >
+            <Minus />
+          </button>
 
-        {selected === null ? (
+          {selected === null ? (
           // Nothing to show is not the same as nothing happening. When the app
           // has not commanded a temperature, the night ahead is still Autopilot's
           // and saying so is more use than a blank or an instruction: the thing
@@ -163,15 +170,18 @@ export function TemperatureCard({
           </span>
         )}
 
-        <button
-          type="button"
-          className="step"
-          onClick={() => step(1)}
-          disabled={!canEdit || atCeiling}
-          aria-label="Warmer"
-        >
-          <Plus />
-        </button>
+          <button
+            type="button"
+            className="step"
+            onClick={() => step(1)}
+            disabled={!canEdit || atCeiling}
+            aria-label="Warmer"
+          >
+            <Plus />
+          </button>
+        </div>
+
+        {tab === 'now' && children}
 
         <StageNote
           state={state}
@@ -231,13 +241,12 @@ function StageNote({
     else if (value === null)
       note = say('Adjust the bed temp by hand with + and −.', measured)
     else if (state.current_stage !== null) {
-      // Said before it happens rather than after. Reaching for the temperature
-      // mid-stage is a correction, not a one-off, so it sticks; better to know
-      // that while deciding than to find the schedule changed in the morning.
-      note = say(
-        measured,
-        `${STAGE_LABEL[state.current_stage]} is running. Changing this sets ${STAGE_LABEL[state.current_stage]} to it from tomorrow too.`,
-      )
+      // Said before it happens rather than after, and it says the opposite of
+      // what it used to. Reaching for the temperature mid-stage used to rewrite
+      // the saved routine, so the warning was "this sticks". It is tonight only
+      // now, so the useful thing to say is that it does not.
+      const label = STAGE_LABEL[state.current_stage]
+      note = say(measured, `${label} is running. Changing this is for tonight only.`)
     } else note = measured
   } else if (value !== null && value >= WARMING_FLOOR_C) {
     note = `Heats the bed to ${value}°C.`

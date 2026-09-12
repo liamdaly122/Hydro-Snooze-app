@@ -198,7 +198,7 @@ def autopilot_json(night) -> dict[str, object]:
     }
 
 
-def tonight_json(schedule, tonight) -> dict[str, object]:
+def tonight_json(schedule, tonight, phase: str = "none") -> dict[str, object]:
     """What is different about this one night, and what it adds up to.
 
     `running` is the whole point: the schedule as tonight is actually being run,
@@ -207,6 +207,7 @@ def tonight_json(schedule, tonight) -> dict[str, object]:
     different without working it out again.
     """
     return {
+        "phase": phase,
         "running": schedule_json(schedule),
         "changed": tonight is not None and tonight.anything_to_say(),
         "skip": bool(tonight and tonight.skip),

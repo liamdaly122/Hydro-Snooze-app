@@ -4,8 +4,10 @@ import { WakeCard } from '../components/WakeCard'
 import { ModeSelector } from '../components/ModeSelector'
 import { StatusStrip } from '../components/StatusStrip'
 import { AutopilotTeaser } from '../components/AutopilotTeaser'
+import { TonightBanner } from '../components/TonightBanner'
+import { KeepTonight, NudgeControls, ShiftControls } from '../components/TonightControls'
 import type { ApiClient } from '../api/client'
-import type { DeviceState, Mode, Schedule, Stage } from '../types'
+import type { DeviceState, Mode, Schedule, Stage, TonightState } from '../types'
 
 interface Props {
   client: ApiClient
@@ -37,7 +39,39 @@ export function Home({
   const [draft, setDraft] = useState<Schedule>(schedule)
   const [error, setError] = useState<string | null>(null)
 
+  // Tonight lives here rather than in each card, because three of them need it
+  // and two of them need to agree about it. `now` ticks only so the nudge can
+  // count itself down; nothing else on this screen cares what minute it is.
+  const [tonight, setTonight] = useState<TonightState | null>(null)
+  const [now, setNow] = useState(() => new Date())
+
   useEffect(() => setDraft(schedule), [schedule])
+
+  useEffect(() => {
+    let live = true
+    const load = () =>
+      void client
+        .getTonight()
+        .then((t) => live && setTonight(t))
+        .catch(() => undefined)
+    load()
+    // Re-read on the minute: a phase changes at bedtime and a nudge lapses on
+    // its own, and neither sends anything to say so.
+    const tick = setInterval(() => {
+      if (!live) return
+      setNow(new Date())
+      load()
+    }, 60_000)
+    return () => {
+      live = false
+      clearInterval(tick)
+    }
+  }, [client, schedule])
+
+  function onTonight(work: Promise<TonightState>) {
+    setError(null)
+    void work.then(setTonight).catch((e: Error) => setError(e.message))
+  }
 
   function save(patch: Partial<Schedule>) {
     setDraft((prev) => ({ ...prev, ...patch }))
@@ -59,18 +93,76 @@ export function Home({
       */}
       <AutopilotTeaser client={client} onOpen={onOpenAutopilot} />
 
+      {/*
+        Above everything, and absent unless tonight is not your usual night.
+        It is the only glance-level answer to "is anything different", and the
+        only undo anyone needs.
+      */}
+      {tonight && (
+        <TonightBanner
+          tonight={tonight}
+          usual={schedule}
+          onClear={() => onTonight(client.clearTonight())}
+        />
+      )}
+
       <TemperatureCard
         state={state}
-        draft={draft}
+        draft={tonight?.running ?? draft}
         maxC={maxC}
         onOpenProfiles={onOpenProfiles}
         onStageChange={setStageTemp}
         onSetNow={(targetC) => {
-          void client.setTemperature(targetC).catch((e: Error) => setError(e.message))
+          void client
+            .setTemperature(targetC)
+            .then(() => client.getTonight().then(setTonight))
+            .catch((e: Error) => setError(e.message))
         }}
-      />
+      >
+        {/*
+          Inside the card rather than under it, so the nudge sits with the
+          temperature it nudges. Only while a night is running: "1 degree cooler
+          for half an hour" means nothing to a unit that is switched off.
+        */}
+        {tonight?.phase === 'running' && (
+          <NudgeControls
+            tonight={tonight}
+            now={now}
+            onNudge={(delta) => onTonight(client.nudgeTonight(delta))}
+            onCancel={() => onTonight(client.nudgeTonight(0))}
+          />
+        )}
+        {tonight && (
+          <KeepTonight
+            tonight={tonight}
+            usualStages={schedule.stages}
+            onKeep={() => {
+              setError(null)
+              void client
+                .keepTonight()
+                .then(() => client.getTonight().then(setTonight))
+                .catch((e: Error) => setError(e.message))
+            }}
+          />
+        )}
+      </TemperatureCard>
 
-      <WakeCard draft={draft} onDraftChange={save} onOpen={onOpenSchedule} />
+      <WakeCard draft={tonight?.running ?? draft} usual={schedule} onDraftChange={save} onOpen={onOpenSchedule}>
+        {/*
+          Shaping the night, which is something you do before you are in it.
+          "Bed early" goes once the bed is already getting ready; "sleep in"
+          stays, because at three in the morning a lie-in is still a thing you
+          might want.
+        */}
+        {tonight && (tonight.phase === 'evening' || tonight.phase === 'running') && (
+          <ShiftControls
+            bedTime={tonight.running.bed_time}
+            wakeTime={tonight.running.wake_time}
+            showBedEarly={tonight.phase === 'evening'}
+            onShift={(patch) => onTonight(client.shiftTonight(patch))}
+          />
+        )}
+      </WakeCard>
 
       <ModeSelector
         state={state}

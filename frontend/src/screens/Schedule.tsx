@@ -18,6 +18,9 @@ interface Props {
   state: DeviceState
   onStartRehearsal: (seconds: number) => Promise<void>
   onStopRehearsal: () => Promise<void>
+  /** Null when there is no night to skip: automation off, or hours away. */
+  skippingTonight: boolean | null
+  onSkipTonight: (skip: boolean) => void
 }
 
 /** Boundaries move by a quarter of an hour, which is also a stage's floor. */
@@ -43,6 +46,8 @@ function toHhMm(minutes: number): string {
  * up, which is the point of editing boundaries rather than durations.
  */
 export function Schedule({
+  skippingTonight,
+  onSkipTonight,
   draft,
   onChange,
   error,
@@ -229,6 +234,35 @@ export function Schedule({
           has to go picks how early to switch on.
         </p>
       </Card>
+
+      {/*
+        Behind the chevron on purpose. It is the one tonight-only control with a
+        real consequence, and a sleeve brushing it on the home screen would mean
+        no bed preparation at all. Reversible, but not from inside a duvet.
+      */}
+      {skippingTonight !== null && (
+        <Card label="Tonight">
+          <div className="skip">
+            <span className="skip__text">
+              <span className="skip__title">
+                {skippingTonight ? 'Skipping tonight' : 'Running tonight as usual'}
+              </span>
+              <span className="skip__sub">
+                {skippingTonight
+                  ? 'The bed will not get ready and nothing switches on. Your usual nights are unchanged.'
+                  : 'Skip one night without changing which nights you sleep on.'}
+              </span>
+            </span>
+            <button
+              type="button"
+              className={`pill${skippingTonight ? ' pill--keep' : ''}`}
+              onClick={() => onSkipTonight(!skippingTonight)}
+            >
+              {skippingTonight ? 'Run tonight' : 'Skip tonight'}
+            </button>
+          </div>
+        </Card>
+      )}
 
       <RehearsalCard
         state={state}

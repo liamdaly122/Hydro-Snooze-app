@@ -20,6 +20,8 @@ import type {
   Profile,
   Schedule,
   ServiceInfo,
+  Stage,
+  TonightState,
 } from '../types'
 
 /** Pushed over the WebSocket whenever anything changes, so the app is never stale. */
@@ -39,6 +41,24 @@ export interface LiveUpdate {
 }
 
 export interface ApiClient {
+  /**
+   * What is different about this one night, and which controls make sense now.
+   *
+   * Everything below it changes tonight and expires with it, so an experiment
+   * costs nothing to undo and nothing to remember. Making one permanent is
+   * keepTonight, which is the only one that touches the saved routine.
+   */
+  getTonight(): Promise<TonightState>
+  setStageTonight(stage: Stage, tempC: number): Promise<TonightState>
+  /** One degree, one period, no stacking. Never moves the switch-off. */
+  nudgeTonight(deltaC: number): Promise<TonightState>
+  /** Going to bed early, or sleeping in. Moves the switch-off with the alarm. */
+  shiftTonight(patch: { bed_minutes?: number; wake_minutes?: number }): Promise<TonightState>
+  skipTonight(skip: boolean): Promise<TonightState>
+  clearTonight(): Promise<TonightState>
+  /** Save as my preference: tonight's temperatures become the usual ones. */
+  keepTonight(): Promise<Schedule>
+
   /**
    * Last night, for the Autopilot screen. Rejects with a 404 message when there
    * is no finished night behind us yet, which is the first morning and any
