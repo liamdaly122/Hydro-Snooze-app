@@ -8,17 +8,30 @@ unit through an infrared blaster and a smart plug.
 
 ## Where this is up to
 
-The hardware has not arrived yet. That does not block the app, so I am building
-the app first.
+*Last updated 16 September 2026.*
 
-**The whole thing works, end to end, against a simulated unit.** The service, the
-scheduler, every command sequence, and the app driving all of it. What it is
-missing is a real HS1001 on the other end, and swapping to one is two lines in
-`.env`.
+**It runs the bed.** A Raspberry Pi in the house drives a real HS1001 through a
+real infrared blaster, watches a real smart plug, and reads three real temperature
+probes taped to the mattress. It has run whole nights unattended and survived ten
+deliberate failures on the real hardware, which is recorded in `CHECKLIST.md`
+rather than claimed here.
 
-**[CHECKLIST.md](CHECKLIST.md) is the thing to work down.** Everything left, in
-order, with boxes to tick. `ROADMAP.md` has the reasoning behind it and `SETUP.md`
-has the detail for each hardware step.
+The night has four stages: **Drift, Deep, REM and Wake.** Drift is a warmer half
+hour at the front, so getting into bed is not getting into the cold.
+
+**The app has started learning.** The plug is the only real sensor on the unit
+itself, so the app compares what it asked for against what the bed actually did
+and corrects the difference. The Autopilot screen shows what it knows and how many
+more nights it needs before it trusts itself.
+
+**Next: a Withings Sleep Analyzer.** Everything above measures the machine. Nothing
+measures the sleeper. The mat goes under the mattress and its data gets joined
+against the mattress temperature, so for the first time the project can ask whether
+the temperature it chose was any good. See [docs/withings.md](docs/withings.md) for
+what the API actually does, established against the live API rather than read.
+
+**[CHECKLIST.md](CHECKLIST.md) is the thing to work down.** `ROADMAP.md` has the
+reasoning behind it and `SETUP.md` has the detail for each hardware step.
 
 ## Running it
 
@@ -44,9 +57,9 @@ The app has a third tab, a spanner, which only appears when the service is
 talking to a simulated unit. It has a clock that can be jumped.
 
 Jump to 21:29, set the speed to 60x, and the whole evening plays out in about
-half a minute: the unit powers on, forces Turbo, rails down and counts up to the
-phase 1 temperature, waits until 22:00, arms the schedule, and drops out of Turbo
-while the display is still awake from arming.
+half a minute: the unit powers on, rails down and counts up to the Drift
+temperature, then steps through Deep, REM and Wake at their boundaries and
+switches off in the morning.
 
 ### Running the tests
 
@@ -54,10 +67,10 @@ while the display is still awake from arming.
 cd backend && . .venv/bin/activate && pytest
 ```
 
-96 of them. The ones that matter check that every temperature sequence lands on
-exactly the right number from every plausible starting state, and that arming
-without the wake preamble fails, which is the failure that would otherwise turn
-up at 3am.
+643 of them. The ones that matter check that every temperature sequence lands on
+exactly the right number from every plausible starting state, that a stage
+boundary still fires when everything else is broken, and that a night is never
+scored against a target nobody wrote down.
 
 ## The idea
 
@@ -71,7 +84,8 @@ below the bedroom temperature".
 
 So the app drives the night itself. It powers the unit on, sets a temperature, and comes back at
 each stage boundary to set another. Outside the unit's own schedule everything is unlocked, which
-means any number of stages, any durations, and heating and cooling in the same night.
+means any number of stages, any durations, and heating and cooling in the same night. Tonight that
+is four stages: Drift, Deep, REM and Wake.
 
 Two things make that work:
 
@@ -89,36 +103,54 @@ no longer a nicety, it is the last line of defence.
 
 ```
 backend/hydrosnooze/
-  models.py            modes, ranges, rail counts, the night plan derivation
+  models.py            modes, ranges, rail counts, the four stages, the night plan
   clock.py             real, simulated and virtual time
+  clocksync.py         whether the Pi's clock can be believed yet
   sequences.py         the button recipes: rail and count, the wake preamble
   scheduler.py         what should be happening, and when it is too late to bother
   service.py           everything wired together, and the only place holding state
+  db.py                schedule, profiles, events, power history, what it has learned
+  autopilot.py         how close last night was to what was asked for
+  report.py            the morning summary
+  events.py            the log the app reads
+  notify.py            push, when something needs saying
+  watchdog.py          the last line of defence
+  pi.py                temperature, throttling, disk, uptime
+  ircodes.py           the eight captured codes
+  config.py            every setting, and which adapters to use
+  main.py              the web service and the background loops
+  api/                 routes, schemas, and the dev-only time machine
   adapters/
     fake_unit.py       a simulated HS1001 with all the documented quirks
     fake_transmitter.py  prints every press instead of sending it
-    esphome.py         the real infrared, untested against hardware
-    shelly.py          the real plug, untested against hardware
+    esphome.py         the real infrared blaster
+    shelly.py          the real plug
+    probes.py          the three DS18B20s on the mattress
 frontend/src/
   types.ts             the same vocabulary, mirrored for the app
-  api/client.ts        the interface between app and service
-  api/http.ts          the live client
-  api/mock.ts          seed data, for the Vercel copy
+  api/                 the client interface, the live client, and seed data
+  screens/Home.tsx     tonight: the stages, the temperatures, the wake time
+  screens/Autopilot.tsx  what it has learned, and how last night went
+  screens/History.tsx  power, temperature and the event log
   screens/Dev.tsx      the time machine and the press log
 scripts/dev.sh         run the whole thing on this machine
-docs/esphome-*.yaml    a template to fill in with the captured codes
+scripts/deploy.sh      copy the working tree to the Pi
+scripts/install.sh     set the Pi up from nothing
+docs/withings.md       what the Withings API actually does
+docs/temperature-probes.md  the three probes, from parts to readings
 ```
 
 ## Putting it on a phone while the design is being settled
 
-Right now there is no service, only seed data, so the app is a plain static site and can be hosted
-anywhere. There is a `vercel.json` at the root for exactly this: point Vercel at this repository and
-it builds `frontend/` and gives me a URL I can open on the phone without my Mac being switched on.
+This was for settling the design before the Pi existed, and it is kept because it is still the
+quickest way to look at a screen on the phone without anything else switched on. Pointed at seed
+data rather than the service, the app is a plain static site and can be hosted anywhere. There is a
+`vercel.json` at the root for exactly this: point Vercel at this repository and it builds
+`frontend/` and gives me a URL.
 
 Vercel scans the repository, sees `backend/pyproject.toml`, and decides this is a two-part app with
 a website and a FastAPI service. It then refuses to deploy until it is told how to handle both. That
-is the wrong shape here: there is no service in `backend/` yet, and when there is one it will not
-live on Vercel.
+is the wrong shape here: the service does not live on Vercel and never will.
 
 Either answer works, and both are in the repository:
 
@@ -170,13 +202,17 @@ Two things the app will not do:
   PWA cannot wake me reliably on iOS and the HydroSnooze has no vibration alarm anyway. My actual
   alarm stays in the Clock app, and the UI says so.
 
-## Hardware, once it arrives
+## The hardware
+
+All of this is installed and running.
 
 | Item | Roughly | What it does |
 |---|---|---|
-| Small always-on computer | £35 to £70 | Runs the app |
+| Raspberry Pi | £35 to £70 | Runs the app, at `hydrosnooze.local` |
 | XIAO Smart IR Mate | £11 | Sends the remote's infrared signals |
 | Shelly Plug S Gen3 | £18 | Tells the app whether the unit is actually on |
+| 3x DS18B20 probes | £10 | The mattress temperature, on one wire |
+| Withings Sleep Analyzer | £120 | Next. The sleeper rather than the machine |
 
 The frontend is built on my Mac and copied across as static files. The Pi never builds React, which
 is why `frontend/` is a standalone Vite project with no Pi-side build step anywhere in it.

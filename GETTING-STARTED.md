@@ -157,8 +157,8 @@ the Raspberry Pi takes over later, and the only reason the Pi exists.
 Tap the **spanner** tab at the bottom. Then **Jump to 21:29**, then **60x**. Wait about thirty
 seconds.
 
-The whole evening plays out: the unit switches on, forces Turbo, counts itself down to the phase 1
-temperature, waits until 22:00, arms the schedule, then drops out of Turbo.
+The whole evening plays out: the unit switches on, counts itself to the Drift temperature, then
+steps through Deep, REM and Wake at their boundaries and switches off in the morning.
 
 Switch back to the Terminal window. Every button press it would have sent over infrared is listed,
 including the ones the unit would have swallowed.

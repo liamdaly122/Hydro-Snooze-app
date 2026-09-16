@@ -3,11 +3,13 @@
 Everything left, in order, with boxes to tick. [SETUP.md](SETUP.md) has the detail behind each step
 and [ROADMAP.md](ROADMAP.md) has the reasoning.
 
-The software half is finished, so nothing here is blocked on anything except parts arriving.
+**The build is finished and the unit runs the bed every night.** Most of what follows is now a
+record of how it was put together rather than work outstanding. Some boxes below are still empty
+because they were branches not taken or niceties skipped, not because they are waiting. I have left
+them as they are rather than tidying them, because an honest record beats a tidy one.
 
-**The order matters now.** The Shelly needs nothing else in the project, so it goes first and can be
-done the day it lands. The blaster needs the Pi to flash it. The install needs both. Everything after
-that is patience.
+**The order mattered.** The Shelly needed nothing else in the project, so it went first. The
+blaster needed the Pi to flash it. The install needed both. Everything after that was patience.
 
 ---
 
@@ -16,11 +18,16 @@ that is patience.
 - [x] The app, designed and running on the phone
 - [x] The service: scheduler, database, live updates
 - [x] A simulated HS1001 with every documented quirk
-- [x] Every button sequence, with 160 tests behind them
+- [x] Every button sequence, with 643 tests behind them
 - [x] Verified on the Mac, press log and all
-- [x] The app drives the night itself: Deep, REM and Wake, any durations, cooling and heating in the
-      same night
+- [x] The app drives the night itself: Drift, Deep, REM and Wake, any durations, cooling and
+      heating in the same night
 - [x] A stage picks cooling or warming from the direction the bed has to move, not just the number
+- [x] A real HS1001, driven over infrared from the Pi, running whole nights unattended
+- [x] Three temperature probes on the mattress, the first measurement of the bed rather than the
+      machine
+- [x] The app corrects its own temperatures from what it observes, and says how sure it is
+- [x] The Autopilot screen: how close last night was, and what the app has learned
 
 ---
 
@@ -465,3 +472,31 @@ runs, so it is worth reading once before the first upgrade rather than during it
 `journalctl -u hydrosnooze -n 100` on the Pi. The troubleshooting tables are at the bottom of
 [SETUP.md](SETUP.md#when-something-goes-wrong) and
 [GETTING-STARTED.md](GETTING-STARTED.md#when-something-goes-wrong).
+
+---
+
+## Next: the Withings Sleep Analyzer
+
+Everything above measures the machine. Nothing measures the sleeper, so the schedule still runs on
+a guess about how I actually sleep. A Sleep Analyzer under the mattress changes that, and its data
+joins against `power_samples` on time, because both carry absolute timestamps.
+
+[docs/withings.md](docs/withings.md) is what the API actually does, established against the live
+API rather than read. Read that before writing any of it.
+
+- [x] Register the Withings application, and the three redirect URIs
+- [x] Read `llms.md` and download `openapi.yaml`, which is the one that wins
+- [x] Prove the token exchange against the live API, unsigned, using the demo account
+- [x] Write it all down in `docs/withings.md`
+- [ ] Sleep a night on the mat, then save the raw `getsummary` and `get` responses
+- [ ] Answer what only a real payload can settle, starting with whether `night_events` is populated
+- [ ] Commit both responses as fixtures, with the device hash stripped from every entry
+- [ ] The backend, offline and against those fixtures: settings, token store, schema, parser, loop
+- [ ] The OAuth routes and a card on the Autopilot screen
+- [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet
+- [ ] Join the two tables and look at one night
+- [ ] Retire the invented numbers on the Autopilot screen, because something measures sleep now
+
+**The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
+lives in its own module, runs in its own loop, and never takes the command lock. An internet outage
+must be a missing chart, never a cold bed.

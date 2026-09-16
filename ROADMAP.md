@@ -2,23 +2,32 @@
 
 This is the roadmap to a unit that cools the bed by itself every night.
 
-**Steps 1 to 3 are done.** The whole thing works end to end against a simulated unit: the service,
-the scheduler, every button sequence, and the app driving all of it. What is left is the hardware
-and the swap.
+**Steps 1 to 14 are done.** It runs the bed, on real hardware, unattended, and has done for
+several nights. What follows the fourteen steps is no longer a plan to build the thing but a
+record of what was learned by living with it.
 
 ---
 
 ## Where I am now
 
-| Done | Not done |
-|---|---|
-| Every screen, working on the phone against the real service | Anything touching real hardware |
-| A simulated HS1001 with every documented quirk | The eight captured infrared codes |
-| Every button sequence, with 96 tests behind them | Real power readings from the plug |
-| The scheduler, the database, the live feed | The Pi it will eventually live on |
-| A clock that can be jumped to 21:29 to watch an evening | |
+*Last updated 16 September 2026.*
 
-Run it with `./scripts/dev.sh`.
+| Done | Next |
+|---|---|
+| Every screen, on the phone, against the real service | Sleep data, from a Withings Sleep Analyzer |
+| A real HS1001, driven over infrared from a Pi in the house | Joining that against the mattress temperature |
+| Every button sequence, with 643 tests behind them | Retiring the invented numbers on the Autopilot screen |
+| Real power readings, and three probes on the mattress | |
+| Four stages a night: Drift, Deep, REM and Wake | |
+| Ten deliberate failures on the real Pi, all recovered from | |
+| The app correcting its own temperatures from what it observes | |
+
+Run it with `./scripts/dev.sh` on the Mac, against the simulated unit. The real one lives on the
+Pi at `hydrosnooze.local`.
+
+**The Withings work has its own route.** `docs/withings.md` is what the API actually does,
+established against the live API rather than read. The ordered build route lives outside the
+repository as a checklist I tick as I go.
 
 ## The idea that makes the rest of this easy
 
