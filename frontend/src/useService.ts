@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from './api/client'
 import type {
   DeviceEvent,
@@ -56,6 +56,10 @@ export function useService(client: ApiClient) {
   // opened yet. Showing the service as down for the half second before it
   // connects would make the bar cry wolf every time the app is opened.
   const [connected, setConnected] = useState(true)
+  // Mirrors `connected` for the socket callback, which closes over a render and
+  // cannot read the state it set. Starts true to match the optimism above, so
+  // the socket's first open is not mistaken for a reconnection.
+  const wasConnected = useRef(true)
 
   useEffect(() => {
     let live = true
@@ -82,6 +86,41 @@ export function useService(client: ApiClient) {
     }
   }, [client])
 
+  /**
+   * Fetch the two things the socket cannot backfill on its own.
+   *
+   * On connect the service resends state, schedule and health, so those look
+   * after themselves. Events and power do not. Events only ever arrive as they
+   * happen and are appended to whatever was fetched when the page loaded, and
+   * power is only ever fetched here.
+   *
+   * So a phone that loaded the app in the evening, slept through the night
+   * routine and woke at midnight reconnected holding an event list that stopped
+   * at the moment it went to sleep. Nothing about it said so. The next event to
+   * arrive live was appended to the top, leaving a list that ran straight from
+   * early evening to now with the whole night missing from the middle and no gap
+   * to see.
+   *
+   * That happened on 16 September and cost an evening: the pre-heat and Drift had
+   * both run perfectly, and the app showed no trace of either, so the conclusion
+   * from the screen was that the night had been missed entirely. A log that
+   * quietly omits what it did not witness is worse than no log, because it is
+   * believed.
+   */
+  const backfill = useCallback(
+    () =>
+      Promise.all([client.getEvents(), client.getPowerHistory()])
+        .then(([ev, pw]) => {
+          setEvents(ev)
+          setPower(pw)
+        })
+        .catch(() => {
+          // The socket has only just come back. There will be another reconnect
+          // along, and a failed backfill must never take the app down with it.
+        }),
+    [client],
+  )
+
   useEffect(
     () =>
       client.subscribe((update) => {
@@ -91,10 +130,17 @@ export function useService(client: ApiClient) {
         if (update.health) setHealth(update.health)
         if (update.connected !== undefined) {
           setConnected(update.connected)
-          if (update.connected) void reloadIfTheServiceMovedOn(client)
+          if (update.connected) {
+            void reloadIfTheServiceMovedOn(client)
+            // Only after an actual gap. The socket reports every open, including
+            // the first, and the first is the page load that has just fetched all
+            // of this already.
+            if (!wasConnected.current) void backfill()
+          }
+          wasConnected.current = update.connected
         }
       }),
-    [client],
+    [client, backfill],
   )
 
   const refreshPower = useCallback(() => {
