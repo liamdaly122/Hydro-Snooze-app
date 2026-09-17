@@ -448,3 +448,95 @@ async def test_the_window_survives_stop(service):
     task = service._button_task
     await service.stop()
     assert task is not None and task.cancelled() or task.done()
+
+
+# --- The fifteen seconds in the middle ----------------------------------------
+#
+# Found at the bed on 17 September: five taps of cooler, and the app caught two.
+#
+# The window closes, the totals are taken, and then about fifteen seconds of
+# infrared go out. The task running all that is not finished, so nothing starts
+# another one, and every press landing in those fifteen seconds went into a total
+# that nothing was left waiting to read. They were not dropped, which is almost
+# worse: they sat there until the next press happened to start a fresh task, and
+# then arrived in a lump attached to somebody else's tap.
+
+
+@pytest.mark.asyncio
+async def test_presses_during_the_command_are_not_lost(service, monkeypatch):
+    sent: list[int] = []
+    really_set = service.set_stage_tonight
+
+    async def slow(stage, target_c):
+        sent.append(target_c)
+        if len(sent) == 1:
+            # Three more taps while the first lot is still going out.
+            for _ in range(3):
+                service._button_pressed(BUTTON_COOLER)
+        return await really_set(stage, target_c)
+
+    monkeypatch.setattr(service, "set_stage_tonight", slow)
+    await tap(service, BUTTON_COOLER, BUTTON_COOLER)
+
+    assert sent == [22, 19], "the three taps in the middle went nowhere"
+    assert stage_temp(service, Stage.DEEP) == 19
+
+
+@pytest.mark.asyncio
+async def test_they_never_arrive_attached_to_a_later_press(service, monkeypatch):
+    """The half of this that is worse than losing them.
+
+    A total nothing is waiting to read is not empty, it is stale. The next press,
+    minutes later, would start a fresh task and find four degrees of somebody
+    else's tapping sitting in front of its own one.
+    """
+    sent: list[int] = []
+    really_set = service.set_stage_tonight
+
+    async def slow(stage, target_c):
+        sent.append(target_c)
+        if len(sent) == 1:
+            service._button_pressed(BUTTON_COOLER)
+        return await really_set(stage, target_c)
+
+    monkeypatch.setattr(service, "set_stage_tonight", slow)
+    await tap(service, BUTTON_COOLER)  # 24 -> 23, and one more in the middle
+    assert sent == [23, 22]
+
+    service.clock.advance(timedelta(minutes=5))
+    await tap(service, BUTTON_WARMER)
+    assert sent == [23, 22, 23], "a later tap inherited the earlier one"
+
+
+@pytest.mark.asyncio
+async def test_a_press_cancelled_by_its_opposite_mid_command_sends_nothing_more(
+    service, monkeypatch
+):
+    sent: list[int] = []
+    really_set = service.set_stage_tonight
+
+    async def slow(stage, target_c):
+        sent.append(target_c)
+        if len(sent) == 1:
+            service._button_pressed(BUTTON_COOLER)
+            service._button_pressed(BUTTON_WARMER)
+        return await really_set(stage, target_c)
+
+    monkeypatch.setattr(service, "set_stage_tonight", slow)
+    await tap(service, BUTTON_WARMER)
+    assert sent == [25]
+    assert service._button_delta == 0
+
+
+@pytest.mark.asyncio
+async def test_a_crash_does_not_leave_a_total_behind(service, monkeypatch):
+    """A total nothing is waiting to read is stale, not empty."""
+
+    async def explode(*a, **k):
+        raise RuntimeError("something nobody thought of")
+
+    monkeypatch.setattr(service, "set_stage_tonight", explode)
+    await tap(service, BUTTON_WARMER, BUTTON_WARMER)
+
+    assert service._button_delta == 0
+    assert service._button_until is None

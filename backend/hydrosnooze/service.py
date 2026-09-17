@@ -1386,19 +1386,66 @@ class Service:
             self._button_task = asyncio.create_task(self._act_on_buttons(), name="buttons")
 
     async def _act_on_buttons(self) -> None:
-        """Wait for the finger to stop, then send one command for the lot."""
+        """Wait for the finger to stop, then send one command for the lot.
+
+        A loop rather than a single pass, and that is the whole of what went
+        wrong at the bed on the 17th: five taps of cooler, and the app caught
+        two.
+
+        Sending is not instant. A temperature change is thirty-eight presses of
+        infrared and about fifteen seconds, and this task is what is awaiting
+        all of it. So for those fifteen seconds the task is running but past its
+        window, and `_button_pressed` looks at it, sees a task that is not
+        finished, and does not start another. Every press landing in there went
+        into a total with nothing left waiting to read it.
+
+        They were not dropped, which is the worse half. They sat in the total
+        until some later press started a fresh task, and then arrived in a lump
+        attached to somebody else's tap.
+
+        So the window is checked again after every command, and a finger that
+        never stopped simply gets another round.
+        """
+        try:
+            while True:
+                if not await self._wait_for_the_finger():
+                    return
+                delta, power = self._button_delta, self._button_power
+                self._button_delta, self._button_power = 0, False
+                self._button_until = None
+                if not delta and not power:
+                    # Warmer and cooler in the same window, cancelling out.
+                    # Nothing to send, and nothing waiting.
+                    return
+                await self._send_what_was_asked(delta, power)
+                if self._button_until is None:
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            # Whatever went wrong, the totals must not outlive it. A total that
+            # nothing is waiting to read is not empty, it is stale, and stale is
+            # how a tap at 4am inherits four degrees of tapping from midnight.
+            self._button_delta, self._button_power = 0, False
+            self._button_until = None
+            log.exception("could not act on the bedside buttons")
+
+    async def _wait_for_the_finger(self) -> bool:
+        """Sit until a window and a half seconds wide closes with nothing in it.
+
+        False when there is nothing waiting at all, which is how the loop above
+        ends.
+        """
         while True:
             until = self._button_until
             if until is None:
-                return
+                return False
             left = (until - self.clock.now()).total_seconds()
             if left <= 0:
-                break
+                return True
             await self.clock.sleep(left)
 
-        delta, power = self._button_delta, self._button_power
-        self._button_delta, self._button_power = 0, False
-        self._button_until = None
+    async def _send_what_was_asked(self, delta: int, power: bool) -> None:
         said = _button_summary(delta, power)
 
         if power:
