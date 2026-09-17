@@ -17,7 +17,15 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from hydrosnooze.adapters.probes import FLOW, RETURN, ROOM, STALE_AFTER, Probes, Reading
+from hydrosnooze.adapters.probes import (
+    FLOW,
+    NAMES,
+    RETURN,
+    ROOM,
+    STALE_AFTER,
+    Probes,
+    Reading,
+)
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.models import Health
@@ -312,3 +320,63 @@ def test_the_probes_never_push_to_a_phone_at_three_in_the_morning(tmp_path):
     service._watch_probes(NOW)
     said = [e for e in service.events.recent(20) if e.kind == "probes"]
     assert said and all(e.level == "info" for e in said)
+
+
+# --- How hard the board is having to shout ------------------------------------
+#
+# The board has published its own signal strength since the day it was flashed
+# and nothing read it. That was fine while this link only carried temperatures,
+# because a missing reading is something the app can say out loud and work
+# around. It stopped being fine when the bedside buttons went on the same board:
+# a press the board registers perfectly and cannot deliver is a button that does
+# nothing at 3am, and the only warning is this number falling.
+
+
+class Signal:
+    def __init__(self, key: int, value: object) -> None:
+        self.key = key
+        self.state = value
+
+
+def test_the_signal_is_not_a_probe(probes):
+    """It is about the link rather than about the bed. `missing()` asking after
+    it would turn a board on a weak link into a board with a broken probe."""
+    probes._signal_key = 9
+    probes._on_state(Signal(9, -85.0))
+    assert probes.signal_dbm == -85
+    assert probes.readings == {}
+    assert probes.missing() == list(NAMES)
+
+
+def test_the_signal_does_not_keep_a_dead_board_looking_alive(probes):
+    """`last_reading_at` decides whether the probes have gone quiet enough to
+    rebuild the link. A board reporting its own signal while saying nothing
+    about the bed is still a board with a problem worth naming."""
+    probes._signal_key = 9
+    probes.last_reading_at = None
+    probes._on_state(Signal(9, -85.0))
+    assert probes.last_reading_at is None
+
+
+def test_a_signal_that_never_arrived_is_not_a_number(probes):
+    assert probes.signal_dbm is None
+
+
+def test_the_health_row_says_the_signal_and_whether_it_is_weak(tmp_path):
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"), echo=False
+    )
+    report(service.probes, 20.8, 20.5, 21.0, at=service.clock.now())
+
+    service.probes.signal_dbm = -60
+    assert "Signal -60 dBm" in service._probes_health().detail
+    assert "weak" not in service._probes_health().detail
+
+    # What the board actually reported on 17 September.
+    service.probes.signal_dbm = -85
+    detail = service._probes_health().detail
+    assert "Signal -85 dBm, weak enough to expect gaps" in detail
+    # Said, never coloured. A weak link that is currently delivering is a
+    # working link, and an amber dot for it would be crying wolf every night.
+    assert service._probes_health().health is Health.OK
+    service.db.close()

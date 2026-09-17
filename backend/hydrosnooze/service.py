@@ -22,14 +22,22 @@ from typing import Any, Callable
 
 from .adapters import build_adapters
 from .adapters.fake_transmitter import FakeTransmitter
-from .adapters.probes import NAMES, Probes
+from .adapters.probes import (
+    BUTTON_COOLER,
+    BUTTON_POWER,
+    BUTTON_WARMER,
+    NAMES,
+    Probes,
+)
 from .clock import Clock, RealClock, SimClock, VirtualClock
 from .config import Settings
 from .db import Database
 from .events import Event, EventLog
 from .models import (
+    COOLING_RANGE,
     MINUTES_IN_A_DAY,
     STAGE_LABEL,
+    WARMING_RANGE,
     Activity,
     DeviceHealth,
     DeviceState,
@@ -89,6 +97,38 @@ TONIGHT_KIND = "tonight"
 #: nights without anybody pressing a button, so both belong in the journal.
 LEARNING_KIND = "learning"
 
+#: What the three buttons on the bedside are logged under.
+BUTTON_KIND = "buttons"
+
+#: Below this the probe board is shouting hard enough to expect dropouts.
+#:
+#: The board reported -79 to -92 dBm across half an hour on 17 September, and ran
+#: a roam scan three times looking for something better. That is the same link
+#: that went quiet twice for six minutes on the night of the 15th, and it now
+#: carries the bedside buttons as well, so it has stopped being a footnote.
+#:
+#: Never a colour on its own. A weak link that is currently delivering is a
+#: working link, and turning the dot amber for it would be crying wolf every
+#: night. It goes in the detail, where it explains a gap rather than predicting
+#: one.
+WEAK_SIGNAL_DBM = -80
+
+#: How long the buttons wait for a finger to stop before anything is sent.
+#:
+#: This is not debounce. The board already handles a contact chattering as it
+#: closes, in 20ms, where that problem belongs. This is about intent: somebody
+#: tapping warmer three times means three degrees, and they mean it as one
+#: request.
+#:
+#: The reason it has to exist is the press log. A single temperature change is
+#: thirty-eight presses of infrared and takes about fifteen seconds, holding the
+#: command lock throughout. Sent one per button press, three quick taps become
+#: three quarters of a minute of a unit being hammered, an app that looks dead
+#: for the duration, and a bed that ends up wherever the last one left it.
+#:
+#: So the presses are counted and one command goes out for the net result.
+BUTTON_SETTLE = timedelta(seconds=1.5)
+
 #: How long before a night starts that its controls appear.
 #:
 #: Six hours, so they turn up in the evening rather than over breakfast. Setting
@@ -105,6 +145,17 @@ CORRECTION_LIMIT_C = 4
 
 #: "Not said yet", distinct from "said, on a day with no night". See Service.
 _UNTOLD = object()
+
+
+def _button_summary(delta: int, power: bool) -> str:
+    """What arrived, in the words the event log uses."""
+    parts = []
+    if power:
+        parts.append("on/off")
+    if delta:
+        way = "warmer" if delta > 0 else "cooler"
+        parts.append(f"{abs(delta)} {way}")
+    return "Bedside: " + " and ".join(parts)
 
 
 def _shifted(at: time_of_day, minutes: int) -> time_of_day:
@@ -270,7 +321,15 @@ class Service:
             settings.probes_host,
             settings.probes_port,
             settings.probes_encryption_key,
+            on_button=self._button_pressed,
         )
+        # What the bedside buttons have asked for and not yet been given. Net
+        # degrees, because warmer then cooler is nothing rather than two
+        # commands, and a flag for on/off, because a press is not a quantity.
+        self._button_delta = 0
+        self._button_power = False
+        self._button_until: datetime | None = None
+        self._button_task: asyncio.Task[None] | None = None
         self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
 
@@ -424,6 +483,7 @@ class Service:
             "room": self.probes.room_c,
         }
         said = ", ".join(f"{k} {v}C" for k, v in readings.items() if v is not None)
+        signal = self._signal_note()
 
         if not missing:
             moving = self.probes.moving_c
@@ -435,13 +495,13 @@ class Service:
                 what = f"bed shedding {abs(moving)}C into the water"
             else:
                 what = f"water giving {abs(moving)}C to the bed"
-            return DeviceHealth("probes", Health.OK, f"{said}. {what}")
+            return DeviceHealth("probes", Health.OK, f"{said}. {what}{signal}")
 
         if len(missing) < len(NAMES):
             return DeviceHealth(
                 "probes",
                 Health.DEGRADED,
-                f"{said}. Not hearing from {' or '.join(missing)}",
+                f"{said}. Not hearing from {' or '.join(missing)}{signal}",
             )
 
         # Nothing at all. The useful part of a red dot is not that it is red, it
@@ -454,7 +514,21 @@ class Service:
             detail += f". Nothing for {_roughly(quiet)}"
         if self.probes.rebuilds:
             detail += f", {self.probes.rebuilds} reconnects since the service started"
-        return DeviceHealth("probes", Health.DOWN, detail)
+        return DeviceHealth("probes", Health.DOWN, detail + signal)
+
+    def _signal_note(self) -> str:
+        """What the board last said about its own Wi-Fi, if it has said anything.
+
+        The first thing worth knowing when a probe goes quiet or a button does
+        nothing, and until now the only way to see it was to sit over the board
+        streaming its log.
+        """
+        dbm = self.probes.signal_dbm
+        if dbm is None:
+            return ""
+        if dbm <= WEAK_SIGNAL_DBM:
+            return f". Signal {dbm:.0f} dBm, weak enough to expect gaps"
+        return f". Signal {dbm:.0f} dBm"
 
     def _alerts_health(self) -> DeviceHealth:
         """Whether anything would actually tell you if this stopped working.
@@ -616,6 +690,11 @@ class Service:
         self._tasks.clear()
         if self._unsubscribe_events:
             self._unsubscribe_events()
+        if self._button_task is not None:
+            self._button_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._button_task
+            self._button_task = None
         await self.probes.close()
         await self.notifier.close()
         await self.transmitter.close()
@@ -1281,6 +1360,143 @@ class Service:
                 "the bed ready falls back to the plug.",
             )
         self._push_state()
+
+    # --- The three buttons on the bedside ------------------------------------
+
+    def _button_pressed(self, name: str) -> None:
+        """A press arrived from the probe board. Count it, and start the clock.
+
+        Called from the adapter, on the library's own task, so it does the least
+        it possibly can: adds to a total and makes sure something is waiting to
+        act on it. Nothing is sent from here.
+        """
+        if name == BUTTON_WARMER:
+            self._button_delta += 1
+        elif name == BUTTON_COOLER:
+            self._button_delta -= 1
+        elif name == BUTTON_POWER:
+            # Not added up. Pressing on/off twice is somebody making sure, not a
+            # request to switch it on and straight back off again.
+            self._button_power = True
+        else:  # pragma: no cover - the adapter only sends the three
+            return
+
+        self._button_until = self.clock.now() + BUTTON_SETTLE
+        if self._button_task is None or self._button_task.done():
+            self._button_task = asyncio.create_task(self._act_on_buttons(), name="buttons")
+
+    async def _act_on_buttons(self) -> None:
+        """Wait for the finger to stop, then send one command for the lot."""
+        while True:
+            until = self._button_until
+            if until is None:
+                return
+            left = (until - self.clock.now()).total_seconds()
+            if left <= 0:
+                break
+            await self.clock.sleep(left)
+
+        delta, power = self._button_delta, self._button_power
+        self._button_delta, self._button_power = 0, False
+        self._button_until = None
+        said = _button_summary(delta, power)
+
+        if power:
+            # One gesture per window. On/off and a temperature in the same one
+            # and a half seconds is a fumble in the dark, and the honest answer
+            # is to do the bigger thing and say the other was dropped, rather
+            # than to set a temperature on a unit whose state nothing knows.
+            if delta:
+                self.events.info(
+                    BUTTON_KIND,
+                    f"{said}. Doing the on/off and leaving the temperature alone.",
+                )
+            await self._button_power_toggle(said if not delta else "Bedside: on/off")
+            return
+
+        if not delta:
+            return
+        await self._button_temperature(delta, said)
+
+    async def _button_power_toggle(self, said: str) -> None:
+        """On/off, decided against what the plug last read rather than a guess."""
+        power = self.state.power
+        if power is Power.ON:
+            self.events.info(BUTTON_KIND, f"{said}. Switching the unit off.")
+            await self.power_off()
+        elif power is Power.OFF:
+            self.events.info(BUTTON_KIND, f"{said}. Switching the unit on.")
+            await self.power_on()
+        else:
+            # The plug has not settled since the last command, so there is no
+            # state to toggle against. One press, and the plug says which way it
+            # went within thirty seconds.
+            self.events.info(
+                BUTTON_KIND,
+                f"{said}. Nothing has confirmed whether the unit is on, so that is "
+                "one press and the plug will say which way it went.",
+            )
+            await self.press_power()
+
+    async def _button_temperature(self, delta: int, said: str) -> None:
+        """Warmer or cooler, by however many presses landed in the window.
+
+        `set_stage_tonight` rather than `nudge_tonight`, and that is a decision
+        rather than a detail. A nudge is clamped to `NUDGE_LIMIT_C`, which is one
+        degree, and expires after `NUDGE_MINUTES`. Tapping warmer five times at
+        3am would move the bed a single degree and then quietly undo itself
+        before I woke up. That is right for a small tweak from the sofa and wrong
+        for the thing I reach for when the bed is actually uncomfortable.
+        """
+        if self.state.power is not Power.ON:
+            self.events.info(
+                BUTTON_KIND, f"{said}. The unit is off, so there was nothing to change."
+            )
+            return
+
+        step = self.scheduler.stage_now(self.schedule, self.clock.now())
+        if step is None:
+            # On, but not inside a stage: somebody running it by hand in the
+            # evening. Move what was last asked for, since there is no plan to
+            # edit, and say nothing if even that is unknown.
+            base = self.state.assumed_target_c
+            if base is None:
+                self.events.info(
+                    BUTTON_KIND,
+                    f"{said}. No stage is running and nothing has confirmed what the "
+                    "unit is set to, so there was nothing to move.",
+                )
+                return
+            want = self._button_clamp(base + delta)
+            self.events.info(
+                BUTTON_KIND, f"{said}. No stage is running, so setting {want}C by hand."
+            )
+            with contextlib.suppress(CommandFailed):
+                await self.set_temperature(want)
+            return
+
+        want = self._button_clamp(step.temp_c + delta)
+        label = STAGE_LABEL[step.stage]
+        if want == step.temp_c:
+            self.events.info(
+                BUTTON_KIND, f"{said}. {label} is already {want}C, which is as far as it goes."
+            )
+            return
+        self.events.info(BUTTON_KIND, f"{said}. {label} goes to {want}C.")
+        with contextlib.suppress(CommandFailed):
+            await self.set_stage_tonight(step.stage, want)
+
+    def _button_clamp(self, target_c: int) -> int:
+        """Into what the unit can express, and under the safety cap.
+
+        The cap is enforced again inside the sequences, and the range again in
+        the API. This one exists because the buttons reach neither: a finger held
+        on warmer has to stop at the cap rather than raise, because at 3am an
+        exception in a log is the same thing as a button that does nothing.
+        """
+        low = COOLING_RANGE[0]
+        high = min(WARMING_RANGE[1], self.settings.max_temperature_c)
+        return max(low, min(high, target_c))
 
     def _learned_lead(self, mode: Mode, target_c: int, gap_c: float) -> int | None:
         if not self.db.learning_on():

@@ -201,16 +201,55 @@ prize for a small number here.
 **Nothing on the Pi changes yet, and nothing breaks.** The adapter filters the
 board's entities with `isinstance(entity, SensorInfo)`, so binary sensors are
 invisible to it and always have been. The buttons can be wired, flashed and proven
-tonight while the service carries on knowing only about temperatures.
+before a line of service code is written.
+
+### What a right one looks like, and what a wrong one looks like
+
+I got this wrong first time, so it is worth writing down. `~/esphome/bin/esphome
+logs docs/esphome-probes.yaml` streams the board without recompiling, which is the
+thing to have open while pressing.
+
+One press should produce exactly one name:
+
+```
+[16:25:29.491][S][binary_sensor]: 'button_cooler' >> ON
+[16:25:29.666][S][binary_sensor]: 'button_cooler' >> OFF
+```
+
+What I actually had was every press firing two names at the same millisecond:
+
+```
+[15:36:43.348][S][binary_sensor]: 'button_power'  >> ON
+[15:36:43.348][S][binary_sensor]: 'button_warmer' >> ON
+```
+
+and buttons that only responded at all when I held one down and pressed another.
+That is one GPIO shorted straight to the ground core while the common return bus
+floats. A single press then joins its pin to a floating node and nothing happens;
+holding another button grounds that node through the shorted pin, and suddenly the
+next press works. It reads like a software fault and it is a wire.
+
+**Power the board off before rewiring.** Pull the USB. The log stream drops when
+it does and reconnects on its own, which is expected and not a fault: uptime
+restarting at a few seconds is how the log shows it rebooted.
+
+Two things in that log that are not button faults but are worth reading anyway:
+
+- **An OFF with no ON in front of it.** Harmless, and the Pi ignores it. The
+  adapter only acts on a rising edge, so an odd release changes nothing
+- **The signal strength line.** Mine read -79 to -92 dBm and ran a roam scan three
+  times looking for something better. See the last trap in the table
 
 ---
 
 ## Step 5: teach the Pi to listen
 
-`backend/hydrosnooze/adapters/probes.py` already subscribes to **every** state the
-board sends, and `_on_state` drops anything whose key it does not recognise. So
-the change is small: recognise the button entities as well, and keep them in their
-own dictionary.
+**Built.** `backend/hydrosnooze/adapters/probes.py`, with the tests in
+`backend/tests/test_buttons.py`.
+
+The adapter already subscribed to **every** state the board sends, and `_on_state`
+dropped anything whose key it did not recognise. So the change was small:
+recognise the button entities as well, and keep them in their own dictionary.
 
 ```python
 entities, _ = await client.list_entities_services()
@@ -241,9 +280,24 @@ Then in `_on_state`, a key in `self._buttons` is a press rather than a reading, 
 only the **rising edge** counts. The board sends a state for the release as well,
 and letting that through would double every press.
 
+Three things that only turned up once it was running against the real board:
+
+- **The first state on a connection is not a finger.** aioesphomeapi replays what
+  it holds for every entity when a subscription comes up, and on a link this weak
+  that happens at 3am. A button whose state has not been seen since the link came
+  up is recorded and nothing else
+- **A repeated ON is not a second press.** The board sent one, and a held finger
+  or a wobbly link will do it again
+- **A press is not a reading.** It deliberately leaves `last_reading_at` alone.
+  That clock decides whether the probes have gone quiet enough to tear the link
+  down and rebuild it, and a press proving the Wi-Fi is fine would quietly stop
+  the app complaining about a dead 1-wire bus
+
 ---
 
 ## Step 6: the settling rule, and why it is the Pi's job
+
+**Built.** `BUTTON_SETTLE` in `backend/hydrosnooze/service.py`, 1.5 seconds.
 
 There are two completely different settling problems here and they are solved in
 two different places.
@@ -280,6 +334,9 @@ added up.
 
 ## Step 7: what each button should actually do
 
+**Built.** `_button_pressed`, `_act_on_buttons`, `_button_temperature` and
+`_button_power_toggle` in `backend/hydrosnooze/service.py`.
+
 This is a decision rather than a detail, and it is worth making deliberately.
 
 The obvious answer is `nudge_tonight`, which already exists and is what the app's
@@ -306,6 +363,19 @@ back to 27, and the buttons should do the thing I already do.
 | **cooler** | current stage temperature, minus the net number of presses |
 | **on/off** | toggles the unit, against what the plug actually reads |
 
+Four cases the first version did not think about and now handles:
+
+| | |
+|---|---|
+| **On/off and a temperature in the same window** | A fumble in the dark. It does the on/off and says the temperature was dropped, rather than setting a number on a unit whose state nothing knows |
+| **The unit is off** | Nothing is sent, and the log says why. A button that does nothing and says nothing is a broken button |
+| **On, but not inside a stage** | Run by hand in the evening, with no plan to edit. It moves whatever was last asked for, and refuses to guess if even that is unknown |
+| **Already at the cap** | Says so. It stops at the cap rather than raising, because at 3am an exception in a log is the same thing as a dead button |
+
+Every press writes a line to the event log under the kind `buttons`, whatever it
+decides. That is the only way to tell afterwards whether a press reached the Pi,
+reached the bed, or never left the bedside.
+
 The safety cap still applies underneath all of this. `set_temperature` refuses
 anything above `max_temperature_c` and anything outside the running mode's range,
 and it refuses it before pressing a single button. A held-down finger cannot cook
@@ -317,6 +387,9 @@ one degree, and that is enough to learn whether the idea is any good.
 ---
 
 ## Step 8: end to end
+
+Everything above this line is done and covered by tests. This is the part that
+needs the real bed, because it is the part no test can prove.
 
 1. Press **warmer** three times, quickly
 2. The app's event log should show **one** temperature change, not three
@@ -340,3 +413,8 @@ is that the presses arrived.
 | One press is 38 presses of infrared | Coalesce over 1.5s, or three taps is 45 seconds of unit |
 | `NUDGE_LIMIT_C` is 1 | Clamped to a degree and gone in half an hour. Not the right call for these |
 | Buttons in `self._keys` | Breaks the guard that catches a board with dead probes |
+| Two names per press | One GPIO shorted to ground, common return floating. Rewire, it is not software |
+| A 4-leg tactile switch | Legs 1-2 and 3-4 are joined inside. Use two that are diagonally opposite, or the button is always closed |
+| A reconnect is a state dump | The library replays every entity. The first state after a connect is recorded, never acted on |
+| Signal at -85 dBm | The board can register a press perfectly and never deliver it. Shown on the probes health row now, so it explains a gap instead of being invisible |
+| Nothing happens at the unit | Check the aim before the code. On 17 September the blaster was simply turned the wrong way and the infrared never left the bedside |

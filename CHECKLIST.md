@@ -18,7 +18,7 @@ blaster needed the Pi to flash it. The install needed both. Everything after tha
 - [x] The app, designed and running on the phone
 - [x] The service: scheduler, database, live updates
 - [x] A simulated HS1001 with every documented quirk
-- [x] Every button sequence, with 643 tests behind them
+- [x] Every button sequence, with 675 tests behind them
 - [x] Verified on the Mac, press log and all
 - [x] The app drives the night itself: Drift, Deep, REM and Wake, any durations, cooling and
       heating in the same night
@@ -472,6 +472,32 @@ runs, so it is worth reading once before the first upgrade rather than during it
 `journalctl -u hydrosnooze -n 100` on the Pi. The troubleshooting tables are at the bottom of
 [SETUP.md](SETUP.md#when-something-goes-wrong) and
 [GETTING-STARTED.md](GETTING-STARTED.md#when-something-goes-wrong).
+
+---
+
+## The bedside buttons, 17 September
+
+Three buttons on the bedside table: warmer, cooler, on/off. At 3am with my eyes shut a phone is a
+terrible instrument, and on the night of the 16th it showed me a two hour hole in its own event log
+and let me conclude the whole night had failed when it had worked perfectly.
+
+They hang off the same ESP32-C3 that already reads the probes. One board, one cable run, one thing
+to power. [docs/buttons.md](docs/buttons.md) is the wiring and the reasoning.
+
+- [x] Three buttons on a 4-core cable, grounds spliced into the probe board's ground
+- [x] `scripts/probes.py` generates them, so a reflash cannot lose them
+- [x] Flashed over the air, all three proven on the board's own log before any service code
+- [x] The adapter tells a press from a reading, and a press from a release
+- [x] A reconnect replaying every entity is never read as somebody's finger
+- [x] The Pi counts presses over 1.5 seconds and sends one command, because one temperature change
+      is thirty-eight presses of infrared and fifteen seconds of the command lock
+- [x] `set_stage_tonight` rather than `nudge_tonight`, so a 3am press is not clamped to one degree
+      and quietly undone half an hour later
+- [x] The board's Wi-Fi signal is on the probes health row, after a fortnight of being published
+      and read by nothing
+- [ ] Press each one at the bed and watch the unit's own display land on the number
+- [ ] Move the probe board or add an access point. It reported -79 to -92 dBm on the 17th, and a
+      press the board registers and cannot deliver is a button that does nothing at 3am
 
 ---
 

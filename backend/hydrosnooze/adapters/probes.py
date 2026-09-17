@@ -20,6 +20,12 @@ number from an hour ago as though it were current.
 Nothing here is allowed to affect a night. A probe board that has fallen off the
 Wi-Fi means the app knows less, not that it stops working: the schedule ran for
 weeks before these existed and must carry on running if they go away.
+
+The same board carries the three bedside buttons, so there are two jobs in here
+now. The probes say what the bed is doing and the buttons say what I want, and
+they are kept apart on purpose: one is a measurement and the other is a request,
+and the check that catches a board with dead probes must not be satisfied by a
+working button. See docs/buttons.md for how they are wired.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -38,6 +45,27 @@ log = logging.getLogger(__name__)
 #: here means one of the two was changed without the other.
 FLOW, RETURN, ROOM = "water_flow", "water_return", "room"
 NAMES = (FLOW, RETURN, ROOM)
+
+#: The three bedside buttons, on the same board, published as binary sensors
+#: rather than sensors. Also set by scripts/probes.py, so the same rule applies:
+#: a mismatch here means one of the two was changed without the other.
+#:
+#: They are a physical input, which in ESPHome is a `binary_sensor:`. The thing
+#: called `button:` is a software control on a web page, which is not this.
+BUTTON_WARMER = "button_warmer"
+BUTTON_COOLER = "button_cooler"
+BUTTON_POWER = "button_power"
+BUTTON_NAMES = (BUTTON_WARMER, BUTTON_COOLER, BUTTON_POWER)
+
+#: How hard the board is having to shout. Published by the board since the day it
+#: was flashed and read by nothing until the buttons went on.
+#:
+#: It was worth ignoring while this link only carried temperatures, because a
+#: missing reading is something the app can say out loud and work around. It is
+#: not worth ignoring now. A press that the board registers perfectly and cannot
+#: deliver is a button that does nothing at 3am, and the only warning of that is
+#: this number falling.
+RSSI = "wifi_rssi"
 
 #: How old a reading may be before it stops counting as current.
 #:
@@ -99,13 +127,24 @@ class Probes:
         encryption_key: str = "",
         *,
         connect_timeout: float = 10.0,
+        on_button: Callable[[str], None] | None = None,
     ) -> None:
         self.clock = clock
         self.host = host
         self.port = port
         self.encryption_key = encryption_key
         self.connect_timeout = connect_timeout
+        #: Called once per press, with the button's name. Never called for a
+        #: release. Runs on the library's own task, so it has to return quickly
+        #: and must not raise: see `_on_button`.
+        self.on_button = on_button
         self.readings: dict[str, Reading] = {}
+        #: The last signal strength the board reported, in dBm, and when. Kept
+        #: apart from `readings` on purpose: it is about the link rather than
+        #: about the bed, and `missing()` asking after it would turn a board on a
+        #: weak link into a board with a broken probe.
+        self.signal_dbm: float | None = None
+        self.signal_at: datetime | None = None
         self.connected = False
         #: When anything last arrived from the board, whichever sensor it was.
         #: Separate from the readings themselves: a board reporting only the room
@@ -116,8 +155,23 @@ class Probes:
         #: on the device bar, because a board that reconnects every few minutes
         #: is a Wi-Fi problem long before it becomes a missing reading.
         self.rebuilds = 0
+        #: Presses heard since the service started. Not a reading and not used to
+        #: decide anything, but it answers "did the board hear that" without
+        #: reading a log, which is the first question when a button does nothing.
+        self.presses = 0
         self._client = None
         self._keys: dict[int, str] = {}
+        self._signal_key: int | None = None
+        self._buttons: dict[int, str] = {}
+        #: What each button was last seen doing, so a release is not a press.
+        #:
+        #: Emptied on every connect. The library replays the current state of
+        #: every entity when a subscription comes up, and that replay is not
+        #: somebody's finger: a button missing from here has not been seen on
+        #: this connection yet, and its first report is recorded and nothing
+        #: else. Otherwise reconnecting at 3am on a weak link would set the bed
+        #: going on its own.
+        self._button_state: dict[str, bool] = {}
         self._task: asyncio.Task[None] | None = None
 
     @property
@@ -188,6 +242,15 @@ class Probes:
         return [name for name in NAMES if self.fresh(name) is None]
 
     @property
+    def buttons_found(self) -> int:
+        """How many of the three bedside buttons the board is publishing.
+
+        Zero on a board flashed before they existed, which is not a fault: the
+        probes are the reason this link exists and they work either way.
+        """
+        return len(self._buttons)
+
+    @property
     def quiet_for(self) -> timedelta | None:
         """How long since anything at all arrived, or None if nothing ever has."""
         if self.last_reading_at is None:
@@ -243,7 +306,7 @@ class Probes:
                 )
 
     async def _connect(self) -> None:
-        from aioesphomeapi import APIClient, SensorInfo
+        from aioesphomeapi import APIClient, BinarySensorInfo, SensorInfo
 
         client = APIClient(
             self.host, self.port, password=None, noise_psk=self.encryption_key or None
@@ -257,6 +320,20 @@ class Probes:
             for entity in entities
             if isinstance(entity, SensorInfo) and entity.name in NAMES
         }
+        # A second dictionary rather than three more entries in the first, and
+        # that is the whole reason it exists. The guard below means "I have
+        # connected to a board that is not the probe board". Let buttons into
+        # `_keys` and a board with three working buttons and three dead probes
+        # sails past the one check written to catch it.
+        self._buttons = {
+            entity.key: entity.name
+            for entity in entities
+            if isinstance(entity, BinarySensorInfo) and entity.name in BUTTON_NAMES
+        }
+        self._button_state = {}
+        self._signal_key = next(
+            (entity.key for entity in entities if entity.name == RSSI), None
+        )
         if not self._keys:
             raise RuntimeError(
                 f"connected but found none of {', '.join(NAMES)}. "
@@ -269,7 +346,12 @@ class Probes:
         # connection left it, so a fresh link gets a full window to deliver
         # something before it is torn down again.
         self.last_reading_at = self.clock.now()
-        log.info("probe board at %s: %d sensors", self.host, len(self._keys))
+        log.info(
+            "probe board at %s: %d sensors, %d buttons",
+            self.host,
+            len(self._keys),
+            len(self._buttons),
+        )
 
     def _on_state(self, state: object) -> None:
         """Called by the library whenever the board sends a reading.
@@ -279,7 +361,14 @@ class Probes:
         useful.
         """
         try:
-            name = self._keys.get(state.key)  # type: ignore[attr-defined]
+            key = state.key  # type: ignore[attr-defined]
+            if key == self._signal_key:
+                self._on_signal(state)
+                return
+            if key in self._buttons:
+                self._on_button(self._buttons[key], state)
+                return
+            name = self._keys.get(key)
             if name is None:
                 return
             value = state.state  # type: ignore[attr-defined]
@@ -291,6 +380,52 @@ class Probes:
         except Exception:  # noqa: BLE001  # pragma: no cover
             log.debug("could not read a probe state", exc_info=True)
 
+    def _on_signal(self, state: object) -> None:
+        """How hard the board is shouting.
+
+        Like a press, this does not touch `last_reading_at`. That clock is what
+        decides whether the probes have gone quiet enough to rebuild the link,
+        and a board reporting its own signal while saying nothing about the bed
+        is still a board with a problem worth naming.
+        """
+        value = getattr(state, "state", None)
+        if value is None or value != value:  # NaN fails this
+            return
+        self.signal_dbm = round(float(value))
+        self.signal_at = self.clock.now()
+
+    def _on_button(self, name: str, state: object) -> None:
+        """A bedside button changed. Act on the press, ignore everything else.
+
+        Deliberately does not touch `last_reading_at`. That clock decides whether
+        the link has gone quiet enough to tear down and rebuild, and it is a
+        question about the probes. A board whose 1-wire bus has died is still a
+        board the app should be complaining about, and a press proving the Wi-Fi
+        is fine would quietly stop it complaining.
+        """
+        down = bool(getattr(state, "state", False))
+        was = self._button_state.get(name)
+        self._button_state[name] = down
+        if was is None:
+            # First report on this connection: the library saying what it holds,
+            # not a finger. Recorded, and nothing else.
+            return
+        if not down or was:
+            # The release is a state too, and the board can repeat one. Either
+            # way through here doubles a press, which at a degree each is a bed
+            # two degrees out from what somebody asked for.
+            return
+        self.presses += 1
+        log.info("bedside button: %s", name)
+        if self.on_button is None:
+            return
+        # Whatever this does, it does it without taking the subscription down
+        # with it. Same rule as the caller, one floor up.
+        try:
+            self.on_button(name)
+        except Exception:  # noqa: BLE001  # pragma: no cover
+            log.warning("could not act on %s", name, exc_info=True)
+
     async def _drop(self) -> None:
         if self._client is None:
             return
@@ -298,6 +433,9 @@ class Probes:
             await self._client.disconnect()
         self._client = None
         self._keys = {}
+        self._signal_key = None
+        self._buttons = {}
+        self._button_state = {}
 
     async def close(self) -> None:
         if self._task is not None:
