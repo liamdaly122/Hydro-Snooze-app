@@ -37,6 +37,12 @@ ESPHOME = Path.home() / "esphome" / "bin" / "esphome"
 #: booting for reasons that look nothing like the cause.
 PIN = "GPIO4"
 
+#: The three bedside buttons. Same reasoning as PIN above: 2, 8 and 9 are
+#: strapping pins and 20 and 21 are the serial logger, so 5, 6 and 7 are the
+#: three free ones next to each other. Three in a row is one less thing to get
+#: wrong when the cable is behind a bed.
+BUTTON_PINS = {"button_warmer": "GPIO5", "button_cooler": "GPIO6", "button_power": "GPIO7"}
+
 #: The SuperMini and the genuine Seeed board are the same chip with different
 #: antennas, so the configuration differs by this one line. Kept here rather than
 #: as something to edit afterwards, because this script rewrites the file.
@@ -131,6 +137,44 @@ RSSI = """
     update_interval: 60s
 """
 
+def buttons() -> str:
+    """The three bedside buttons, as inputs rather than as web controls.
+
+    `binary_sensor` and not `button`. The `button:` block below is a software
+    control for the web page to click; a physical switch on a pin is a
+    binary_sensor, and putting these there would collide with the restart entry.
+
+    `inverted` because the pin is held high by the chip's own pull-up and the
+    button pulls it down to ground, so electrically "pressed" is low. That is
+    also why there are no resistors in the bedside table.
+
+    `delayed_on_off` is the debounce, and it is the board's problem alone. A
+    mechanical contact does not close once, it chatters for a few milliseconds,
+    and without this one press arrives as five. The Pi has a completely separate
+    settling problem, measured in seconds rather than milliseconds, because a
+    person taps a button several times and a single temperature change is
+    thirty-eight presses of infrared. That one is solved in service.py.
+
+    The board reports that a button went down and nothing else. What a press
+    means is the Pi's business, exactly as it is for a temperature.
+    """
+    out = ["\nbinary_sensor:"]
+    for name, pin in BUTTON_PINS.items():
+        out.append(f"""
+  - platform: gpio
+    pin:
+      number: {pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    name: "{name}"
+    filters:
+      - delayed_on_off: 20ms
+""")
+    return "".join(out)
+
+
 RESTART = """
 # So the board can be restarted from http://hydrosnooze-temp.local without
 # anyone reaching behind a bed for a USB plug.
@@ -195,6 +239,7 @@ def real_config(flow: str, back: str, room: str) -> str:
         + sensor(back, "water_return", "30s", 5)
         + sensor(room, "room", "60s", 3)
         + RSSI
+        + buttons()
         + RESTART
     )
 
