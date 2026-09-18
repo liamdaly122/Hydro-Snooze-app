@@ -13,6 +13,38 @@ import type {
 let loadedBuild: string | null = null
 
 /**
+ * How many events the app holds, and how many it asks for.
+ *
+ * One number rather than two. It used to fetch a hundred and keep two hundred,
+ * so every reconnect quietly halved the history: the list grew past a hundred
+ * as the night ran, and the next backfill replaced it with the last hundred.
+ */
+const EVENT_LIMIT = 200
+
+/**
+ * Fetched history and whatever arrived live, as one list. Newest first.
+ *
+ * Neither side may simply win. Replacing the live list with the fetched one
+ * loses anything that arrived while the fetch was in the air, and a reconnect is
+ * exactly when that happens: a deploy restarts the service, the socket comes
+ * back, the backfill goes out, and the service's own startup events are pushed
+ * during the round trip. Those are the lines that say it came back up, and they
+ * were the ones being erased.
+ *
+ * Replacing the other way round is no better, because the fetched list is the
+ * only thing that can fill a gap the phone slept through.
+ *
+ * So both, keyed by id. Ids come from the service and survive its restarts,
+ * because `seed` reads the highest one back out of the database on startup.
+ */
+function mergeEvents(fetched: DeviceEvent[], live: DeviceEvent[]): DeviceEvent[] {
+  const byId = new Map<number, DeviceEvent>()
+  for (const event of live) byId.set(event.id, event)
+  for (const event of fetched) byId.set(event.id, event)
+  return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, EVENT_LIMIT)
+}
+
+/**
  * Reload when the service is serving a newer frontend than this one.
  *
  * A phone with the app already open keeps running the JavaScript it loaded days
@@ -67,7 +99,7 @@ export function useService(client: ApiClient) {
       client.info(),
       client.getState(),
       client.getSchedule(),
-      client.getEvents(),
+      client.getEvents(EVENT_LIMIT),
       client.getPowerHistory(),
       client.getHealth(),
     ]).then(([i, s, sch, ev, pw, hp]) => {
@@ -77,7 +109,10 @@ export function useService(client: ApiClient) {
       if (loadedBuild === null) loadedBuild = i.build
       setState(s)
       setSchedule(sch)
-      setEvents(ev)
+      // Merged, not assigned. The socket subscribes in the effect below, on the
+      // same mount, so it can already have delivered an event by the time this
+      // first fetch lands.
+      setEvents((prev) => mergeEvents(ev, prev))
       setPower(pw)
       setHealth(hp)
     })
@@ -109,9 +144,9 @@ export function useService(client: ApiClient) {
    */
   const backfill = useCallback(
     () =>
-      Promise.all([client.getEvents(), client.getPowerHistory()])
+      Promise.all([client.getEvents(EVENT_LIMIT), client.getPowerHistory()])
         .then(([ev, pw]) => {
-          setEvents(ev)
+          setEvents((prev) => mergeEvents(ev, prev))
           setPower(pw)
         })
         .catch(() => {
@@ -126,7 +161,7 @@ export function useService(client: ApiClient) {
       client.subscribe((update) => {
         if (update.state) setState(update.state)
         if (update.schedule) setSchedule(update.schedule)
-        if (update.event) setEvents((prev) => [update.event!, ...prev].slice(0, 200))
+        if (update.event) setEvents((prev) => mergeEvents([update.event!], prev))
         if (update.health) setHealth(update.health)
         if (update.connected !== undefined) {
           setConnected(update.connected)
