@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -132,6 +133,111 @@ def env_file(path: Path) -> list[str]:
     return out or ["(no settings set)"]
 
 
+#: A boot id in `journalctl --list-boots`, for counting them without depending
+#: on the column layout, which differs between systemd versions.
+BOOT_ID = re.compile(r"\b[0-9a-f]{32}\b")
+
+
+def _roughly(gap: timedelta) -> str:
+    """A gap in the words somebody uses at 7am."""
+    minutes = int(gap.total_seconds() // 60)
+    if minutes < 1:
+        return "less than a minute"
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def verdict(*, boots: str, up_since: str, throttled: str, restarts: str, hours: int) -> str:
+    """The three or four lines worth reading, said out loud at the terminal.
+
+    The file this script writes is three hundred kilobytes and the answer is in
+    the first eighty lines of it. That is a poor way to ask somebody at 7am, so
+    the decisive part is printed as well.
+
+    Nothing here is a diagnosis. It says which of the three failures happened,
+    because a machine that rebooted, a service that restarted and a network that
+    dropped look identical from the app and want completely different fixes.
+    """
+    said = []
+
+    if "No journal files" in boots or len(BOOT_ID.findall(boots)) < 2:
+        said.append(
+            "  ! The journal does not go back past this boot, so nothing here can "
+            "say\n    whether the machine has rebooted before. See the journald "
+            "block in\n    scripts/install.sh, and rerun it."
+        )
+
+    rebooted = None
+    try:
+        started = datetime.strptime(up_since.strip(), "%Y-%m-%d %H:%M:%S")
+        rebooted = datetime.now() - started
+    except ValueError:
+        pass
+    if rebooted is None:
+        said.append("  ? Could not read the boot time.")
+    elif rebooted < timedelta(0):
+        # Not a curiosity on this hardware. A Pi has no battery-backed clock, so
+        # it boots in 1970 or wherever it last was and jumps forward when NTP
+        # answers. The unit file waits on time-sync.target for this reason. A
+        # boot time in the future means the jump happened after boot, and every
+        # timestamp before it is worth reading with that in mind.
+        said.append(
+            f"  ! The boot time reads as {started:%a %d %b %H:%M}, which is in the "
+            "future.\n    The clock was corrected after boot, so timestamps around "
+            "then will not line up."
+        )
+    elif rebooted < timedelta(hours=hours):
+        said.append(
+            f"  ! The machine itself rebooted {_roughly(rebooted)} ago, at "
+            f"{started:%a %d %b %H:%M}.\n"
+            "    Read WHAT THE KERNEL SAID BEFORE THE LAST REBOOT."
+        )
+    else:
+        said.append(
+            f"  - The machine has not rebooted. Up since {started:%a %d %b %H:%M}.\n"
+            "    So whatever went wrong, it was the service or the network, not the Pi."
+        )
+
+    found = re.search(r"throttled=0x([0-9a-fA-F]+)", throttled)
+    if found is None:
+        said.append("  ? No answer from vcgencmd, so power and heat are unknown.")
+    else:
+        mask = int(found.group(1), 16)
+        if mask & ((1 << 0) | (1 << 16)):
+            said.append(
+                f"  ! Under-voltage (throttled=0x{mask:x}). That is the supply or the "
+                "cable, and\n    left alone it corrupts the card. Change it before "
+                "looking anywhere else."
+            )
+        elif mask:
+            said.append(f"  ! Throttled (throttled=0x{mask:x}). Heat or airflow.")
+        elif rebooted is not None and timedelta(0) <= rebooted < timedelta(hours=1):
+            # The sticky bits at 16 and up are what say it happened at all, and
+            # they are cleared by a boot. An hour after a restart, 0x0 means the
+            # supply has been fine for an hour and nothing more than that.
+            said.append(
+                "  ? Power and heat read clean, but this machine booted within the "
+                "hour and\n    the bits that remember under-voltage are cleared by a "
+                "boot. 0x0 here\n    does not clear the supply of anything before it."
+            )
+        else:
+            said.append("  - Power and heat are clean.")
+
+    found = re.search(r"NRestarts=(\d+)", restarts)
+    if found is not None:
+        count = int(found.group(1))
+        if count:
+            said.append(
+                f"  ! systemd has restarted the service {count} time(s) since the last "
+                "boot."
+            )
+        else:
+            said.append("  - systemd has not restarted the service since the last boot.")
+
+    return "\n".join(said)
+
+
 def section(title: str, body: object) -> str:
     if isinstance(body, (dict, list)):
         body = json.dumps(body, indent=2, default=str)
@@ -148,6 +254,18 @@ def main() -> int:
 
     base = f"http://127.0.0.1:{args.port}"
     now = datetime.now()
+    # Run once and read twice: these go in the file and into the verdict at the
+    # end, and asking the machine the same question twice invites two answers.
+    boots = run("journalctl", "--list-boots", "--no-pager")
+    up_since = run("uptime", "-s")
+    up_for = run("uptime", "-p")
+    throttled = run("vcgencmd", "get_throttled")
+    restarts = run(
+        "systemctl", "show", args.service,
+        "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState",
+        "-p", "ActiveEnterTimestamp", "-p", "WatchdogTimestamp",
+        "-p", "ExecMainStartTimestamp",
+    )
     out = Path(args.out) if args.out else Path.home() / f"hydrosnooze-diagnosis-{now:%Y%m%d-%H%M}.txt"
 
     parts = [
@@ -183,11 +301,11 @@ def main() -> int:
         section(
             "HAS THE MACHINE ITSELF REBOOTED",
             "Up since  "
-            + run("uptime", "-s").strip()
+            + up_since.strip()
             + "\nUp for    "
-            + run("uptime", "-p").strip()
+            + up_for.strip()
             + "\n\n"
-            + run("journalctl", "--list-boots", "--no-pager"),
+            + boots,
         ),
         # Where the cause is, if it did. An overnight reboot leaves its reason
         # in the last thing the kernel managed to write: a supply browning out,
@@ -210,14 +328,7 @@ def main() -> int:
         # every write fail silently. `ro` in here is the whole answer.
         section("THE CARD", run("findmnt", "-n", "-o", "SOURCE,FSTYPE,OPTIONS", "/")),
         # First, because a service that has been restarting is the whole answer.
-        section(
-            "HAS IT BEEN RESTARTING",
-            run(
-                "systemctl", "show", args.service,
-                "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState",
-                "-p", "ActiveEnterTimestamp", "-p", "WatchdogTimestamp", "-p", "ExecMainStartTimestamp",
-            ),
-        ),
+        section("HAS IT BEEN RESTARTING", restarts),
         section("SERVICE STATUS", run("systemctl", "status", args.service, "--no-pager", "-l")),
         section("WHAT IT BELIEVES NOW", fetch(f"{base}/api/state")),
         section("DEVICE HEALTH", fetch(f"{base}/api/health")),
@@ -239,7 +350,7 @@ def main() -> int:
         # The commonest reason a Pi behaves as though the software is broken, and
         # the one that leaves no other trace. "throttled=0x0" is the good answer;
         # anything else and the power supply is the first thing to change.
-        section("POWER AND HEAT", run("vcgencmd", "get_throttled")),
+        section("POWER AND HEAT", throttled),
         section("TEMPERATURE", run("vcgencmd", "measure_temp")),
     ]
 
@@ -247,10 +358,19 @@ def main() -> int:
     out.write_text(text)
 
     print()
+    print("What this says")
+    print()
+    print(verdict(
+        boots=boots, up_since=up_since, throttled=throttled,
+        restarts=restarts, hours=args.hours,
+    ))
+    print()
     print(f"Written to  {out}")
     print(f"            {len(text.splitlines())} lines, {out.stat().st_size // 1024} KB")
     print()
     print("Secrets are masked, so it is safe to paste. Worth a skim before you do.")
+    print("The part that matters is everything above WHAT IT BELIEVES NOW:")
+    print(f"    sed -n '1,/WHAT IT BELIEVES NOW/p' {out}")
     return 0
 
 
