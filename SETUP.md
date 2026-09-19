@@ -1210,6 +1210,100 @@ file was not rewritten, and the `git pull` and `install.sh` above are what is ne
 
 ---
 
+## If it goes down overnight
+
+Written on 19 September, the morning after a night where the bed sat five degrees cold from 01:52
+and the unit was still running at breakfast. Everything here is in the order it is worth doing, and
+the first line is the one I got wrong.
+
+**Do not reboot it yet.** A reboot fixes the symptom and takes the evidence with it. It resets the
+uptime, zeroes `NRestarts`, and clears the sticky under-voltage bits that say whether the supply
+sagged. A fault you can still see is worth more than a machine that is working again, and nothing
+about the bed gets better five minutes sooner.
+
+**1. Can you reach the Pi at all?**
+
+```sh
+ping -c 3 hydrosnooze.local
+```
+
+That one answer splits the whole problem. If it replies, the Pi's own network is fine and whatever
+broke is downstream: the plug, the blaster, or the boards. If it does not, the Pi or the booster is
+the problem and everything else is a symptom.
+
+**2. Ask it what it thinks happened.**
+
+```sh
+ssh liam@hydrosnooze.local "cd ~/Hydro-Snooze-app && git pull && ./scripts/diagnose.py --hours 24"
+```
+
+It prints a verdict at the terminal before it writes the file: whether the machine rebooted, whether
+the supply sagged, and how many times systemd restarted the service. The file is three hundred
+kilobytes and the part worth reading is everything above `WHAT IT BELIEVES NOW`.
+
+**3. The night itself, from the database rather than the journal.**
+
+The service writes its own events to SQLite, so they survive anything the machine does. One line per
+event, with repeats collapsed:
+
+```sh
+ssh liam@hydrosnooze.local 'python3 - <<"PY"
+import json, urllib.request
+rows = json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/events?limit=500"))
+rows.reverse()
+last, count, when = None, 0, ""
+def flush():
+    if last is None:
+        return
+    extra = "   x%d" % count if count > 1 else ""
+    print(when, last[0], last[1][:9].ljust(9), last[2][:95] + extra)
+for row in rows:
+    key = (row["level"][:1].upper(), row["kind"], row["message"])
+    if key == last:
+        count += 1
+        continue
+    flush()
+    last, count, when = key, 1, row["at"][5:19].replace("T", " ")
+flush()
+PY'
+```
+
+**Read it for the shape, not the messages.** One device failing is that device. Several failing
+within a few minutes of each other is the network, however different the messages look. They will
+look staggered even when they are not: the plug is polled every thirty seconds, the blaster health
+check is slower, and the probes need three minutes of silence before they count as missing. Subtract
+those and see whether everything actually went at once.
+
+**4. If it was the network, ask the kernel whose fault it was.**
+
+```sh
+ssh liam@hydrosnooze.local 'journalctl -k -u NetworkManager -u wpa_supplicant --since "today 01:00" --until "today 02:00" --no-pager'
+```
+
+The reason code in the Wi-Fi lines is the answer:
+
+| What it says | What it means |
+|---|---|
+| `deauthenticating ... by local choice` | The Pi walked away. Its radio or its driver |
+| `Reason: 4`, `DISASSOC_DUE_TO_INACTIVITY` | The access point gave up on an idle client. Power saving |
+| `Reason: 2`, `PREV_AUTH_NOT_VALID` | A key exchange failed. Group rekey on the hub or booster |
+| Nothing at all | The Pi never lost its link, so look downstream |
+
+**5. Only now, reboot.**
+
+Once the evidence is collected, `sudo reboot` on the Pi. Then reflash whichever board did not come
+back, because a board that is on the network and wedged looks identical to one that is not.
+
+### The thing to remember
+
+Every device in this project is on the Virgin booster rather than the hub, so the booster is a
+load-bearing part of the system with nothing behind it. When it hiccups the whole system goes dark
+at once and four separate devices look broken. Getting the Pi onto ethernet or powerline is the
+single change that would help most, because it takes the one machine that can tell you something is
+wrong out of the blast radius of the thing that goes wrong.
+
+---
+
 ## When something goes wrong
 
 | Symptom | Where to look |
