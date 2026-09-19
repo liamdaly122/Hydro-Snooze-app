@@ -171,6 +171,44 @@ def main() -> int:
             # is a poor way to start debugging.
             + "\nRunning:     " + deployed_at(),
         ),
+        # Before anything about the service, because a machine that rebooted
+        # and a service that restarted look identical from the app and want
+        # completely different fixes. NRestarts is reset by a reboot, so the
+        # section below reads "0 restarts, all healthy" for exactly the failure
+        # that is worst.
+        #
+        # If this shows only one boot on a machine that has been up for weeks,
+        # the journal is not being kept across reboots and the evidence of the
+        # last crash no longer exists. See the journald block in install.sh.
+        section(
+            "HAS THE MACHINE ITSELF REBOOTED",
+            "Up since  "
+            + run("uptime", "-s").strip()
+            + "\nUp for    "
+            + run("uptime", "-p").strip()
+            + "\n\n"
+            + run("journalctl", "--list-boots", "--no-pager"),
+        ),
+        # Where the cause is, if it did. An overnight reboot leaves its reason
+        # in the last thing the kernel managed to write: a supply browning out,
+        # the card going read-only, the out-of-memory killer, a panic.
+        section(
+            "WHAT THE KERNEL SAID BEFORE THE LAST REBOOT",
+            run("journalctl", "-k", "-b", "-1", "-n", "120", "--no-pager"),
+        ),
+        # Everything on the machine rather than just this service, at error
+        # level. Out-of-memory kills, ext4 and mmc errors and under-voltage all
+        # land here and none of them are in the service's own log.
+        section(
+            f"ERRORS FROM THE WHOLE MACHINE, LAST {args.hours} HOURS",
+            run(
+                "journalctl", "-p", "err", "--since", f"{args.hours} hours ago",
+                "--no-pager", "-n", "200",
+            ),
+        ),
+        # A card that has gone read-only keeps the service running and makes
+        # every write fail silently. `ro` in here is the whole answer.
+        section("THE CARD", run("findmnt", "-n", "-o", "SOURCE,FSTYPE,OPTIONS", "/")),
         # First, because a service that has been restarting is the whole answer.
         section(
             "HAS IT BEEN RESTARTING",

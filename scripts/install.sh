@@ -189,11 +189,27 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   # The journal is this machine's only record of what happened, so it is worth
   # keeping. It is not worth letting it take a tenth of the card, which is the
   # default. Two hundred megabytes is months of this service.
+  #
+  # Storage=persistent is the line that matters, and it was missing until the
+  # 19th. The default on Raspberry Pi OS is Storage=auto, which keeps the
+  # journal only if /var/log/journal already exists, and on a fresh Lite image
+  # it does not. So the journal lived in a tmpfs and every reboot wiped it.
+  #
+  # That is the worst possible place to lose a log. A service that restarted and
+  # a machine that rebooted look identical from the app and want completely
+  # different fixes, and the only thing that tells them apart is a log written
+  # before the reboot. Twice now the answer to "why did it go down overnight"
+  # has been destroyed by the going down.
   if [ -d /etc/systemd ]; then
-    say "Capping the journal at 200M"
+    say "Keeping the journal across reboots, capped at 200M"
     as_root mkdir -p /etc/systemd/journald.conf.d
-    printf '[Journal]\nSystemMaxUse=200M\n' \
+    printf '[Journal]\nStorage=persistent\nSystemMaxUse=200M\n' \
       | as_root tee /etc/systemd/journald.conf.d/hydrosnooze.conf >/dev/null
+    # journald creates this itself once Storage=persistent is set, but only on
+    # its next start. Making it here means the very next boot is recorded,
+    # rather than the one after.
+    as_root mkdir -p /var/log/journal
+    as_root systemd-tmpfiles --create --prefix /var/log/journal 2>/dev/null || true
     as_root systemctl restart systemd-journald 2>/dev/null || true
   fi
 fi
