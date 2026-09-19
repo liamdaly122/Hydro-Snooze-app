@@ -48,11 +48,14 @@ fi
 say "Using $($PYTHON --version)"
 
 # Packages Raspberry Pi OS Lite may not have. venv is separate from python on
-# Debian, and rsync is what scripts/deploy.sh needs on this end to copy the app
-# across from the Mac later.
+# Debian, rsync is what scripts/deploy.sh needs on this end to copy the app
+# across from the Mac later, and iw is what turns Wi-Fi power saving off further
+# down. iw is here rather than left to chance because its absence was not
+# survivable: see the block below.
 MISSING=()
 "$PYTHON" -c 'import venv' 2>/dev/null || MISSING+=(python3-venv)
 command -v rsync >/dev/null 2>&1 || MISSING+=(rsync)
+command -v iw >/dev/null 2>&1 || MISSING+=(iw)
 
 if [ ${#MISSING[@]} -gt 0 ]; then
   if command -v apt-get >/dev/null 2>&1; then
@@ -167,23 +170,57 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   #
   # iw applies it now without bouncing the link, which matters because this is
   # usually being run over SSH on that same link. nmcli makes it survive a reboot.
-  WLAN=$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2; exit }')
-  if [ -n "$WLAN" ]; then
-    say "Turning off Wi-Fi power saving on $WLAN"
-    as_root iw dev "$WLAN" set power_save off 2>/dev/null || true
-    WIFI_CONN=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null \
-      | awk -F: '$2 == "802-11-wireless" { print $1; exit }')
-    if [ -n "$WIFI_CONN" ]; then
-      as_root nmcli connection modify "$WIFI_CONN" wifi.powersave 2 >/dev/null 2>&1 \
-        || echo "   Could not make it permanent. After a reboot, run: sudo iw dev $WLAN set power_save off"
-    fi
+  # The interface is found in /sys rather than with `iw dev`, and that is not
+  # tidiness. This block used to begin with `iw dev`, so on a Pi that did not
+  # have iw the variable came back empty, the script announced "no wireless
+  # interface found", and power saving was left on. Two states that want
+  # opposite responses looked identical, and the one that needed action was the
+  # one reported as fine.
+  #
+  # It cost the night of 18 September. The Pi dropped off the network at 01:33
+  # and never came back: REM and Wake both missed, the unit still running at
+  # breakfast, and the plug, the blaster and the probe board all unreachable at
+  # once, which is what sent me looking at three innocent devices.
+  #
+  # /sys/class/net is the kernel. It needs nothing installed and cannot be
+  # missing.
+  WLAN=""
+  for candidate in /sys/class/net/*/wireless; do
+    [ -e "$candidate" ] || continue
+    WLAN=$(basename "$(dirname "$candidate")")
+    break
+  done
+
+  if [ -z "$WLAN" ]; then
+    say "No wireless interface, so Wi-Fi power saving was left alone"
+    echo "   Expected on a Pi using ethernet, and nothing to do."
   else
-    # Silence here would be the worst of both: the setting left on, and no way to
-    # know it had been. A wired machine is a fine reason to skip; a missing iw is
-    # not, and from the outside the two look identical.
-    say "No wireless interface found, so Wi-Fi power saving was left alone"
-    echo "   Fine if this Pi is on ethernet. If it is on Wi-Fi, iw is probably not"
-    echo "   installed: sudo apt install -y iw, then run this again."
+    say "Turning off Wi-Fi power saving on $WLAN"
+    # Now, without bouncing the link, which matters because this is usually
+    # being run over SSH on that same link.
+    as_root iw dev "$WLAN" set power_save off 2>/dev/null \
+      || echo "   Could not set it now. The permanent setting below still applies from the next boot."
+
+    # Permanent, and deliberately a NetworkManager drop-in rather than
+    # `nmcli connection modify`. This Pi's connection is managed by netplan
+    # (netplan-wlan0-...), and netplan regenerates the connection profile
+    # whenever it is applied, taking any per-connection setting with it. A
+    # conf.d default belongs to NetworkManager itself, so it survives that, and
+    # it still applies if the connection comes back under a different name.
+    if [ -d /etc/NetworkManager ]; then
+      as_root mkdir -p /etc/NetworkManager/conf.d
+      printf '[connection]\nwifi.powersave = 2\n' \
+        | as_root tee /etc/NetworkManager/conf.d/hydrosnooze-powersave.conf >/dev/null
+      as_root systemctl reload NetworkManager 2>/dev/null || true
+    fi
+
+    # Read back rather than assumed. The whole failure above was a setting that
+    # was never applied and never checked, so this one gets checked.
+    NOW=$(as_root iw dev "$WLAN" get power_save 2>/dev/null | awk '{print $NF}')
+    echo "   Power save on $WLAN is now: ${NOW:-unknown}"
+    if [ "$NOW" = "on" ]; then
+      echo "   ! Still on. The Pi will drop off the network when it goes idle." >&2
+    fi
   fi
 
   # The journal is this machine's only record of what happened, so it is worth
