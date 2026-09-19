@@ -84,10 +84,10 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-  # The three lines below are why this board stays on the network, and they are
-  # here because it did not. It went quiet for twenty minutes one evening and
-  # came back on its own, which is the signature of the radio dropping off and
-  # the default fifteen minute reboot timer eventually clearing it.
+  # The two settings below are why this board stays on the network, and they
+  # are here because it did not. It went quiet for twenty minutes one evening
+  # and came back on its own, which is the signature of the radio dropping off
+  # and the default fifteen minute reboot timer eventually clearing it.
 
   # The big one. An ESP32 defaults to light power save: the radio naps between
   # beacons to save a few milliamps, misses packets, and eventually the access
@@ -95,15 +95,28 @@ wifi:
   # there is nothing to save and a great deal to lose.
   power_save_mode: none
 
-  # Skip the scan and go straight to the access point it knows. Faster to come
-  # back, and this board never moves. Take this line out if it ever ends up
-  # somewhere with two access points on the same name, because it will hold on
-  # to the first one it saw rather than the nearest.
-  fast_connect: true
-
   # Two minutes of failing to connect and start again from scratch. The default
   # is fifteen, which is most of an evening with no readings.
   reboot_timeout: 2min
+
+  # `fast_connect` is deliberately NOT here, and that is worth explaining
+  # because it was here until 19 September.
+  #
+  # It skips the scan and goes straight to the access point it remembers, which
+  # is faster to come back and sounds like exactly what a board that never moves
+  # wants. It is also documented not to work when more than one access point
+  # broadcasts the same SSID, and this house has two: a Virgin hub and a
+  # booster, both answering to VM1876778_EXT. Everything in this project is on
+  # the booster because the hub is too far away to hold a connection.
+  #
+  # So the board was pinning itself to one remembered radio on one remembered
+  # channel. A booster that re-syncs with its hub and lands somewhere else takes
+  # the board with it, and the board cannot find its way back because finding
+  # its way back is the step it was told to skip. Rebooting does not help: it
+  # comes up and tries the same remembered radio again.
+  #
+  # The scan costs a couple of seconds on a board that speaks a few times a
+  # night. Being able to find the network again is worth more than that.
 """
 
 WEB = """

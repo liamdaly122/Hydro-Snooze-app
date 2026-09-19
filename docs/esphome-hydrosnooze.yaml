@@ -53,7 +53,7 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-  # The same three lines the probe board needed, and for the same reason. An
+  # The same two settings the probe board needed, and for the same reason. An
   # ESP32 defaults to light power save: the radio naps between beacons to save a
   # few milliamps, misses packets, and the access point eventually gives up on
   # it. This board is on a USB charger. There is nothing to save.
@@ -61,8 +61,26 @@ wifi:
   # This board dropped off the network twice on 10 September before anyone
   # thought to look here.
   power_save_mode: none
-  fast_connect: true
   reboot_timeout: 2min
+
+  # `fast_connect` is deliberately NOT here, and that is worth explaining
+  # because it was here until 19 September.
+  #
+  # It skips the scan and goes straight to the access point it remembers, which
+  # is faster to come back and sounds like exactly what a board that never moves
+  # wants. It is also documented not to work when more than one access point
+  # broadcasts the same SSID, and this house has two: a Virgin hub and a
+  # booster, both answering to VM1876778_EXT. Everything in this project is on
+  # the booster because the hub is too far away to hold a connection.
+  #
+  # So the board was pinning itself to one remembered radio on one remembered
+  # channel. A booster that re-syncs with its hub and lands somewhere else takes
+  # the board with it, and the board cannot find its way back because finding
+  # its way back is the step it was told to skip. Rebooting does not help: it
+  # comes up and tries the same remembered radio again.
+  #
+  # The scan costs a couple of seconds on a board that speaks a few times a
+  # night. Being able to find the network again is worth more than that.
 
 remote_transmitter:
   pin: GPIO3
