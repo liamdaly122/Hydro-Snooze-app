@@ -177,13 +177,20 @@ if [ "$SKIP_SYSTEMD" != "1" ]; then
   # opposite responses looked identical, and the one that needed action was the
   # one reported as fine.
   #
-  # It cost the night of 18 September. The Pi dropped off the network at 01:33
-  # and never came back: REM and Wake both missed, the unit still running at
-  # breakfast, and the plug, the blaster and the probe board all unreachable at
-  # once, which is what sent me looking at three innocent devices.
+  # There is a second way the same block lied, and it is the one that actually
+  # caught me out. `ssh pi "iw dev wlan0 get power_save"` answers "command not
+  # found" even on a Pi that has iw, because iw is in /usr/sbin and a
+  # non-interactive ssh shell does not have /usr/sbin on its PATH. I read that
+  # as a missing package and said so. It was not.
   #
-  # /sys/class/net is the kernel. It needs nothing installed and cannot be
-  # missing.
+  # So the honest version of this comment: it is not established that power
+  # saving was on during the night of 18 September, only that nothing here ever
+  # confirmed it was off. That is the fault being fixed. A setting this script
+  # claims to apply gets read back and printed now, so the question does not
+  # come up again.
+  #
+  # /sys/class/net is the kernel. It needs nothing installed, cannot be missing,
+  # and is not on anybody's PATH.
   WLAN=""
   for candidate in /sys/class/net/*/wireless; do
     [ -e "$candidate" ] || continue

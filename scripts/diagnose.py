@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
 import shutil
@@ -97,13 +98,36 @@ def deployed_at(prefix: Path = Path("/opt/hydrosnooze/backend")) -> str:
     return f"{prefix}, last deployed {datetime.fromtimestamp(newest):%a %d %b %H:%M}"
 
 
+#: Where the networking tools live, and why this script has to say so.
+#:
+#: iw, iwconfig and ip are in /usr/sbin, which an interactive login shell has on
+#: its PATH and `ssh host "command"` does not. This script is almost always run
+#: the second way, so `shutil.which("iwconfig")` came back None and the Wi-Fi
+#: section read "(iwconfig not on this machine)" on a machine that had it.
+#:
+#: That is not a cosmetic gap. The same PATH caught me out on the 19th: `ssh pi
+#: "iw dev wlan0 get power_save"` answered "command not found", I read that as a
+#: missing package, and I was wrong about why a night had failed.
+SBIN = ("/usr/sbin", "/sbin", "/usr/local/sbin")
+
+
+def _path() -> str:
+    parts = os.environ.get("PATH", "").split(":")
+    return ":".join(parts + [p for p in SBIN if p not in parts])
+
+
 def run(*command: str, timeout: int = 20) -> str:
     """A shell command's output, or a note saying why there is none."""
-    if shutil.which(command[0]) is None:
+    if shutil.which(command[0], path=_path()) is None:
         return f"({command[0]} not on this machine)"
     try:
         done = subprocess.run(
-            command, capture_output=True, text=True, timeout=timeout, check=False
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env={**os.environ, "PATH": _path()},
         )
     except Exception as exc:  # noqa: BLE001
         return f"(failed: {exc})"
@@ -260,6 +284,12 @@ def main() -> int:
     up_since = run("uptime", "-s")
     up_for = run("uptime", "-p")
     throttled = run("vcgencmd", "get_throttled")
+    # From the kernel rather than from a tool that may not be on this PATH. The
+    # two used to be conflated, and "no wireless interface" was printed on a
+    # machine whose only connection was Wi-Fi.
+    wlan = next(
+        (p.parent.name for p in Path("/sys/class/net").glob("*/wireless")), ""
+    )
     restarts = run(
         "systemctl", "show", args.service,
         "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState",
@@ -346,7 +376,27 @@ def main() -> int:
         ),
         section("DISK", run("df", "-h")),
         section("MEMORY", run("free", "-h")),
-        section("WI-FI", run("iwconfig")),
+        # Three questions about the link, not one. Power saving is the setting
+        # that makes a Pi drop off when it goes idle and never come back, and it
+        # is invisible unless asked for by name. The lease time is what explains
+        # a wobble that arrives on a schedule rather than at random: the plug,
+        # the blaster and the probe board all dropped together every four hours
+        # to within twenty seconds on the 18th, which is a timer somewhere.
+        section(
+            "WI-FI",
+            "Power save: "
+            + (
+                run("iw", "dev", wlan, "get", "power_save").strip()
+                if wlan
+                else "(no wireless interface)"
+            )
+            + "\n\n"
+            + run("iwconfig")
+            + "\n\n"
+            + run("nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active")
+            + "\n"
+            + run("nmcli", "-g", "DHCP4.OPTION", "device", "show", wlan or "wlan0"),
+        ),
         # The commonest reason a Pi behaves as though the software is broken, and
         # the one that leaves no other trace. "throttled=0x0" is the good answer;
         # anything else and the power supply is the first thing to change.
