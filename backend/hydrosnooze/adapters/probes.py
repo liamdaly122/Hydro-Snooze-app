@@ -67,6 +67,15 @@ BUTTON_NAMES = (BUTTON_WARMER, BUTTON_COOLER, BUTTON_POWER)
 #: this number falling.
 RSSI = "wifi_rssi"
 
+#: Which access point the board actually joined.
+#:
+#: The house has a hub and two boosters, and the board is configured to prefer
+#: the hub and fall back to a booster. That fallback is what makes the
+#: arrangement safe, and it is also what makes "which one is it on" a real
+#: question rather than a setting anyone can read off. Without this the only way
+#: to answer it was a serial cable and a boot banner.
+NETWORK = "wifi_network"
+
 #: How old a reading may be before it stops counting as current.
 #:
 #: Past this the value is not wrong, it is simply not news, and the difference
@@ -145,6 +154,9 @@ class Probes:
         #: weak link into a board with a broken probe.
         self.signal_dbm: float | None = None
         self.signal_at: datetime | None = None
+        #: The SSID the board is on, or None if it has not said. A text sensor
+        #: rather than a number, which is why it is kept apart from the rest.
+        self.network: str | None = None
         self.connected = False
         #: When anything last arrived from the board, whichever sensor it was.
         #: Separate from the readings themselves: a board reporting only the room
@@ -162,6 +174,7 @@ class Probes:
         self._client = None
         self._keys: dict[int, str] = {}
         self._signal_key: int | None = None
+        self._network_key: int | None = None
         self._buttons: dict[int, str] = {}
         #: What each button was last seen doing, so a release is not a press.
         #:
@@ -306,7 +319,12 @@ class Probes:
                 )
 
     async def _connect(self) -> None:
-        from aioesphomeapi import APIClient, BinarySensorInfo, SensorInfo
+        from aioesphomeapi import (
+            APIClient,
+            BinarySensorInfo,
+            SensorInfo,
+            TextSensorInfo,
+        )
 
         client = APIClient(
             self.host, self.port, password=None, noise_psk=self.encryption_key or None
@@ -333,6 +351,14 @@ class Probes:
         self._button_state = {}
         self._signal_key = next(
             (entity.key for entity in entities if entity.name == RSSI), None
+        )
+        self._network_key = next(
+            (
+                entity.key
+                for entity in entities
+                if isinstance(entity, TextSensorInfo) and entity.name == NETWORK
+            ),
+            None,
         )
         if not self._keys:
             raise RuntimeError(
@@ -364,6 +390,12 @@ class Probes:
             key = state.key  # type: ignore[attr-defined]
             if key == self._signal_key:
                 self._on_signal(state)
+                return
+            if key == self._network_key:
+                # Same reasoning as the signal and the buttons: about the link,
+                # not about the bed, so it does not touch the probe clocks.
+                said = getattr(state, "state", None)
+                self.network = str(said) if said else None
                 return
             if key in self._buttons:
                 self._on_button(self._buttons[key], state)
@@ -434,6 +466,7 @@ class Probes:
         self._client = None
         self._keys = {}
         self._signal_key = None
+        self._network_key = None
         self._buttons = {}
         self._button_state = {}
 

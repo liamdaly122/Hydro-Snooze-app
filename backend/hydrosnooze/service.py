@@ -524,11 +524,15 @@ class Service:
         streaming its log.
         """
         dbm = self.probes.signal_dbm
+        # Which access point, when the board has said. The house has a hub and
+        # two boosters all in range, the board prefers the hub and falls back to
+        # a booster, and telling those apart by hand meant a serial cable.
+        where = f" on {self.probes.network}" if self.probes.network else ""
         if dbm is None:
-            return ""
+            return f". Connected to {self.probes.network}" if self.probes.network else ""
         if dbm <= WEAK_SIGNAL_DBM:
-            return f". Signal {dbm:.0f} dBm, weak enough to expect gaps"
-        return f". Signal {dbm:.0f} dBm"
+            return f". Signal {dbm:.0f} dBm{where}, weak enough to expect gaps"
+        return f". Signal {dbm:.0f} dBm{where}"
 
     def _alerts_health(self) -> DeviceHealth:
         """Whether anything would actually tell you if this stopped working.

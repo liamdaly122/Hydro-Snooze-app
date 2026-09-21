@@ -178,6 +178,9 @@ class _Sensor:
 class _BinarySensor(_Sensor): ...
 
 
+class _TextSensor(_Sensor): ...
+
+
 @pytest.fixture
 def fake_api(monkeypatch):
     """Stand in for the library, which is not installed on a development Mac."""
@@ -185,6 +188,7 @@ def fake_api(monkeypatch):
     module = types.ModuleType("aioesphomeapi")
     module.SensorInfo = _Sensor  # type: ignore[attr-defined]
     module.BinarySensorInfo = _BinarySensor  # type: ignore[attr-defined]
+    module.TextSensorInfo = _TextSensor  # type: ignore[attr-defined]
     module.APIClient = lambda *a, **k: _Client(entities)  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "aioesphomeapi", module)
     return entities
@@ -540,3 +544,72 @@ async def test_a_crash_does_not_leave_a_total_behind(service, monkeypatch):
 
     assert service._button_delta == 0
     assert service._button_until is None
+
+
+# --- Which access point it actually joined -------------------------------------
+#
+# The board prefers the hub and falls back to a booster, which is what makes it
+# safe to point at the hub without a torch and a USB cable. It also makes "which
+# one is it on" a real question, and until this there was no way to answer it
+# without a serial cable and a boot banner.
+
+
+@pytest.mark.asyncio
+async def test_the_board_says_which_network_it_joined(fake_api):
+    from hydrosnooze.adapters.probes import NETWORK
+
+    fake_api.extend(
+        [_Sensor(i, n) for i, n in enumerate(NAMES, 1)]
+        + [_TextSensor(40, NETWORK)]
+    )
+    p = Probes(VirtualClock(NOW), host="192.0.2.9")
+    await p._connect()
+    assert p.network is None, "nothing said yet is not a guess"
+
+    p._on_state(State(40, "VM1876778"))
+    assert p.network == "VM1876778"
+
+
+def test_the_network_name_is_not_a_reading(probes):
+    """Same rule as the signal and the buttons. It is about the link rather than
+    about the bed, so it must not hold off a rebuild of a dead probe bus."""
+    probes._network_key = 40
+    probes.last_reading_at = None
+    probes._on_state(State(40, "VM1876778"))
+    assert probes.network == "VM1876778"
+    assert probes.last_reading_at is None
+    assert probes.readings == {}
+    assert probes.missing() == list(NAMES)
+
+
+def test_an_empty_network_name_is_not_a_network(probes):
+    probes._network_key = 40
+    probes._on_state(State(40, ""))
+    assert probes.network is None
+
+
+def test_the_health_row_names_the_access_point(tmp_path):
+    from hydrosnooze.adapters.probes import FLOW, RETURN, ROOM, Reading
+
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"), echo=False
+    )
+    now = service.clock.now()
+    for name, value in ((FLOW, 20.8), (RETURN, 20.5), (ROOM, 21.0)):
+        service.probes.readings[name] = Reading(value, now)
+    service.probes.last_reading_at = now
+
+    service.probes.signal_dbm = -53
+    service.probes.network = "VM1876778"
+    assert "Signal -53 dBm on VM1876778" in service._probes_health().detail
+
+    # On the booster and weak, which is the combination worth seeing at a glance.
+    service.probes.signal_dbm = -85
+    service.probes.network = "VM1876778_EXT"
+    detail = service._probes_health().detail
+    assert "Signal -85 dBm on VM1876778_EXT, weak enough to expect gaps" in detail
+
+    # A board flashed before this existed says nothing, rather than guessing.
+    service.probes.network = None
+    assert "on " not in service._probes_health().detail
+    service.db.close()

@@ -81,8 +81,32 @@ api:
 ota:
   - platform: esphome
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  # Two networks, not one, and the hub is preferred.
+  #
+  # Everything in this house sits on a booster and the boosters are what keep
+  # dropping: on 19 September, with the Pi moved onto a cable and its own Wi-Fi
+  # switched off, the blaster and this board still went together at 21:33, four
+  # hours to the second after the one before. The Pi was never the cause.
+  #
+  # So this board tries the hub first. `priority` is what makes that a
+  # preference rather than a coin toss: without it ESPHome takes whichever is
+  # loudest, which is always the booster three metres away. With it, the hub
+  # wins whenever it is reachable at all.
+  #
+  # The booster stays listed underneath as a fallback, which is the whole
+  # reason this is safe to try. If the hub cannot be heard from behind the bed
+  # the board lands back on the booster instead of disappearing and needing a
+  # USB cable and a torch.
+  #
+  # Which one it actually chose is not a guess: the text sensor further down
+  # publishes the SSID it is on, and the app shows it on the probes row.
+  networks:
+    - ssid: !secret wifi_ssid_hub
+      password: !secret wifi_password
+      priority: 10
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+      priority: 0
 
   # The two settings below are why this board stays on the network, and they
   # are here because it did not. It went quiet for twenty minutes one evening
@@ -117,6 +141,18 @@ wifi:
   #
   # The scan costs a couple of seconds on a board that speaks a few times a
   # night. Being able to find the network again is worth more than that.
+"""
+
+#: Which access point it is actually on, published as an entity.
+#:
+#: There was no way to answer that without reading a boot banner over a serial
+#: cable, which is a poor way to run an experiment whose whole question is "did
+#: it join the other network". It is one line on the probes health row now.
+NETWORK = """
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      name: "wifi_network"
 """
 
 WEB = """
@@ -254,6 +290,7 @@ def real_config(flow: str, back: str, room: str) -> str:
         + RSSI
         + buttons()
         + RESTART
+        + NETWORK
     )
 
 

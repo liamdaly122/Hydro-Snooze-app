@@ -50,8 +50,26 @@ api:
 ota:
   - platform: esphome
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  # Two networks, hub first, booster underneath. Same arrangement and same
+  # reasoning as scripts/probes.py, which has the long version.
+  #
+  # The short version: on 19 September the Pi moved onto a cable and had its own
+  # Wi-Fi switched off, and this board still dropped at 21:33 alongside the
+  # probe board, four hours to the second after the drop before it. The Pi was
+  # never the cause. The boosters are.
+  #
+  # `priority` is what makes the hub a preference rather than a coin toss,
+  # because without it ESPHome takes whichever is loudest and that is always the
+  # booster. The booster staying listed is what makes this safe to try: a hub
+  # that cannot be heard from behind the bed means a fallback, not a board that
+  # has to be fetched and plugged into a laptop.
+  networks:
+    - ssid: !secret wifi_ssid_hub
+      password: !secret wifi_password
+      priority: 10
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+      priority: 0
 
   # The same two settings the probe board needed, and for the same reason. An
   # ESP32 defaults to light power save: the radio naps between beacons to save a
@@ -108,6 +126,14 @@ remote_transmitter:
 # The service talks over the API, not this, so this is a setup and debugging tool
 # and nothing depends on it. It is open to anything on the network, which for a
 # device whose worst case is changing the bed temperature is a fair trade.
+# Which access point it landed on. There is no other way to ask: this board
+# publishes buttons rather than readings, so the service never sees a sensor
+# from it. It shows on the page below.
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      name: "wifi_network"
+
 web_server:
   version: 3
   port: 80
