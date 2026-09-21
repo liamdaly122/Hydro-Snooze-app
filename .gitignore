@@ -24,7 +24,17 @@ frontend/dist/
 !.env.example
 
 # ESPHome keeps the Wi-Fi password and the API key here.
+#
+# The same three lines as .env above, and they were missing here until 21
+# September: the bare name was ignored and every shape an editor or a script
+# leaves beside it was not. secrets.yaml.bak, secrets.yaml.save and
+# secrets.yaml~ were all one `git add -A` away from publishing the Wi-Fi
+# password and the ESPHome encryption key. The lesson had already been learned
+# once, four lines up, and only applied to the file it was learned on.
 secrets.yaml
+secrets.yaml.*
+secrets.yaml~
+!secrets.yaml.example
 .esphome/
 data/
 

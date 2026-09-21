@@ -57,15 +57,30 @@ entire question is exactly that.
 ## Step 1: add the hub to the secrets
 
 `docs/secrets.yaml` is gitignored and lives only on the Mac. It needs one new
-line, and **ESPHome will refuse to compile without it**:
+key, and **ESPHome will refuse to compile without it**. Worse, its error names
+the generated file and a line number rather than the key, which sends me editing
+the wrong file.
 
-```yaml
-wifi_ssid: "VM1876778_EXT"
-wifi_ssid_hub: "VM1876778"
-wifi_password: "the same password as before"
+So there is a script that asks the question properly:
+
+```sh
+./scripts/secret.py
 ```
 
-One password covers both. A booster repeats its hub, so they share it.
+It reads every `!secret` the configurations actually ask for and says which of
+them are not set yet. **It never prints a value.** Then:
+
+```sh
+./scripts/secret.py wifi_ssid_hub VM1876778
+```
+
+It keeps every comment and every other key exactly where they were, backs the
+file up beside itself first, and refuses to leave anything behind that does not
+parse. Run it with no arguments again and everything should read `set`.
+
+One password covers both networks. A booster repeats its hub, so they share it.
+If I ever need to retype it, `./scripts/secret.py wifi_password` with no value
+prompts for it hidden rather than leaving it in the shell history.
 
 Check the hub's name on my phone's Wi-Fi list first. Both should be visible from
 the bedroom, and if the hub is not listed at all then it cannot be reached from
@@ -203,7 +218,8 @@ to it is a five minute job in daylight and a bad half hour at eleven at night.
 
 | | |
 |---|---|
-| Missing `wifi_ssid_hub` | ESPHome refuses to compile. Add it to `docs/secrets.yaml` before anything else |
+| Missing `wifi_ssid_hub` | ESPHome refuses to compile and blames the generated file, not the key. `./scripts/secret.py` says which keys are missing before it gets that far |
+| A backup beside `secrets.yaml` | `.gitignore` covered the bare name and none of the shapes an editor leaves next to it. Fixed on 21 September, after the same lesson had already been learned on `.env` |
 | Editing the generated file | `docs/esphome-probes.yaml` is written by `scripts/probes.py`. Edits there vanish on the next run |
 | Flashing the blaster first | A night runs without probes and not at all without the blaster. Probe board first, always |
 | No `priority` | ESPHome takes whichever network is loudest, which is always the booster. The hub never wins |
