@@ -27,6 +27,7 @@ from .adapters.probes import (
     BUTTON_POWER,
     BUTTON_WARMER,
     NAMES,
+    STALE_AFTER,
     Probes,
 )
 from .clock import Clock, RealClock, SimClock, VirtualClock
@@ -523,13 +524,32 @@ class Service:
         nothing, and until now the only way to see it was to sit over the board
         streaming its log.
         """
-        dbm = self.probes.signal_dbm
+        dbm, at = self.probes.signal_dbm, self.probes.signal_at
         # Which access point, when the board has said. The house has a hub and
         # two boosters all in range, the board prefers the hub and falls back to
         # a booster, and telling those apart by hand meant a serial cable.
         where = f" on {self.probes.network}" if self.probes.network else ""
         if dbm is None:
             return f". Connected to {self.probes.network}" if self.probes.network else ""
+
+        # Dated rather than presented as current, and this is the whole of what
+        # was wrong with it. On the night of 21 September this row read
+        #
+        #   No readings from the probe board. Nothing for 22 minutes,
+        #   19 reconnects since the service started. Signal -41 dBm
+        #
+        # An excellent signal and no readings, printed side by side, which sends
+        # anyone reading it hunting for a broken probe. The -41 was simply the
+        # last thing the board said before it went, and nothing here checked how
+        # old it was. Every other number in this project is None once it stops
+        # being news; this one was written on the 19th and exempted itself.
+        #
+        # Not hidden, though. The last thing a board said before it vanished is
+        # exactly what is worth knowing afterwards, as long as it is labelled as
+        # that rather than as now.
+        age = None if at is None else self.clock.now() - at
+        if age is not None and age > STALE_AFTER:
+            return f". Last said {dbm:.0f} dBm{where}, {_roughly(age)} ago"
         if dbm <= WEAK_SIGNAL_DBM:
             return f". Signal {dbm:.0f} dBm{where}, weak enough to expect gaps"
         return f". Signal {dbm:.0f} dBm{where}"

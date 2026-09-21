@@ -380,3 +380,40 @@ def test_the_health_row_says_the_signal_and_whether_it_is_weak(tmp_path):
     # working link, and an amber dot for it would be crying wolf every night.
     assert service._probes_health().health is Health.OK
     service.db.close()
+
+
+def test_a_signal_that_has_stopped_arriving_is_dated_not_presented_as_now(tmp_path):
+    """The night of 21 September, where this row read
+
+        No readings from the probe board. Nothing for 22 minutes,
+        19 reconnects since the service started. Signal -41 dBm
+
+    An excellent signal and no readings, side by side, which sends anyone
+    reading it hunting for a broken probe. The -41 was the last thing the board
+    said before it went, and nothing checked how old it was.
+    """
+    clock = VirtualClock(NOW)
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"),
+        clock=clock,
+        echo=False,
+    )
+    service.probes.signal_dbm = -41
+    service.probes.signal_at = NOW
+    service.probes.network = "VM1876778"
+
+    assert "Signal -41 dBm on VM1876778" in service._probes_health().detail
+
+    clock.advance(timedelta(minutes=22))
+    detail = service._probes_health().detail
+    assert "Last said -41 dBm on VM1876778, 22 minutes ago" in detail
+    assert "Signal -41 dBm" not in detail
+    service.db.close()
+
+
+def test_a_board_that_never_said_anything_about_its_signal_says_nothing(tmp_path):
+    service = Service(
+        Settings(db_path=str(tmp_path / "s.db"), probes_host="192.0.2.9"), echo=False
+    )
+    assert "dBm" not in service._probes_health().detail
+    service.db.close()
