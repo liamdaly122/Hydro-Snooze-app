@@ -8,6 +8,7 @@ import {
   STAGE_ORDER,
   WARMING_FLOOR_C,
   type DeviceState,
+  type Mode,
   type Schedule,
   type Stage,
 } from '../types'
@@ -197,6 +198,7 @@ export function TemperatureCard({
           state={state}
           tab={tab}
           value={selected}
+          mode={tab === 'now' ? null : (stageOf(tab)?.mode ?? null)}
           atCeiling={atCeiling}
           ceiling={ceiling}
           maxC={maxC}
@@ -217,6 +219,7 @@ function StageNote({
   state,
   tab,
   value,
+  mode,
   atCeiling,
   ceiling,
   maxC,
@@ -224,6 +227,8 @@ function StageNote({
   state: DeviceState
   tab: TabKey
   value: number | null
+  /** The stage's own mode, as the service worked it out for the whole night. */
+  mode: Mode | null
   atCeiling: boolean
   ceiling: number
   maxC: number
@@ -258,10 +263,12 @@ function StageNote({
       const label = STAGE_LABEL[state.current_stage]
       note = say(measured, `${label} is running. Changing this is for tonight only.`)
     } else note = measured
-  } else if (value !== null && value >= WARMING_FLOOR_C) {
-    note = `Heats the bed to ${value}°C.`
   } else if (value !== null) {
-    note = `Cools the bed to ${value}°C.`
+    // The stage's mode when the service has said, because between 25 and 35
+    // both modes reach the number and the stage before decides. A Wake at 26
+    // after a REM at 28 cools, and reading the number alone said it heats.
+    const warms = mode !== null ? mode === 'warming' : value >= WARMING_FLOOR_C
+    note = warms ? `Heats the bed to ${value}°C.` : `Cools the bed to ${value}°C.`
   }
 
   if (atCeiling && ceiling === maxC) note = `${maxC}°C safety cap.`

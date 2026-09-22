@@ -156,3 +156,65 @@ def test_keeping_it_is_the_only_one_that_touches_the_routine(client):
         22,
         26,
     ]
+
+
+# --- Tonight's cooling speed --------------------------------------------------------
+#
+# From the review of 22 September. The Cooling speed card has a tab labelled
+# "Tonight" and it saved the routine, so one warm evening on Turbo became every
+# night on Turbo.
+
+
+def test_tonights_speed_leaves_the_usual_one_alone(client):
+    r = client.post("/api/tonight/speed", json={"cooling_speed": "turbo"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["running"]["cooling_speed"] == "turbo"
+    assert r.json()["speed_changed"] is True
+    assert r.json()["changed"] is True
+    assert client.get("/api/schedule").json()["cooling_speed"] == "quiet"
+
+
+def test_picking_the_usual_speed_takes_tonights_back_off(client):
+    client.post("/api/tonight/speed", json={"cooling_speed": "turbo"})
+    body = client.post("/api/tonight/speed", json={"cooling_speed": "quiet"}).json()
+    assert body["speed_changed"] is False
+    assert body["running"]["cooling_speed"] == "quiet"
+
+
+def test_warming_is_not_a_speed(client):
+    r = client.post("/api/tonight/speed", json={"cooling_speed": "warming"})
+    assert r.status_code == 422
+    assert "not a cooling speed" in r.json()["detail"]
+
+
+def test_keeping_tonight_keeps_its_speed_too(client):
+    client.post("/api/tonight/speed", json={"cooling_speed": "turbo"})
+    kept = client.post("/api/tonight/keep")
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["cooling_speed"] == "turbo"
+    assert client.get("/api/tonight").json()["speed_changed"] is False
+
+
+def test_tonights_speed_decides_tonights_modes(client):
+    """Deep at 19C is a cooling stage, so it runs at whatever speed tonight has."""
+    body = client.post("/api/tonight/speed", json={"cooling_speed": "turbo"}).json()
+    deep = next(s for s in body["running"]["stages"] if s["stage"] == "deep")
+    assert deep["mode"] == "turbo"
+
+
+# --- Skipping, from the screen's side ------------------------------------------------
+
+
+def test_the_skip_card_stays_to_be_undone(client):
+    """From the review of 22 September. Skip tonight at eight in the evening and
+    the phase went to 'none', because the scheduler looks straight past a
+    skipped night to the next one. The app hides the card on 'none', so the
+    card and its Run tonight button went away the moment they were used."""
+    assert client.get("/api/tonight").json()["phase"] == "evening"
+
+    body = client.post("/api/tonight/skip", params={"skip": True}).json()
+
+    assert body["skip"] is True
+    assert body["phase"] == "evening", "the card that can undo it is still there"
+    assert client.post("/api/tonight/skip", params={"skip": False}).json()["phase"] == "evening"

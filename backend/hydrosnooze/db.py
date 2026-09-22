@@ -214,7 +214,8 @@ CREATE TABLE IF NOT EXISTS tonight (
     wake_time   TEXT,
     bed_time    TEXT,
     nudge_c     INTEGER NOT NULL DEFAULT 0,
-    nudge_until TEXT
+    nudge_until TEXT,
+    cooling_speed TEXT
 );
 
 -- The handful of settings that are not part of a schedule.
@@ -357,6 +358,12 @@ class Database:
         ):
             if name not in pre:
                 self._db.execute(f"ALTER TABLE precondition_runs ADD COLUMN {name} {kind}")
+
+        # Tonight's own cooling speed. NULL is "the usual one", which is what
+        # every row written before it existed meant.
+        night = {r["name"] for r in self._db.execute("PRAGMA table_info(tonight)")}
+        if "cooling_speed" not in night:
+            self._db.execute("ALTER TABLE tonight ADD COLUMN cooling_speed TEXT")
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
@@ -514,19 +521,21 @@ class Database:
             bed_time=_time_from(row["bed_time"]) if row["bed_time"] else None,
             nudge_c=row["nudge_c"] or 0,
             nudge_until=_parse(row["nudge_until"]),
+            cooling_speed=Mode(row["cooling_speed"]) if row["cooling_speed"] else None,
         )
 
     def save_tonight(self, tonight: Tonight) -> None:
         self._db.execute(
             """
             INSERT INTO tonight (id, wake_on, skip, stages, wake_time, bed_time,
-                                 nudge_c, nudge_until)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                                 nudge_c, nudge_until, cooling_speed)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 wake_on=excluded.wake_on, skip=excluded.skip,
                 stages=excluded.stages, wake_time=excluded.wake_time,
                 bed_time=excluded.bed_time, nudge_c=excluded.nudge_c,
-                nudge_until=excluded.nudge_until
+                nudge_until=excluded.nudge_until,
+                cooling_speed=excluded.cooling_speed
             """,
             (
                 tonight.wake_on.isoformat(),
@@ -549,6 +558,7 @@ class Database:
                 tonight.bed_time.strftime("%H:%M") if tonight.bed_time else None,
                 tonight.nudge_c,
                 _iso(tonight.nudge_until),
+                tonight.cooling_speed.value if tonight.cooling_speed else None,
             ),
         )
         self._db.commit()

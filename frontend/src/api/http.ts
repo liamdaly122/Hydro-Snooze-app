@@ -114,6 +114,12 @@ export class HttpApiClient implements ApiClient {
   skipTonight = (skip: boolean) =>
     request<TonightState>(`/api/tonight/skip?skip=${skip}`, { method: 'POST' })
 
+  speedTonight = (cooling_speed: Mode) =>
+    request<TonightState>('/api/tonight/speed', {
+      method: 'POST',
+      body: JSON.stringify({ cooling_speed }),
+    })
+
   clearTonight = () => request<TonightState>('/api/tonight', { method: 'DELETE' })
 
   keepTonight = () => request<Schedule>('/api/tonight/keep', { method: 'POST' })
@@ -164,6 +170,12 @@ export class HttpApiClient implements ApiClient {
 
   subscribe = (listener: (u: LiveUpdate) => void): (() => void) => {
     this.listeners.add(listener)
+    // A subscribe after the last unsubscribe is a fresh start, not a closed
+    // client. React's StrictMode does exactly that in development, mounting,
+    // unmounting and mounting again, and with `closed` left set the second
+    // mount never opened a socket: the device bar said the service was down
+    // under `npm run dev` and no live update ever arrived.
+    this.closed = false
     this.open()
     return () => {
       this.listeners.delete(listener)
@@ -193,6 +205,9 @@ export class HttpApiClient implements ApiClient {
       this.emit(payload as LiveUpdate)
     }
     socket.onclose = () => {
+      // One already let go of. Its close can land after a new socket has been
+      // opened, and clearing `this.socket` then would open a second one.
+      if (this.socket !== socket) return
       this.socket = null
       this.emit({ connected: false })
       // The Pi rebooting, or the phone waking from sleep. Keep trying quietly.

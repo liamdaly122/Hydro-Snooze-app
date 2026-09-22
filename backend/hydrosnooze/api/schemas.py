@@ -237,6 +237,7 @@ def tonight_json(
         "skip": bool(tonight and tonight.skip),
         "stages_changed": bool(tonight and tonight.stages is not None),
         "times_changed": bool(tonight and (tonight.wake_time or tonight.bed_time)),
+        "speed_changed": bool(tonight and tonight.cooling_speed is not None),
         "nudge_c": (tonight.nudge_c if tonight else 0),
         "nudge_until": (
             tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None

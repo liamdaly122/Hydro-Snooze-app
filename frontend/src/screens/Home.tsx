@@ -145,7 +145,7 @@ export function Home({
           temperature it nudges. Only while a night is running: "1 degree cooler
           for half an hour" means nothing to a unit that is switched off.
         */}
-        {tonight?.phase === 'running' && (
+        {tonight?.phase === 'running' && !tonight.skip && (
           <NudgeControls
             tonight={tonight}
             now={now}
@@ -160,9 +160,9 @@ export function Home({
           Shaping the night, which is something you do before you are in it.
           "Bed early" goes once the bed is already getting ready; "sleep in"
           stays, because at three in the morning a lie-in is still a thing you
-          might want.
+          might want. Neither on a skipped night, which has nothing to shape.
         */}
-        {tonight && (tonight.phase === 'evening' || tonight.phase === 'running') && (
+        {tonight && !tonight.skip && (tonight.phase === 'evening' || tonight.phase === 'running') && (
           <ShiftControls
             bedTime={tonight.running.bed_time}
             wakeTime={tonight.running.wake_time}
@@ -174,8 +174,20 @@ export function Home({
 
       <ModeSelector
         state={state}
-        scheduleMode={draft.cooling_speed}
-        onScheduleChange={(cooling_speed: Mode) => save({ cooling_speed })}
+        // Tonight's, as the tab says. It used to save the routine, so one warm
+        // evening on Turbo became every night on Turbo.
+        scheduleMode={tonight?.running.cooling_speed ?? draft.cooling_speed}
+        usualMode={schedule.cooling_speed}
+        onScheduleChange={(cooling_speed: Mode) => onTonight(client.speedTonight(cooling_speed))}
+        // The deliberate one, as with the temperatures. The usual speed first,
+        // then tonight's taken back off, because it now matches.
+        onKeep={(cooling_speed: Mode) => {
+          setError(null)
+          setDraft((prev) => ({ ...prev, cooling_speed }))
+          onTonight(
+            client.putSchedule({ cooling_speed }).then(() => client.speedTonight(cooling_speed)),
+          )
+        }}
         onLiveChange={(mode: Mode) => {
           void client.setMode(mode).catch((e: Error) => setError(e.message))
         }}

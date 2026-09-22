@@ -2397,6 +2397,17 @@ class Service:
         """
         now = self.clock.now()
         plan = self.scheduler.plan_in_progress(self.schedule, now)
+        # A skipped night is still the night on the screen. plan_in_progress
+        # looks straight past one that has not begun, which is right for what
+        # runs and was wrong here: the phase went to "none" the moment Skip
+        # tonight was tapped, and the card holding Run tonight went with it.
+        skipped = self.tonight_state()
+        if skipped is not None and skipped.skip and (
+            plan is None or plan.wake_at.date() != skipped.wake_on
+        ):
+            plan = self.scheduler.shape(self.schedule, skipped.wake_on).plan_for(
+                skipped.wake_on, self.scheduler.learned_lead
+            )
         if plan is None:
             return "none"
         if now >= plan.wake_at:
@@ -2501,6 +2512,30 @@ class Service:
             f"Tonight runs {after.bed_time:%H:%M} to {after.wake_time:%H:%M}, "
             f"{after.night_minutes // 60}h{after.night_minutes % 60:02d}. "
             "The unit switches off at the new alarm. Your usual times are untouched.",
+        )
+        return out
+
+    def set_speed_tonight(self, speed: Mode) -> Tonight:
+        """Tonight's cooling speed, leaving the usual one alone.
+
+        The card has always said "Tonight" above these three buttons, and they
+        saved the routine: pick Turbo once for a warm evening and every night
+        after ran Turbo. The same "I was cold once" mistake the temperatures
+        were taken away from, still sitting one card further down.
+
+        Picking the usual speed takes tonight's back off rather than storing a
+        copy of it, so tonight stops saying it is different when it is not.
+        """
+        if not speed.is_cooling:
+            raise CommandFailed(f"{speed.value} is not a cooling speed.")
+        own = None if speed is self.schedule.cooling_speed else speed
+        out = self._change_tonight(cooling_speed=own)
+        name = speed.value.capitalize()
+        self.events.info(
+            TONIGHT_KIND,
+            f"Cooling stages run in {name} tonight. Your usual speed is untouched."
+            if own is not None
+            else f"Back to your usual speed, {name}, for tonight.",
         )
         return out
 

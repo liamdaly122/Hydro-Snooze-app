@@ -1,5 +1,5 @@
 import { Flame, Snowflake } from './Icons'
-import type { TonightState } from '../types'
+import { STAGE_LABEL, type TonightState } from '../types'
 
 /**
  * The controls that only make sense from inside a running night.
@@ -86,7 +86,7 @@ export function KeepTonight({
 
   const what =
     moved.length === 1
-      ? `Save ${moved[0]!.temp_c}° as my usual ${labelOf(moved[0]!.stage)}`
+      ? `Save ${moved[0]!.temp_c}° as my usual ${STAGE_LABEL[moved[0]!.stage]}`
       : `Save tonight's ${moved.length} temperatures as my usual`
 
   return (
@@ -96,10 +96,6 @@ export function KeepTonight({
       </button>
     </div>
   )
-}
-
-function labelOf(stage: string): string {
-  return { deep: 'Deep', rem: 'REM', wake: 'Wake' }[stage] ?? stage
 }
 
 /**

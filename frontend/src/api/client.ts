@@ -56,6 +56,8 @@ export interface ApiClient {
   /** Going to bed early, or sleeping in. Moves the switch-off with the alarm. */
   shiftTonight(patch: { bed_minutes?: number; wake_minutes?: number }): Promise<TonightState>
   skipTonight(skip: boolean): Promise<TonightState>
+  /** Tonight's cooling speed. Picking the usual one takes tonight's back off. */
+  speedTonight(coolingSpeed: Mode): Promise<TonightState>
   clearTonight(): Promise<TonightState>
   /** Save as my preference: tonight's temperatures become the usual ones. */
   keepTonight(): Promise<Schedule>

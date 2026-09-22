@@ -780,6 +780,10 @@ class Tonight:
     wake_time: time | None = None
     bed_time: time | None = None
 
+    #: Tonight's cooling speed, when it differs from the usual one. Used by the
+    #: cooling stages from the next boundary on; the unit is not changed now.
+    cooling_speed: Mode | None = None
+
     #: A temporary offset on whatever stage is running, and when it lapses.
     #: Degrees only. See the note above about times.
     nudge_c: int = 0
@@ -802,6 +806,8 @@ class Tonight:
             patch["wake_time"] = self.wake_time
         if self.bed_time is not None:
             patch["bed_time"] = self.bed_time
+        if self.cooling_speed is not None:
+            patch["cooling_speed"] = self.cooling_speed
         return replace(schedule, **patch) if patch else schedule
 
     def nudge_at(self, now: datetime) -> int:
@@ -823,6 +829,7 @@ class Tonight:
             or self.stages is not None
             or self.wake_time is not None
             or self.bed_time is not None
+            or self.cooling_speed is not None
         )
 
 

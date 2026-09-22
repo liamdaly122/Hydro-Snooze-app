@@ -176,6 +176,10 @@ class StageTonight(BaseModel):
     temp_c: int
 
 
+class SpeedTonight(BaseModel):
+    cooling_speed: Mode
+
+
 def _tonight(service: Service) -> dict[str, object]:
     # tonight_state rather than scheduler.tonight: the second is whatever was last
     # read off disk, and a row for a night that is over is spent.
@@ -240,6 +244,17 @@ async def post_tonight_shift(request: Request, body: Shift) -> dict[str, object]
     return _tonight(service)
 
 
+@router.post("/tonight/speed")
+async def post_tonight_speed(request: Request, body: SpeedTonight) -> dict[str, object]:
+    """Tonight's cooling speed. The usual one is changed on the schedule."""
+    service = _service(request)
+    try:
+        service.set_speed_tonight(body.cooling_speed)
+    except CommandFailed as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return _tonight(service)
+
+
 @router.post("/tonight/skip")
 async def post_tonight_skip(request: Request, skip: bool = True) -> dict[str, object]:
     """One night off, with the weekly routine untouched."""
@@ -269,6 +284,13 @@ async def post_tonight_keep(request: Request) -> dict[str, object]:
     service = _service(request)
     for stage in service.tonight_now().stages:
         service._adopt_into_running_stage(stage.stage, stage.temp_c)
+    # The speed too. It is set on the same tab of the same screen, and a save
+    # that kept the temperatures and quietly left the speed behind would read as
+    # having kept everything.
+    tonight = service.tonight_state()
+    if tonight is not None and tonight.cooling_speed is not None:
+        service.update_schedule({"cooling_speed": tonight.cooling_speed})
+        service.set_speed_tonight(tonight.cooling_speed)
     return schedule_json(service.schedule)
 
 

@@ -271,6 +271,7 @@ export class MockApiClient implements ApiClient {
     bed_time: null as string | null,
     nudge_c: 0,
     nudge_until: null as string | null,
+    cooling_speed: null as Mode | null,
   }
 
   private learningOn = true
@@ -305,19 +306,29 @@ export class MockApiClient implements ApiClient {
     const night_minutes = minutesBetween(bed_time, wake_time)
     const running: Schedule = {
       ...this.schedule,
+      cooling_speed: t.cooling_speed ?? this.schedule.cooling_speed,
       wake_time,
       bed_time,
       night_minutes,
-      stages: fitStages((t.stages ?? this.schedule.stages).map((s) => ({ ...s })), night_minutes),
+      stages: withModes(
+        fitStages((t.stages ?? this.schedule.stages).map((s) => ({ ...s })), night_minutes),
+        t.cooling_speed ?? this.schedule.cooling_speed,
+      ),
     }
     return {
       phase: this.tonightPhase,
       running,
       // Not the nudge: it is visible where it happens and lapses on its own.
-      changed: t.skip || t.stages !== null || t.wake_time !== null || t.bed_time !== null,
+      changed:
+        t.skip ||
+        t.stages !== null ||
+        t.wake_time !== null ||
+        t.bed_time !== null ||
+        t.cooling_speed !== null,
       skip: t.skip,
       stages_changed: t.stages !== null,
       times_changed: t.wake_time !== null || t.bed_time !== null,
+      speed_changed: t.cooling_speed !== null,
       nudge_c: t.nudge_c,
       nudge_until: t.nudge_until,
     }
@@ -372,6 +383,13 @@ export class MockApiClient implements ApiClient {
     return this.tonightJson()
   }
 
+  async speedTonight(cooling_speed: Mode): Promise<TonightState> {
+    await sleep(120)
+    this.tonightState.cooling_speed =
+      cooling_speed === this.schedule.cooling_speed ? null : cooling_speed
+    return this.tonightJson()
+  }
+
   async clearTonight(): Promise<TonightState> {
     await sleep(120)
     this.tonightState = {
@@ -381,6 +399,7 @@ export class MockApiClient implements ApiClient {
       bed_time: null,
       nudge_c: 0,
       nudge_until: null,
+      cooling_speed: null,
     }
     return this.tonightJson()
   }
@@ -388,8 +407,13 @@ export class MockApiClient implements ApiClient {
   async keepTonight(): Promise<Schedule> {
     await sleep(160)
     const running = this.tonightJson().running
-    this.schedule = { ...this.schedule, stages: running.stages.map((s) => ({ ...s })) }
+    this.schedule = {
+      ...this.schedule,
+      cooling_speed: running.cooling_speed,
+      stages: running.stages.map((s) => ({ ...s })),
+    }
     this.tonightState.stages = null
+    this.tonightState.cooling_speed = null
     return this.schedule
   }
 

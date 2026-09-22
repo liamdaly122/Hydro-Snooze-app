@@ -333,3 +333,40 @@ def test_a_tonight_override_saved_before_drift_comes_back_with_it(tmp_path) -> N
         assert [s.temp_c for s in tonight.stages] == [22, 22, 20, 26]
     finally:
         db.close()
+
+
+def test_a_tonight_row_from_before_its_own_speed_still_loads(tmp_path) -> None:
+    """The tonight table as it was before it had a cooling speed. NULL there is
+    the usual speed, which is what every one of those rows meant."""
+    from datetime import date
+
+    path = tmp_path / "speed.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """
+        CREATE TABLE tonight (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            wake_on     TEXT    NOT NULL,
+            skip        INTEGER NOT NULL DEFAULT 0,
+            stages      TEXT,
+            wake_time   TEXT,
+            bed_time    TEXT,
+            nudge_c     INTEGER NOT NULL DEFAULT 0,
+            nudge_until TEXT
+        );
+        INSERT INTO tonight (id, wake_on, skip) VALUES (1, '2026-09-12', 1);
+        """
+    )
+    old.commit()
+    old.close()
+
+    db = Database(path)
+    try:
+        tonight = db.load_tonight(date(2026, 9, 12))
+        assert tonight is not None and tonight.skip and tonight.cooling_speed is None
+
+        db.save_tonight(tonight.__class__(wake_on=date(2026, 9, 12), cooling_speed=Mode.TURBO))
+        again = db.load_tonight(date(2026, 9, 12))
+        assert again is not None and again.cooling_speed is Mode.TURBO
+    finally:
+        db.close()

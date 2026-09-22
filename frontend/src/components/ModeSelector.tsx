@@ -6,9 +6,13 @@ type Scope = 'now' | 'schedule'
 
 interface Props {
   state: DeviceState
-  /** Tonight's setting, used by every cooling stage. */
+  /** Tonight's speed, used by every cooling stage tonight and no other night. */
   scheduleMode: Mode
+  /** The usual one, from the saved schedule. */
+  usualMode: Mode
   onScheduleChange: (mode: Mode) => void
+  /** Make tonight's speed the usual one. */
+  onKeep: (mode: Mode) => void
   /** Change the unit's mode right now. */
   onLiveChange: (mode: Mode) => void
 }
@@ -29,7 +33,14 @@ interface Props {
  * Warming is never an option here. Whether a stage cools or warms is worked out
  * from its temperature, so it is not a speed to choose.
  */
-export function ModeSelector({ state, scheduleMode, onScheduleChange, onLiveChange }: Props) {
+export function ModeSelector({
+  state,
+  scheduleMode,
+  usualMode,
+  onScheduleChange,
+  onKeep,
+  onLiveChange,
+}: Props) {
   const [scope, setScope] = useState<Scope>('now')
 
   const on = state.power === 'on'
@@ -86,6 +97,18 @@ export function ModeSelector({ state, scheduleMode, onScheduleChange, onLiveChan
         ))}
       </div>
 
+      {scope === 'schedule' && scheduleMode !== usualMode && (
+        <div className="pills">
+          <button
+            type="button"
+            className="pill pill--keep pill--wide"
+            onClick={() => onKeep(scheduleMode)}
+          >
+            &#10003; Save {MODE_LABEL[scheduleMode]} as my usual speed
+          </button>
+        </div>
+      )}
+
       <p className="footnote" style={{ marginTop: 12 }}>
         {note(scope, { on, warming, unknown: liveMode === null })}
       </p>
@@ -96,7 +119,7 @@ export function ModeSelector({ state, scheduleMode, onScheduleChange, onLiveChan
 /** Says what will happen before it happens, including when nothing will. */
 function note(scope: Scope, s: { on: boolean; warming: boolean; unknown: boolean }): string {
   if (scope === 'schedule') {
-    return 'Used by every cooling stage tonight. The unit is not changed now. Quiet is the slowest and the least noisy, which matters next to a bed.'
+    return 'Used by every cooling stage tonight, and only tonight. The unit is not changed now, and your usual speed is untouched. Quiet is the slowest and the least noisy, which matters next to a bed.'
   }
   if (!s.on) return 'The unit is off. Only the power button responds.'
   if (s.warming) {

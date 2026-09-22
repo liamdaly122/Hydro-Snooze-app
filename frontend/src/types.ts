@@ -354,6 +354,8 @@ export interface TonightState {
   skip: boolean
   stages_changed: boolean
   times_changed: boolean
+  /** Tonight has its own cooling speed. The usual one is on the schedule. */
+  speed_changed: boolean
   nudge_c: number
   nudge_until: string | null
 }
