@@ -26,6 +26,8 @@ sharpest edge in the original design, and dropping their scheduler removes it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from .adapters.base import PowerMonitor, Transmitter
 from .clock import Clock
 from .config import Settings
@@ -67,6 +69,17 @@ class Commands:
         self.clock = clock
         self.settings = settings
         self.events = events
+        #: Told whenever a sequence does something: a press, a poll of the plug.
+        #: The service uses it to tell a long command from a stuck loop. A
+        #: switch-off that escalates to restarting the board runs for over four
+        #: minutes, polling every few seconds throughout, and the watchdog used
+        #: to count that as three minutes without a tick and kill the process
+        #: in the middle of it.
+        self.on_progress: Callable[[], None] | None = None
+
+    def _progress(self) -> None:
+        if self.on_progress is not None:
+            self.on_progress()
 
     # --- Building blocks ------------------------------------------------------
 
@@ -84,6 +97,7 @@ class Commands:
         the same stage every second until morning.
         """
         before = self.clock.now()
+        self._progress()
         try:
             await self.tx.press(button, note)
         except CommandFailed:
@@ -94,6 +108,40 @@ class Commands:
         if wait:
             await self.clock.sleep(wait)
         return (self.clock.now() - before).total_seconds()
+
+    async def _read_before_pressing(self, want: str) -> float:
+        """What the plug reads, before a press of power, or a refusal to press.
+
+        Power is a toggle. Pressing it without knowing which way the unit is
+        facing is a coin toss, and the switch-off used to toss it: press, then
+        two minutes polling a plug that never answered, a failure, a retry five
+        minutes later and another press. Reproduced in review, the unit went
+        off, on, off, on, off across one morning's window and ended wherever the
+        window happened to close.
+
+        `_run_stage` has refused to press power blind since it was written. This
+        brings the two sequences that exist to press power into line with it.
+
+        Not pressing is only safe because the caller retries. The first attempt
+        after the plug answers again reads the real state and does the job, and
+        the Shelly's own daily schedule is the backstop behind that.
+
+        A few tries first, the same tolerance `_confirm` has: a plug behind a
+        bed drops the odd read, and a switch-off delayed five minutes for one
+        dropped packet is a poor trade.
+        """
+        for attempt in range(3):
+            watts = await self.power.read_watts()
+            self._progress()
+            if watts is not None:
+                return watts
+            if attempt < 2:
+                await self.clock.sleep(float(self.settings.power_poll_s))
+        raise CommandFailed(
+            f"Plug unreachable, so whether the unit is on is unknown. Not pressing "
+            f"power to switch it {want}: it is a toggle, and a press without knowing "
+            "the starting state is as likely to do the opposite"
+        )
 
     def _banner(self, text: str) -> None:
         banner = getattr(self.tx, "banner", None)
@@ -172,8 +220,8 @@ class Commands:
         lit display, which switches it straight back off.
         """
         self._banner("power_on()")
-        watts = await self.power.read_watts()
-        if watts is not None and watts >= self.settings.off_threshold_w:
+        watts = await self._read_before_pressing("on")
+        if watts >= self.settings.off_threshold_w:
             self.events.info("power", f"Already on, plug reads {watts:.1f} W")
             return
 
@@ -231,8 +279,8 @@ class Commands:
         So: as few presses as the unit needs, and then real patience.
         """
         self._banner("power_off()")
-        watts = await self.power.read_watts()
-        if watts is not None and watts < self.settings.off_threshold_w:
+        watts = await self._read_before_pressing("off")
+        if watts < self.settings.off_threshold_w:
             self.events.info("power", f"Already off, plug reads {watts:.1f} W")
             return
 
@@ -334,6 +382,7 @@ class Commands:
         heard = False
         while True:
             watts = await self.power.read_watts()
+            self._progress()
             if watts is not None:
                 heard = True
                 reads_off = watts < self.settings.off_threshold_w

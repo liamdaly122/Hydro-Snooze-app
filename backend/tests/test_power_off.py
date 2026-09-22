@@ -296,3 +296,133 @@ async def test_the_fake_plug_is_only_slow_when_it_has_a_clock(rig):
     """So a test that wants the old instant plug can still have one."""
     instant = FakePowerMonitor(rig.unit)
     assert instant.lag_s == 0.0
+
+
+# --- A plug that cannot be asked -----------------------------------------------
+#
+# Found in review on 22 September. Power is a toggle, and the switch-off used to
+# press it before finding out whether the plug could confirm anything. With the
+# plug unreachable, that press was followed by two minutes of polling, a
+# failure, a retry five minutes later, and another press. Simulated: the unit
+# went off, on, off, on, off at 06:30, 06:37, 06:44, 06:51 and 06:58, ending
+# wherever the two hour window happened to run out.
+#
+# _run_stage has refused to press power blind since the start, for exactly this
+# reason. The switch-off, where a spare press costs the most, did not.
+
+
+async def test_an_unreachable_plug_gets_no_press_at_all(service):
+    unit = running(service)
+    service.power.offline = True
+
+    with pytest.raises(CommandFailed, match="unreachable"):
+        await service.commands.power_off()
+
+    assert service.transmitter.count(Button.POWER) == 0
+    assert unit.powered, "left exactly as it was"
+
+
+async def test_the_retries_do_not_flip_the_unit_back_and_forth(service):
+    """The scheduler's view: the whole two hour window of retries."""
+    unit = running(service)
+    service.power.offline = True
+    plan = service.schedule.plan_for(NOW.date())
+
+    for _ in range(6):
+        assert await service._run_power_off(plan) is False
+        service.clock.advance(timedelta(minutes=5))
+
+    assert service.transmitter.count(Button.POWER) == 0
+    assert unit.powered
+
+
+async def test_it_switches_off_as_soon_as_the_plug_comes_back(service):
+    """Not pressing blind is only safe because the retry is still running. The
+    first attempt after the plug answers again does the job."""
+    unit = running(service)
+    service.power.offline = True
+    plan = service.schedule.plan_for(NOW.date())
+
+    assert await service._run_power_off(plan) is False
+    service.clock.advance(timedelta(minutes=5))
+
+    service.power.offline = False
+    assert await service._run_power_off(plan) is True
+    assert not unit.powered
+    assert service.transmitter.count(Button.POWER) == 1
+
+
+async def test_pre_conditioning_does_not_press_blind_either(service):
+    """power_on is the same toggle and was the same shape: a precool retrying
+    every few minutes until bedtime, flipping the unit each time."""
+    service.unit.powered = False
+    service.power.offline = True
+
+    with pytest.raises(CommandFailed, match="unreachable"):
+        await service.commands.power_on()
+
+    assert service.transmitter.count(Button.POWER) == 0
+    assert not service.unit.powered
+
+
+async def test_one_dropped_read_before_pressing_is_not_a_reason_to_give_up(service):
+    """The same tolerance _confirm already has. A plug behind a bed drops the odd
+    read, and a switch-off delayed five minutes for one dropped packet would be
+    a strange thing to trade for safety."""
+    unit = running(service)
+    real = service.power.read_watts
+    reads = {"n": 0}
+
+    async def first_one_dropped():
+        reads["n"] += 1
+        return None if reads["n"] == 1 else await real()
+
+    service.power.read_watts = first_one_dropped
+    await service.commands.power_off()
+    assert not unit.powered
+
+
+# --- Long, and legitimately so --------------------------------------------------
+#
+# Also from review. The escalation that restarts a wedged board is two patient
+# switch-off attempts with a restart between them, which is over four minutes
+# inside one scheduler tick. The watchdog counts three minutes without a
+# completed tick as stuck, stops pinging systemd, and WatchdogSec=90 kills the
+# process in the middle of the second attempt. After the restart the counters
+# are back at zero, so the escalation can never finish, and every restart sends
+# another press.
+#
+# Stuck means not making progress. A switch-off polling a plug every five
+# seconds is making progress, and says so now.
+
+
+async def test_a_long_switch_off_never_looks_stuck(service):
+    from hydrosnooze.service import STUCK_AFTER
+
+    unit = running(service)
+    unit.deaf = True
+    stub = Wedged(unit, cured_by_reboot=True)
+    service.transmitter.reboot = stub.reboot
+    plan = service.schedule.plan_for(NOW.date())
+    service._last_tick_at = service.clock.now()
+
+    # First attempt fails patiently, second escalates to the reboot path.
+    assert await service._run_power_off(plan) is False
+    service.clock.advance(timedelta(minutes=5))
+    service._last_tick_at = service.clock.now()
+
+    worst = timedelta(0)
+    real_sleep = service.clock.sleep
+
+    async def watching(seconds):
+        nonlocal worst
+        await real_sleep(seconds)
+        worst = max(worst, service.clock.now() - service._alive_at())
+
+    service.clock.sleep = watching
+    started = service.clock.now()
+    assert await service._run_power_off(plan) is True
+
+    assert stub.reboots == 1
+    assert service.clock.now() - started > STUCK_AFTER, "the case this is about"
+    assert worst < STUCK_AFTER, f"looked stuck for {worst}"

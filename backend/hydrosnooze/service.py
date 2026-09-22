@@ -310,6 +310,7 @@ class Service:
         self.events = EventLog(self.clock)
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
+        self.commands.on_progress = self._note_progress
         self.scheduler = Scheduler(learned_lead=self._learned_lead, bed_now=self._bed_now)
         # Read back what already ran tonight before anything can ask. A restart is
         # a routine event now: systemd brings the service back after a crash and
@@ -357,6 +358,13 @@ class Service:
         # only while this keeps moving, so a loop that is running but stuck stops
         # the pings and gets restarted, which Restart=always would never do.
         self._last_tick_at: datetime | None = None
+        #: When a command last did something: a press, a poll of the plug. Kept
+        #: apart from the tick because a tick can legitimately be long. The
+        #: switch-off that restarts a wedged board is two patient attempts with
+        #: a restart between, over four minutes in one tick, and it used to trip
+        #: the three minute stuck check and get the process killed halfway. Stuck
+        #: means not making progress, and that is not the same as taking a while.
+        self._last_progress_at: datetime | None = None
 
         self._retrying: str | None = None
         self._retry_after: datetime | None = None
@@ -615,6 +623,20 @@ class Service:
                 )
         self._push_state()
 
+    def _note_progress(self) -> None:
+        self._last_progress_at = self.clock.now()
+
+    def _alive_at(self) -> datetime | None:
+        """The last moment anything showed this process was doing its job.
+
+        A completed tick, or a command part way through one. Either proves the
+        loop is not the one that spun for four hours getting nowhere, which is
+        the only thing the watchdog exists to catch. Commands are bounded by
+        their own timeouts, so this cannot hide a loop that never ends.
+        """
+        marks = [t for t in (self._last_tick_at, self._last_progress_at) if t is not None]
+        return max(marks) if marks else None
+
     async def _watchdog_loop(self, every: float) -> None:
         """Tell systemd we are alive, but only while the scheduler is ticking.
 
@@ -623,7 +645,7 @@ class Service:
         """
         while True:
             await self.clock.sleep(every)
-            last = self._last_tick_at
+            last = self._alive_at()
             stuck = last is not None and (self.clock.now() - last) > STUCK_AFTER
             if stuck:
                 log.error("no scheduler tick since %s, letting the watchdog fire", last)
@@ -638,7 +660,7 @@ class Service:
         should look dead from outside, because for the purposes of a night it is.
         """
         while True:
-            last = self._last_tick_at
+            last = self._alive_at()
             ticking = last is not None and (self.clock.now() - last) <= STUCK_AFTER
             if ticking:
                 await self.heartbeat.ping()
@@ -1877,6 +1899,7 @@ class Service:
             )
 
         self._rebooted_for = plan.wake_at
+        self._note_progress()
         try:
             await self.transmitter.reboot()
         except Exception as exc:  # noqa: BLE001
@@ -1885,6 +1908,7 @@ class Service:
             ) from exc
 
         await self.clock.sleep(REBOOT_SECONDS)
+        self._note_progress()
         await self.commands.power_off()
 
     async def _apply(self, mode: Mode, target_c: int) -> int:
@@ -1968,7 +1992,9 @@ class Service:
 
         # It reboots and rejoins the Wi-Fi in a few seconds. Waiting here rather
         # than failing immediately, because the whole point is the retry.
+        self._note_progress()
         await self.clock.sleep(REBOOT_SECONDS)
+        self._note_progress()
         await what()
 
     async def power_on(self) -> None:
