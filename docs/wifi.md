@@ -16,6 +16,36 @@ takes more than four hours to arrive.
 
 ---
 
+## What the boards actually saw, 22 September
+
+The XIAO's first boot scanned before it connected, and printed the thing nobody
+had been able to measure:
+
+```
+Found networks:
+ - 'VM1876778'     (60:8D:26:E3:D2:06)  Ch:11  -50dB  P:10
+ - 'VM1876778_EXT' (18:69:45:02:E7:24)  Ch:11  -61dB  P:0
+Connecting to 'VM1876778' (priority 10, attempt 1/2)
+```
+
+**The hub is eleven decibels stronger than the booster.** Everything in this
+project has been sitting on a repeater that was quieter than the thing it was
+repeating, for weeks, on the assumption that the hub was too far away. It was
+not. Nobody measured it.
+
+Eleven dB is not a rounding error. It is roughly an order of magnitude in
+received power.
+
+**And both are on channel 11.** A repeater sharing a channel with its host has
+to receive and retransmit on one radio, which halves throughput on its own, and
+every transmission from one is interference to the other. Two access points in
+one room on one channel is a configuration nothing wants.
+
+That is an observation rather than a diagnosis of the four hourly drops. It is
+enough on its own to move everything off the booster.
+
+---
+
 ## What the configuration does now
 
 Both boards list **two networks** rather than one, with the hub preferred:
