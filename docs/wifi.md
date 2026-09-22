@@ -41,8 +41,42 @@ to receive and retransmit on one radio, which halves throughput on its own, and
 every transmission from one is interference to the other. Two access points in
 one room on one channel is a configuration nothing wants.
 
-That is an observation rather than a diagnosis of the four hourly drops. It is
-enough on its own to move everything off the booster.
+That is an observation rather than a diagnosis of the four hourly drops.
+
+### And then the plug said the opposite
+
+Moving the plug to the hub, and asking it the same question:
+
+```
+booster  ssid VM1876778_EXT   rssi -17
+hub      ssid VM1876778       rssi -86
+```
+
+**Sixty nine decibels worse.** The plug is in a wall socket behind the bed, low
+down and shadowed by the unit itself; the probe board is higher and in the
+clear. Two devices, one room, and the hub is eleven dB better for one of them
+and sixty nine dB worse for the other.
+
+So "move everything onto the hub" was wrong, and I said it an hour before this
+measurement existed. **It is a per-device question, not a per-room one**, and
+the only way to answer it is to ask each device from where it actually lives.
+
+Which is easy, because both boards print it at boot before they connect:
+
+```
+Found networks:
+ - 'VM1876778'     Ch:11  -50dB  P:10
+ - 'VM1876778_EXT' Ch:11  -61dB  P:0
+```
+
+That line gives both numbers from that board's own position. Flash, read it,
+and only then decide which `priority` belongs where. A board forced onto the
+hub at -86 by a priority is worse off than it was on the booster, and the
+priority will win regardless of signal, which is the whole point of it.
+
+The plug went back on the booster as its first network, with the hub kept as
+its second so it has somewhere to go when the booster does its four hourly
+thing.
 
 ---
 
