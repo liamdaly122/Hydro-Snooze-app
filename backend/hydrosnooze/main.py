@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import dev, routes
-from .api.schemas import health_json, schedule_json, state_json
+from .api.schemas import health_json, state_json
 from .config import get_settings
 from .service import Service
 
@@ -145,17 +145,30 @@ async def live(websocket: WebSocket) -> None:
         await websocket.send_json(
             {
                 "state": state_json(service.state),
-                "schedule": schedule_json(service.schedule),
+                # As measured, not the bare schedule. The bare one worked the
+                # head start out from an assumed 20C bed, and it arrived straight
+                # after the HTTP endpoint had sent the measured one, so every
+                # reconnect put the wrong pre-heat time back on the screen.
+                "schedule": service.schedule_as_shown(),
                 "health": health_json(service.health()),
             }
         )
-        while True:
+        # Until the service lets this subscriber go. A phone that stops reading
+        # fills its queue and is dropped, and this used to carry on waiting on
+        # that queue and pinging every twenty five seconds: an open connection,
+        # a device bar saying Connected, and a screen that never changed again.
+        # Closing is what makes the app reconnect and backfill, which it already
+        # knows how to do. Checked before every send, so a backlog that has
+        # already been given up on is not delivered first.
+        while service.still_subscribed(queue):
             try:
                 payload = await asyncio.wait_for(queue.get(), timeout=25)
             except asyncio.TimeoutError:
                 # Keep the connection alive through a phone's idle timeouts.
                 await websocket.send_json({"ping": True})
                 continue
+            if not service.still_subscribed(queue):
+                break
             await websocket.send_json(payload)
     except WebSocketDisconnect:
         pass

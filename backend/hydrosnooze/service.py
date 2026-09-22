@@ -757,6 +757,14 @@ class Service:
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
 
+    def still_subscribed(self, queue: asyncio.Queue[dict[str, Any]]) -> bool:
+        """False once this subscriber fell too far behind and was let go.
+
+        The socket handler asks, so it can close rather than keep a phone on a
+        connection that will never carry another update. See main.live.
+        """
+        return queue in self._subscribers
+
     def _broadcast(self, payload: dict[str, Any]) -> None:
         for queue in list(self._subscribers):
             try:
@@ -793,11 +801,21 @@ class Service:
         the assumptions on screen while the scheduler quietly ran on the real
         numbers, which is the one kind of disagreement this project cannot have.
         """
+        return self._shown(self.schedule)
+
+    def tonight_as_shown(self) -> dict[str, Any]:
+        """The same, for tonight as it is actually being run.
+
+        /api/tonight drew `running` from the bare schedule, so the Alarm card's
+        pre-heat time was the assumed one while the scheduler used the measured
+        one, which is the disagreement `schedule_as_shown` exists to prevent.
+        """
+        return self._shown(self.tonight_now())
+
+    def _shown(self, schedule: Schedule) -> dict[str, Any]:
         from .api.schemas import schedule_json
 
-        return schedule_json(
-            self.schedule, bed_c=self.probes.bed_c, learned=self._learned_lead
-        )
+        return schedule_json(schedule, bed_c=self.probes.bed_c, learned=self._learned_lead)
 
     # --- Loops ----------------------------------------------------------------
 

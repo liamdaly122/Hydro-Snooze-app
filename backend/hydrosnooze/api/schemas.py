@@ -213,7 +213,9 @@ def autopilot_json(night) -> dict[str, object]:
     }
 
 
-def tonight_json(schedule, tonight, phase: str = "none") -> dict[str, object]:
+def tonight_json(
+    schedule, tonight, phase: str = "none", *, running: dict[str, Any] | None = None
+) -> dict[str, object]:
     """What is different about this one night, and what it adds up to.
 
     `running` is the whole point: the schedule as tonight is actually being run,
@@ -223,7 +225,10 @@ def tonight_json(schedule, tonight, phase: str = "none") -> dict[str, object]:
     """
     return {
         "phase": phase,
-        "running": schedule_json(schedule),
+        # The measured version when the caller has one, which the service
+        # always does. The bare fallback is for anything with no service behind
+        # it, which can only honestly show the assumptions.
+        "running": running if running is not None else schedule_json(schedule),
         "changed": tonight is not None and tonight.anything_to_say(),
         "skip": bool(tonight and tonight.skip),
         "stages_changed": bool(tonight and tonight.stages is not None),

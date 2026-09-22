@@ -180,7 +180,10 @@ def _tonight(service: Service) -> dict[str, object]:
     # tonight_state rather than scheduler.tonight: the second is whatever was last
     # read off disk, and a row for a night that is over is spent.
     return tonight_json(
-        service.tonight_now(), service.tonight_state(), service.tonight_phase()
+        service.tonight_now(),
+        service.tonight_state(),
+        service.tonight_phase(),
+        running=service.tonight_as_shown(),
     )
 
 
