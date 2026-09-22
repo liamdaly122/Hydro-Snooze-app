@@ -188,6 +188,7 @@ def autopilot_json(night) -> dict[str, object]:
             "landed": night.stages_landed,
             "total": night.stages_total,
             "missed": night.missed,
+            "cancelled": night.cancelled,
         },
         "on_target": night.on_target,
         "from_record": night.from_record,

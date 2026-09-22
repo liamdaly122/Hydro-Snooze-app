@@ -76,10 +76,41 @@ def _bed(samples: list[Sample]) -> list[float]:
     return [s.return_c for s in samples if s.return_c is not None]
 
 
-def _stages_landed(plan: NightPlan, fired: set[str]) -> tuple[int, list[str]]:
-    """How many stages ran, and the names of any that did not."""
-    missed = [s.label for s in plan.steps if f"stage:{s.stage.value}" not in fired]
-    return len(plan.steps) - len(missed), missed
+def _stages_landed(
+    plan: NightPlan, fired: set[str], cancelled: set[str] = frozenset()
+) -> tuple[int, list[str], list[str]]:
+    """How many stages ran, which failed, and which were called off.
+
+    Three, not two. A stage cancelled by switching automation off is not a
+    failure and was counted as one: the night it was asked for read as a night
+    that went wrong.
+    """
+    ran, missed, off = 0, [], []
+    for step in plan.steps:
+        key = f"stage:{step.stage.value}"
+        if key in fired:
+            ran += 1
+        elif key in cancelled:
+            off.append(step.label)
+        else:
+            missed.append(step.label)
+    return ran, missed, off
+
+
+def stages_line(
+    plan: NightPlan, fired: set[str], cancelled: set[str] = frozenset()
+) -> tuple[str, Level]:
+    """The first line of the report, and whether it is worth a warning."""
+    landed, missed, off = _stages_landed(plan, fired, cancelled)
+    total = len(plan.steps)
+    if not missed and not off:
+        return f"All {total} stages landed.", "info"
+    parts = [f"{landed} of {total} stages landed."]
+    if missed:
+        parts.append(f"Missed: {', '.join(missed)}.")
+    if off:
+        parts.append(f"Cancelled, as asked: {', '.join(off)}.")
+    return " ".join(parts), ("warning" if missed else "info")
 
 
 def _how_the_bed_did(plan: NightPlan, samples: list[Sample]) -> str | None:
@@ -142,6 +173,8 @@ def build(
     events: list[Event],
     fired: set[str],
     pre=None,
+    *,
+    cancelled: set[str] = frozenset(),
 ) -> Report:
     """The whole night in four or five lines.
 
@@ -149,8 +182,7 @@ def build(
     this night or None. Everything else is read out of what was recorded while it
     happened.
     """
-    landed, missed = _stages_landed(plan, fired)
-    total = len(plan.steps)
+    first, stages_level = stages_line(plan, fired, cancelled)
     bad = [e for e in events if e.level in ("warning", "error")]
     # Deliberately not "mode". That kind covers every set_mode there is: stage
     # boundaries, getting the bed ready, anything pressed by hand. Only the
@@ -159,12 +191,7 @@ def build(
 
     lines: list[str] = []
 
-    if missed:
-        lines.append(
-            f"{landed} of {total} stages landed. Missed: {', '.join(missed)}."
-        )
-    else:
-        lines.append(f"All {total} stages landed.")
+    lines.append(first)
 
     for maybe in (_how_it_got_ready(pre), _how_the_bed_did(plan, samples)):
         if maybe:
@@ -180,7 +207,7 @@ def build(
     if bad:
         lines.append(f"{_things(len(bad))} worth a look. First: {bad[0].message}")
 
-    level: Level = "warning" if (missed or bad) else "info"
+    level: Level = "warning" if (stages_level == "warning" or bad) else "info"
     # Named for the screen it belongs to. The push is the trailer and Autopilot
     # is the film: four lines on a lock screen, and the whole night a tap away.
     title = "Autopilot: last night" if level == "info" else "Autopilot: last night, with notes"

@@ -182,6 +182,9 @@ class Night:
     stages_landed: int
     stages_total: int
     missed: list[str]
+    #: Stages called off by switching automation off or skipping mid-night.
+    #: Kept apart from missed, which means something failed.
+    cancelled: list[str]
     energy_kwh: float
     on_target: int | None
     #: Whether the score above came from what the app wrote down at the time. A
@@ -400,9 +403,19 @@ def build(
     events: list[Event],
     fired: set[str],
     ready: PreconditionRow | None = None,
+    *,
+    cancelled: set[str] = frozenset(),
 ) -> Night:
     """One night, as the app draws it. Reads what was recorded; decides nothing."""
-    missed = [s.label for s in plan.steps if f"stage:{s.stage.value}" not in fired]
+    landed = [s for s in plan.steps if f"stage:{s.stage.value}" in fired]
+    called_off = [
+        s.label for s in plan.steps
+        if f"stage:{s.stage.value}" in cancelled and f"stage:{s.stage.value}" not in fired
+    ]
+    missed = [
+        s.label for s in plan.steps
+        if f"stage:{s.stage.value}" not in fired and s.label not in called_off
+    ]
     track = _track(plan, samples)
     bed = [s.return_c for s in samples if s.return_c is not None]
     # Only the night itself. Before the first stage opens, the bed is on its way
@@ -420,9 +433,10 @@ def build(
         track=track,
         bands=_bands(plan),
         boosts=_boosts(plan, samples, ready),
-        stages_landed=len(plan.steps) - len(missed),
+        stages_landed=len(landed),
         stages_total=len(plan.steps),
         missed=missed,
+        cancelled=called_off,
         energy_kwh=_energy(samples),
         # The share of the night the bed was where it was asked to be. The
         # headline count says how often Autopilot acted; this says whether it

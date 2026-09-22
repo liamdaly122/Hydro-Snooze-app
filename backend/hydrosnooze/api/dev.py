@@ -66,7 +66,9 @@ async def post_reset(request: Request) -> dict[str, object]:
     unit.wizard_phase = None
     unit.display_awake_until = None
     unit.adjusting = False
-    service.scheduler.fired = type(service.scheduler.fired)()
+    # In place: a replacement object has no store, and every mark after it
+    # would be held in memory and never written down.
+    service.scheduler.fired.clear()
     service.events.info("sim", "Simulated unit reset")
     snapshot = service.sim_snapshot()
     assert snapshot is not None

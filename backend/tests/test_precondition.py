@@ -489,8 +489,19 @@ async def test_editing_mid_night_does_not_report_finished_stages_as_missed(servi
     assert [j.step.stage for j in missed if j.step] == [], "nothing in the past is missed"
 
 
-def test_moving_the_wake_time_invalidates_the_marks_by_itself(service):
-    """Which is why clearing them was never needed: they are keyed by wake time."""
+def test_moving_the_wake_time_does_not_orphan_what_already_ran(service):
+    """This used to assert the opposite, and that was the bug.
+
+    It said marks keyed by wake time were why clearing them on an edit was never
+    needed: move the wake time and the old marks simply stopped matching. That is
+    the same thing as the test above forbids, arriving by a different door. Move
+    the wake time at 2am, or tap Sleep in, and every stage that had already run
+    stopped matching and was reported missed at error level. Edit the routine the
+    morning after and the switch-off and the morning report both ran twice.
+
+    Marks are keyed by the night's wake date since 22 September. A night is the
+    same night however its edges move.
+    """
     service.schedule = _schedule()
     plan = service.schedule.plan_for(datetime(2026, 9, 8).date())
     job = Job("stage", plan, plan.steps[0])
@@ -499,7 +510,8 @@ def test_moving_the_wake_time_invalidates_the_marks_by_itself(service):
 
     service.update_schedule({"wake_time": time(7, 30)})
     moved = service.schedule.plan_for(datetime(2026, 9, 8).date())
-    assert not service.scheduler.fired.has_fired(Job("stage", moved, moved.steps[0]))
+    assert moved.wake_at != plan.wake_at, "the case this is about"
+    assert service.scheduler.fired.has_fired(Job("stage", moved, moved.steps[0]))
 
 
 @pytest.mark.asyncio

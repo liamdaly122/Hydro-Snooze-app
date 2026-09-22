@@ -316,8 +316,8 @@ class Service:
         # a routine event now: systemd brings the service back after a crash and
         # the watchdog brings it back after a stall, so losing this in memory
         # meant a good night reporting itself as a failed one afterwards.
-        self.scheduler.fired.done = self.db.fired_marks()
         self.scheduler.fired.store = self.db.set_fired_marks
+        self.scheduler.fired.load(self.db.fired_marks())
         self.probes = Probes(
             self.clock,
             settings.probes_host,
@@ -884,6 +884,21 @@ class Service:
                 f"The bed stayed where it was instead of going to {job.step.temp_c}C.",
             )
 
+        # Called off rather than missed. Somebody switched automation off or
+        # skipped tonight part way through, so this is what they asked for, and
+        # it is said at info level: an error here rang the phone at 3am about a
+        # decision made at 2am. Marked so it is said once, and marked as its own
+        # kind so the morning report does not count it with the failures.
+        for job in self.scheduler.cancelled(self.schedule, now):
+            self.scheduler.fired.mark(job, cancelled=True)
+            assert job.step is not None
+            why = "automation is off" if not self.schedule.enabled else "tonight was skipped"
+            self.events.info(
+                "stage",
+                f"The {job.step.label} stage at {job.step.starts_at:%H:%M} was not run, "
+                f"because {why}. The unit still switches off at the usual time.",
+            )
+
         job = self.scheduler.due(self.schedule, now)
         if job is None:
             return
@@ -1096,11 +1111,13 @@ class Service:
             total_seconds=seconds,
             bed_c=self._bed_now(),
         )
-        # A fresh set of marks, so a second rehearsal is not skipped as one that
-        # has already fired. This drops the real night's marks too, which is
-        # harmless: every job is idempotent, so the worst case is a stage being
-        # set to a temperature it is already holding.
-        self.scheduler.fired.clear()
+        # No clearing. A rehearsal is its own night in the marks, named by its
+        # exact wake time, so a second one never finds the first's and neither
+        # touches the real night's. Clearing used to be how a second rehearsal
+        # avoided being skipped, and the comment here called dropping the real
+        # night's marks harmless. It was not: a rehearsal at 07:00, inside the
+        # switch-off window, came back to four missed stages at error level, a
+        # second morning report, and a second switch-off.
         self.scheduler.rehearsal = plan
         self._set_state(rehearsal_ends_at=plan.wake_at)
 
@@ -1122,7 +1139,6 @@ class Service:
         if self.scheduler.rehearsal is None:
             return
         self.scheduler.rehearsal = None
-        self.scheduler.fired.clear()
         self._set_state(rehearsal_ends_at=None, current_stage=None)
         self.events.info("rehearsal", "Rehearsal stopped.")
         if power_off:
@@ -1764,6 +1780,7 @@ class Service:
             self.db.events_between(start, end),
             self.scheduler.fired.keys_for(plan),
             self.db.precondition_since(start),
+            cancelled=self.scheduler.fired.cancelled_for(plan),
         )
 
     def _send_report(self, plan: NightPlan) -> bool:
@@ -1782,6 +1799,7 @@ class Service:
                 self.db.events_between(start, end),
                 self.scheduler.fired.keys_for(plan),
                 self.db.precondition_since(start),
+                cancelled=self.scheduler.fired.cancelled_for(plan),
             )
         except Exception:  # noqa: BLE001
             log.exception("could not build the morning report")
@@ -2540,8 +2558,10 @@ class Service:
         if isinstance(self.clock, (SimClock, VirtualClock)):
             self.clock.jump_to(target)
             # A jump lands in a different night, so nothing that fired before
-            # should count as fired now.
-            self.scheduler.fired = type(self.scheduler.fired)()
+            # should count as fired now. Cleared in place rather than replaced:
+            # a new object has no store, so every mark after the first jump was
+            # held in memory and never written down.
+            self.scheduler.fired.clear()
             self.events.info("sim", f"Jumped the clock to {target:%a %d %b %H:%M}")
 
     def sim_set_speed(self, speed: float) -> None:

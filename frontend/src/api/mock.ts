@@ -742,7 +742,7 @@ function seedNight(): AutopilotNight {
       { key: 'rem', label: 'Increased REM sleep', percent: 27, for_fun: true },
       { key: 'ready', label: 'Fell asleep faster', percent: 6, for_fun: true },
     ],
-    stages: { landed: 3, total: 3, missed: [] },
+    stages: { landed: 3, total: 3, missed: [], cancelled: [] },
     on_target: Math.round((100 * off.filter((o) => o <= 0.5).length) / off.length),
     // Seed data is written as though the app had always recorded its target.
     from_record: true,

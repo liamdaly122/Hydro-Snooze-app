@@ -683,6 +683,10 @@ class NightPlan:
     bedtime_at: datetime
     wake_at: datetime
     steps: tuple[StageStep, ...]
+    #: A compressed test run rather than a night anybody sleeps through. Carried
+    #: on the plan so the marks can keep the two apart without either having to
+    #: wipe the other: see FiredMarks.night.
+    rehearsal: bool = False
 
     @property
     def starts_at(self) -> datetime:
@@ -914,6 +918,7 @@ def rehearsal_plan(
         bedtime_at=bedtime_at,
         wake_at=cursor,
         steps=tuple(steps),
+        rehearsal=True,
     )
 
 

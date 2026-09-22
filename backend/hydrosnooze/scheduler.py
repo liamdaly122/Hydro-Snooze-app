@@ -76,9 +76,10 @@ class Job:
 class FiredMarks:
     """Which jobs have already run, keyed by the night they belonged to.
 
-    Keyed by wake time rather than a flag, so a second night is never confused
-    with the first: a mark left over from yesterday does not match tonight's plan
-    and is quietly ignored.
+    Keyed by night rather than a flag, so a second night is never confused with
+    the first. Until 22 September each job kept one mark, stamped with an exact
+    wake time, so tonight's overwrote last night's and a changed wake time
+    orphaned everything already done. See `night` for what a night is now.
 
     Written through to storage as well as held in memory, which it was not until
     9 September. That was harmless while a restart was an unusual event. It
@@ -108,40 +109,136 @@ class FiredMarks:
     #: and it said the night was perfect.
     GAVE_UP = "missed:"
 
-    def mark(self, job: Job, *, ran: bool = True) -> None:
-        self.done[(job.key if ran else self.GAVE_UP + job.key)] = job.plan.wake_at
+    #: Prefix on a stage that was not run because the night was being wound up:
+    #: automation switched off, or tonight skipped, part way through. Different
+    #: from missed and it has to stay different. Missed means something failed
+    #: and is an error at 3am; cancelled means somebody asked for exactly this.
+    CANCELLED = "cancelled:"
+
+    #: Between the night and the job in a key.
+    SEP = "|"
+    REHEARSAL = "rehearsal@"
+
+    #: How many nights to remember. Two, because the morning report and
+    #: Autopilot describe last night while tonight is already marking, and one
+    #: used to be the whole problem: tonight's first stage overwrote last
+    #: night's, and a perfect night read as missed from 22:30 the next evening.
+    #: Not more, because this table lives on an SD card.
+    NIGHTS_KEPT = 2
+    REHEARSALS_KEPT = 1
+
+    @classmethod
+    def night(cls, plan: NightPlan) -> str:
+        """What a night is called, for the purpose of remembering it.
+
+        The wake date, not the wake time. Sleep in moves the wake time by a
+        quarter of an hour and the night is the same night; keyed on the exact
+        time, every stage that had already run stopped matching, and at 3am
+        Drift and Deep were reported missed and pushed to the phone.
+
+        A rehearsal is named by its exact wake time instead, because two of them
+        can happen on one date and the second must not find the first's marks.
+        Which is what clearing every mark used to be for, and clearing every
+        mark also cleared the real night's.
+        """
+        if plan.rehearsal:
+            return f"{cls.REHEARSAL}{plan.wake_at.isoformat()}"
+        return plan.wake_at.date().isoformat()
+
+    def _key(self, job: Job, prefix: str = "") -> str:
+        return f"{self.night(job.plan)}{self.SEP}{prefix}{job.key}"
+
+    def load(self, marks: dict[str, datetime]) -> None:
+        """Read marks back from storage, including any written the old way.
+
+        Before 22 September a key was just the job, stamped with its wake time.
+        Those are the night of their wake date, which is what they meant.
+        """
+        migrated = False
+        self.done = {}
+        for key, at in marks.items():
+            if self.SEP not in key:
+                key = f"{at.date().isoformat()}{self.SEP}{key}"
+                migrated = True
+            self.done[key] = at
+        if migrated:
+            self._prune()
+            self._save()
+
+    def mark(self, job: Job, *, ran: bool = True, cancelled: bool = False) -> None:
+        prefix = self.CANCELLED if cancelled else ("" if ran else self.GAVE_UP)
+        self.done[self._key(job, prefix)] = job.plan.wake_at
+        self._prune()
         self._save()
 
     def gave_up_on(self, job: Job) -> bool:
-        return self.done.get(self.GAVE_UP + job.key) == job.plan.wake_at
+        return self._key(job, self.GAVE_UP) in self.done
 
     def has_fired(self, job: Job) -> bool:
-        """Whether this job is finished with, one way or the other.
+        """Whether this job is finished with, one way or another.
 
-        Both marks count. due() must not offer a stage again once it has been
-        given up on, or the tick would keep retrying a stage whose window closed
-        hours ago. What ran and what was abandoned are told apart by keys_for.
+        All three marks count. due() must not offer a stage again once it has
+        been given up on or cancelled, or the tick would keep retrying a stage
+        whose window closed hours ago. What ran, what was abandoned and what was
+        called off are told apart by keys_for and cancelled_for.
         """
-        return job.plan.wake_at in (
-            self.done.get(job.key),
-            self.done.get(self.GAVE_UP + job.key),
+        return any(
+            self._key(job, prefix) in self.done
+            for prefix in ("", self.GAVE_UP, self.CANCELLED)
         )
 
     def keys_for(self, plan: NightPlan) -> set[str]:
-        """Which jobs have already run for this particular night.
+        """Which jobs actually ran for this particular night."""
+        return self._outcomes(plan, "")
 
-        The marks outlive a night by design, so asking "what ran" without naming
-        the night would answer with yesterday's as well.
-        """
-        return {
-            key
-            for key, at in self.done.items()
-            if at == plan.wake_at and not key.startswith(self.GAVE_UP)
-        }
+    def cancelled_for(self, plan: NightPlan) -> set[str]:
+        """Which jobs were called off for this night rather than run or missed."""
+        return self._outcomes(plan, self.CANCELLED)
+
+    def _outcomes(self, plan: NightPlan, prefix: str) -> set[str]:
+        head = self.night(plan) + self.SEP
+        out: set[str] = set()
+        for key in self.done:
+            if not key.startswith(head):
+                continue
+            job = key[len(head):]
+            if prefix:
+                if job.startswith(prefix):
+                    out.add(job[len(prefix):])
+            elif not job.startswith((self.GAVE_UP, self.CANCELLED)):
+                out.add(job)
+        return out
 
     def clear(self) -> None:
+        """Forget everything. For the simulator, which jumps between nights.
+
+        Never for a rehearsal any more. A rehearsal is its own night now, and
+        clearing on its account took the real night's marks with it.
+        """
         self.done.clear()
         self._save()
+
+    def _prune(self) -> None:
+        """Keep the most recent nights and the most recent rehearsal, no more."""
+        latest: dict[str, datetime] = {}
+        for key, at in self.done.items():
+            night = key.split(self.SEP, 1)[0]
+            if night not in latest or at > latest[night]:
+                latest[night] = at
+        real = sorted(
+            (n for n in latest if not n.startswith(self.REHEARSAL)),
+            key=latest.__getitem__,
+            reverse=True,
+        )
+        tests = sorted(
+            (n for n in latest if n.startswith(self.REHEARSAL)),
+            key=latest.__getitem__,
+            reverse=True,
+        )
+        keep = set(real[: self.NIGHTS_KEPT]) | set(tests[: self.REHEARSALS_KEPT])
+        if len(keep) == len(latest):
+            return
+        self.done = {k: v for k, v in self.done.items() if k.split(self.SEP, 1)[0] in keep}
 
     def _save(self) -> None:
         """Never allowed to take the night down with it.
@@ -428,7 +525,23 @@ class Scheduler:
         Worth saying out loud. A missed stage means the bed spent that stretch of
         the night at the wrong temperature, and a missed power off means it is
         still running.
+
+        Not while the night is being wound up. due() stops offering stages then,
+        on purpose, and this used to report every one of them as missed as its
+        window closed: switch automation off at 2am and REM rang as an error at
+        3am. Those are `cancelled` below.
         """
+        if self.only_finishing(schedule, now):
+            return []
+        return self._closed_unfired(schedule, now)
+
+    def cancelled(self, schedule: Schedule, now: datetime) -> list[Job]:
+        """Stages whose window closed while the night was being wound up."""
+        if not self.only_finishing(schedule, now):
+            return []
+        return self._closed_unfired(schedule, now)
+
+    def _closed_unfired(self, schedule: Schedule, now: datetime) -> list[Job]:
         plan = self.plan_in_progress(schedule, now)
         if plan is None:
             return []
@@ -441,7 +554,17 @@ class Scheduler:
         return out
 
     def stage_now(self, schedule: Schedule, now: datetime) -> StageStep | None:
-        """Which stage the night is currently in, for the app to display."""
+        """Which stage the night is being run in, or None if none is.
+
+        None once the night is being wound up, and that is the whole of how the
+        sampling beat is kept from driving it. due() stopped offering stages
+        when automation was switched off, but the beat asked this, got REM back,
+        and set REM's temperature anyway. Everything that acts on the plan
+        between boundaries asks here first, so saying there is no stage running
+        stops all of it, which is also the honest answer for the app to show.
+        """
+        if self.only_finishing(schedule, now):
+            return None
         plan = self.plan_in_progress(schedule, now)
         if plan is None:
             return None

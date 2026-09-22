@@ -35,8 +35,8 @@ def scheduler_on(db_path: str) -> Scheduler:
     """A scheduler as the service builds one: marks read back from storage."""
     db = Database(db_path)
     sched = Scheduler()
-    sched.fired.done = db.fired_marks()
     sched.fired.store = db.set_fired_marks
+    sched.fired.load(db.fired_marks())
     return sched
 
 
@@ -103,8 +103,10 @@ def test_last_nights_marks_do_not_count_for_tonight(db_path):
 
 
 def test_clearing_clears_the_stored_copy_too(db_path):
-    """A rehearsal clears the marks. If that only cleared memory, the next
-    restart would bring them all back and skip the night."""
+    """The simulator clears the marks when it jumps between nights. If that
+    only cleared memory, the next restart would bring them all back. (Rehearsals
+    used to clear them too, and took the real night's with them; they no longer
+    need to.)"""
     schedule = Schedule()
     sched = scheduler_on(db_path)
     night = a_night(sched, schedule)
@@ -115,20 +117,26 @@ def test_clearing_clears_the_stored_copy_too(db_path):
 
 
 def test_the_table_never_grows(db_path):
-    """Five keys, one row each. Worth pinning: this database lives on an SD card
-    and an unbounded table would be a slow way to kill one."""
+    """Bounded, and worth pinning: this database lives on an SD card and an
+    unbounded table would be a slow way to kill one.
+
+    Two nights rather than one since 22 September. One night's worth was the
+    rule, and it was also the bug: tonight's first stage overwrote last
+    night's, so the morning report and Autopilot described a perfect night as
+    missed from 22:30 the following evening.
+    """
     schedule = Schedule()
     sched = scheduler_on(db_path)
-    for day in (5, 6, 7):
+    for day in range(1, 31):
         plan = sched.plan_in_progress(schedule, datetime(2026, 9, day, 23, 0))
         sched.fired.mark(Job("precool", plan))
         for step in plan.steps:
             sched.fired.mark(Job("stage", plan, step))
         sched.fired.mark(Job("power_off", plan))
 
-    # Pre-conditioning, one mark a stage, and the power off. One night's worth,
+    # Pre-conditioning, one mark a stage, and the power off. Two nights' worth,
     # however many nights went through the loop above.
-    most = 2 + len(STAGE_ORDER)
+    most = 2 * (2 + len(STAGE_ORDER))
     assert len(Database(db_path).fired_marks()) == len(sched.fired.done) <= most
 
 

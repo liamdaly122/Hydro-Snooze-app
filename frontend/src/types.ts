@@ -312,7 +312,9 @@ export interface AutopilotNight {
   track: AutopilotPoint[]
   bands: AutopilotBand[]
   boosts: AutopilotBoost[]
-  stages: { landed: number; total: number; missed: string[] }
+  /** `cancelled` is stages called off by switching automation off or skipping
+   * mid-night, which is not a failure and is drawn apart from `missed`. */
+  stages: { landed: number; total: number; missed: string[]; cancelled: string[] }
   /** Share of the night proper, after bedtime, that the bed sat within half a
    *  degree of its setpoint. Getting ready is reported separately in `ready`. */
   on_target: number | null

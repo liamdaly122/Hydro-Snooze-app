@@ -265,6 +265,13 @@ export function Autopilot({ client }: { client: ApiClient }) {
         {night.stages.missed.length > 0 && (
           <p className="ap-verdict ap-verdict--warn">Missed: {night.stages.missed.join(', ')}.</p>
         )}
+        {/* Not a warning. These are stages somebody called off by switching
+            automation off or skipping mid-night, and drawing them in the same
+            colour as a failure would say the night went wrong when it went as
+            asked. Older service builds do not send the field, hence the guard. */}
+        {(night.stages.cancelled?.length ?? 0) > 0 && (
+          <p className="ap-verdict">Cancelled, as asked: {night.stages.cancelled.join(', ')}.</p>
+        )}
       </section>
 
       {night.notes.length > 0 && (
