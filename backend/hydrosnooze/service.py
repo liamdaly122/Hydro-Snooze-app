@@ -1776,10 +1776,10 @@ class Service:
         start, end = report.window(plan)
         return autopilot.build(
             plan,
-            self.db.night_history(start),
+            self.db.night_history(start, end),
             self.db.events_between(start, end),
             self.scheduler.fired.keys_for(plan),
-            self.db.precondition_since(start),
+            self.db.precondition_since(start, end),
             cancelled=self.scheduler.fired.cancelled_for(plan),
         )
 
@@ -1795,10 +1795,10 @@ class Service:
             start, end = report.window(plan)
             summary = report.build(
                 plan,
-                self.db.night_history(start),
+                self.db.night_history(start, end),
                 self.db.events_between(start, end),
                 self.scheduler.fired.keys_for(plan),
-                self.db.precondition_since(start),
+                self.db.precondition_since(start, end),
                 cancelled=self.scheduler.fired.cancelled_for(plan),
             )
         except Exception:  # noqa: BLE001

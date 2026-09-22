@@ -85,6 +85,12 @@ class Notifier:
     def worth_sending(self, event: Event) -> bool:
         if not self.enabled:
             return False
+        # The morning report is pushed on its own, by `push`, with its own title.
+        # Its body quotes the night's first problem, and that quote can contain a
+        # phrase from LOUD_WARNINGS, so letting it through here as well sent the
+        # same report twice: once as "HydroSnooze warning" and once as itself.
+        if event.kind == "report":
+            return False
         if event.level == "error":
             return True
         if event.level == "warning":

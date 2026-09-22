@@ -239,3 +239,72 @@ def test_a_report_that_cannot_be_built_does_not_keep_retrying(service, plan):
     unfired would try again every minute until the grace window closed."""
     service.db.close()  # anything that reads the night will now throw
     assert service._send_report(plan) is True
+
+
+# --- Last night means last night -------------------------------------------------
+#
+# Found in review on 22 September. The report and Autopilot asked the database
+# for everything since the night started and never said when it ended, so
+# opening Autopilot in the evening described last night using the whole day
+# and tonight's pre-heat as well: the energy, the bed's range and the score all
+# took in hours that were not part of it, and "ready" was tonight's row.
+
+
+def test_the_night_report_stops_at_the_end_of_the_night(service, plan):
+    start, end = report.window(plan)
+    inside = plan.steps[0].starts_at + timedelta(minutes=30)
+    tomorrow_evening = plan.wake_at + timedelta(hours=15)
+
+    service.db.add_power_sample(inside, 150.0, return_c=19.0, target_c=19)
+    service.db.add_power_sample(tomorrow_evening, 900.0, return_c=35.0, target_c=27)
+    service.db.record_precondition(plan.precool_at, "turbo", 19, 1200, True)
+    service.db.record_precondition(tomorrow_evening, "warming", 27, 600, True)
+
+    service.clock.jump_to(tomorrow_evening + timedelta(minutes=10))
+    night = service.night_report(plan)
+
+    assert night.high_c == 19.0, "tomorrow evening's 35C leaked into last night"
+    assert night.ready is not None and night.ready.mode == "turbo"
+
+
+# --- One push for one report ----------------------------------------------------
+
+
+def test_a_report_quoting_a_loud_warning_is_pushed_once(service, plan):
+    """Also from review. The report is logged as an event and then pushed on
+    its own. A night with a blaster blip quotes 'is not answering' in the body,
+    which is on the notifier's loud list, so the event pushed it a second time
+    as a 'HydroSnooze warning' on top of the report itself."""
+    sent: list[tuple[str, str]] = []
+    service.notifier.topic = "test-topic"
+    service.notifier.push = lambda title, message, **_: sent.append((title, message))
+    # What start() does, so events reach the database and the notifier.
+    service.events.subscribe(service._on_event)
+
+    service.clock.jump_to(plan.steps[1].starts_at)
+    service.events.warning(
+        "blaster", "The blaster at hydrosnooze-ir.local is not answering. Presses will not reach"
+    )
+    service.clock.jump_to(plan.wake_at + REPORT_AFTER)
+    sent.clear()
+
+    service._send_report(plan)
+    assert len(sent) == 1, [title for title, _ in sent]
+    assert sent[0][0].startswith("Autopilot")
+    assert "not answering" in sent[0][1], "the case this is about"
+
+
+def test_the_report_scores_against_what_was_asked_for_at_the_time(plan):
+    """Also from review. The report rebuilt each target from the plan, while
+    Autopilot uses the target written down with each sample. A stage changed at
+    the bedside to 27C is in the sample and not in the plan, so the morning
+    message called a bed that did exactly as asked three degrees off, and the
+    screen a tap away said it was on target."""
+    deep = plan.steps[1]
+    samples = [
+        Sample(deep.starts_at + timedelta(minutes=m), 150.0, None, float(deep.temp_c + 3), None,
+               deep.temp_c + 3)
+        for m in range(0, 120, 5)
+    ]
+    said = report._how_the_bed_did(plan, samples)
+    assert said is not None and "never more than 0.0C off" in said, said

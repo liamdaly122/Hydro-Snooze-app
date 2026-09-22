@@ -132,8 +132,15 @@ def _how_the_bed_did(plan: NightPlan, samples: list[Sample]) -> str | None:
         step = next(
             (s for s in plan.steps if s.starts_at <= sample.at < s.ends_at), None
         )
-        if step is not None:
-            wanted.append((sample.return_c, step.temp_c))
+        if step is None:
+            continue
+        # What was being asked for at the time, when it was written down, which
+        # is how Autopilot scores the same night. The plan does not know about a
+        # stage changed at the bedside or a nudge, so rebuilding from it called
+        # a bed that did exactly as asked several degrees off, in the message,
+        # while the screen a tap away said it was on target.
+        target = sample.target_c if sample.target_c is not None else step.temp_c
+        wanted.append((sample.return_c, target))
 
     low, high = min(bed), max(bed)
     said = f"Bed ran {low:.1f} to {high:.1f}C"

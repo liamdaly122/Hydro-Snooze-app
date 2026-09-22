@@ -682,7 +682,7 @@ class Database:
         ).fetchall()
         return [(datetime.fromisoformat(r["at"]), r["watts"]) for r in rows]
 
-    def night_history(self, since: datetime) -> list[Sample]:
+    def night_history(self, since: datetime, until: datetime | None = None) -> list[Sample]:
         """Everything measured since a moment, watts and degrees together.
 
         The whole night in one query, which is what a chart wants and what
@@ -691,10 +691,13 @@ class Database:
         could be asked in the morning was about the machine.
         """
         self.flush_power()
+        # `until` for anything describing one night. Without it, "last night"
+        # asked in the evening took in the whole day and tonight's pre-heat.
+        end = "9999" if until is None else until.isoformat()
         rows = self._db.execute(
             "SELECT at, watts, flow_c, return_c, room_c, target_c FROM power_samples "
-            "WHERE at >= ? ORDER BY at",
-            (since.isoformat(),),
+            "WHERE at >= ? AND at <= ? ORDER BY at",
+            (since.isoformat(), end),
         ).fetchall()
         return [
             Sample(
@@ -750,9 +753,19 @@ class Database:
         )
         self._db.commit()
 
-    def precondition_since(self, start: datetime) -> PreconditionRow | None:
-        """The pre-conditioning run for one night, or None if it never ran."""
-        rows = [r for r in self.precondition_runs(5) if r.at >= start]
+    def precondition_since(
+        self, start: datetime, until: datetime | None = None
+    ) -> PreconditionRow | None:
+        """The pre-conditioning run for one night, or None if it never ran.
+
+        The newest row after `start` used to be the answer, and by the next
+        evening the newest row is tonight's, so last night was described as
+        having got ready the way tonight is getting ready. `until` bounds it.
+        """
+        rows = [
+            r for r in self.precondition_runs(5)
+            if r.at >= start and (until is None or r.at <= until)
+        ]
         return rows[0] if rows else None
 
     def learned_lead_minutes(
