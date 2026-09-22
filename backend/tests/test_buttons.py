@@ -368,7 +368,7 @@ async def test_on_off_is_one_press_and_no_waiting(service):
     # OFF here would be the confident lie this whole project exists to avoid.
     assert service.state.power is Power.UNKNOWN
     assert said(service) == [
-        "Bedside: on/off. One press sent. It should go off, and the plug says "
+        "Bedside: on/off. Sent the on/off gesture. It should go off, and the plug says "
         "which within half a minute."
     ]
     # The clock is what proves it. power_off would have advanced it by the
@@ -410,7 +410,7 @@ async def test_on_off_and_a_temperature_together_drops_the_temperature(service):
     assert stage_temp(service, Stage.DEEP) == 24
     assert said(service) == [
         "Bedside: on/off and 2 warmer. Doing the on/off and leaving the temperature alone.",
-        "Bedside: on/off. One press sent. It should go off, and the plug says "
+        "Bedside: on/off. Sent the on/off gesture. It should go off, and the plug says "
         "which within half a minute.",
     ]
 
@@ -631,3 +631,91 @@ def test_the_health_row_names_the_access_point(tmp_path):
     service.probes.network = None
     assert "on " not in service._probes_health().detail
     service.db.close()
+
+
+# --- The gesture, against the simulated unit ------------------------------------
+#
+# For one morning the bedside on/off sent a single bare press of power. On a
+# running unit with a dark display that press only wakes the display, and
+# overnight the display is always dark, so the button could not switch the unit
+# off at the one time it exists for. A second tap would have rescued it and the
+# settle window merges a second tap away on purpose.
+#
+# These drive the simulated unit from each starting state, because the claim is
+# that one gesture is right from all of them, and a claim like that is only as
+# good as the states it was tried from.
+
+
+def _unit(service: Service, *, powered: bool, lit: bool = False):
+    unit = service.unit
+    unit.powered = powered
+    unit.powered_at = service.clock.now() if powered else None
+    unit.schedule_armed_at = None
+    unit.adjusting = False
+    unit.display_awake_until = None
+    if powered and lit:
+        unit._wake(service.clock.now())
+    return unit
+
+
+@pytest.mark.asyncio
+async def test_it_switches_off_a_running_unit_with_a_dark_display(service):
+    """The overnight case, and the one the bare press got wrong."""
+    unit = _unit(service, powered=True, lit=False)
+    await tap(service, BUTTON_POWER)
+    assert unit.powered is False
+
+
+@pytest.mark.asyncio
+async def test_it_switches_off_a_running_unit_with_a_lit_display(service):
+    unit = _unit(service, powered=True, lit=True)
+    await tap(service, BUTTON_POWER)
+    assert unit.powered is False
+
+
+@pytest.mark.asyncio
+async def test_it_switches_on_a_unit_that_is_off(service):
+    """The wake presses are ignored by an off unit, so the same gesture turns
+    it on. Which is what makes it safe to send without knowing the state."""
+    service._set_state(power=Power.OFF)
+    unit = _unit(service, powered=False)
+    await tap(service, BUTTON_POWER)
+    assert unit.powered is True
+
+
+@pytest.mark.asyncio
+async def test_it_is_the_same_gesture_whatever_the_app_believes(service):
+    """The belief picks the wording and nothing else. A stale ON over a unit that
+    is actually off still turns it on, rather than sending something that only
+    works if the belief is right."""
+    service._set_state(power=Power.ON)
+    unit = _unit(service, powered=False)
+    await tap(service, BUTTON_POWER)
+    assert unit.powered is True
+
+
+# --- The two power buttons are different on purpose -----------------------------
+#
+# Pinned because a stray edit on 22 September turned the app's power button into
+# the bedside gesture and all 689 tests passed. Nothing here said which button
+# sends what, so a change to what a user-facing button does was invisible.
+
+
+@pytest.mark.asyncio
+async def test_the_app_power_button_is_one_bare_press(service):
+    """The remote's own button, for someone looking at the unit. If it only
+    wakes the display they press it again, and nothing merges that away."""
+    before = list(service.transmitter.sent)
+    await service.press_power()
+    sent = service.transmitter.sent[len(before):]
+    assert sent == [Button.POWER]
+
+
+@pytest.mark.asyncio
+async def test_the_bedside_power_button_is_wake_then_power(service):
+    """For someone lying in the dark. A second tap is merged by the settle
+    window, so the one gesture has to work from any state on its own."""
+    before = list(service.transmitter.sent)
+    await tap(service, BUTTON_POWER)
+    sent = service.transmitter.sent[len(before):]
+    assert sent == [Button.TEMP_DOWN, Button.TEMP_DOWN, Button.POWER]

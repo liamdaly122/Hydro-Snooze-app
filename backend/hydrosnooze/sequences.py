@@ -245,6 +245,32 @@ class Commands:
             f"{self.settings.power_confirm_s}s later"
         )
 
+    async def toggle(self) -> None:
+        """The unit's own on/off, from any starting state, with no waiting.
+
+        For the bedside button, where somebody is lying next to the unit and
+        will see the answer. It is `_off_gesture` under a truthful name, because
+        that gesture is not only the way off:
+
+        - **off:** an off unit answers nothing but power, so both `temp_down`
+          presses are ignored and the power press switches it on
+        - **on, display dark:** the first `temp_down` wakes the display, and
+          the power press lands on a lit display and switches it off
+        - **on, display lit:** the same, and the only cost is up to a degree
+          off a target that stops mattering the moment the unit is off
+
+        One bare press of power, which is what this button sent for a morning,
+        only wakes a dark display. Overnight the display is always dark, so the
+        button that exists for 3am could not switch the unit off at 3am. The
+        repeat press that would have rescued it is merged away by the service's
+        settle window on purpose, so there was no way through.
+
+        No confirmation against the plug. That wait is two minutes and it
+        belongs to 07:30, when nobody is awake to notice a failure.
+        """
+        self._banner("toggle()")
+        await self._off_gesture()
+
     async def _off_gesture(self) -> None:
         """Wake the display, then the one press that switches the unit off.
 

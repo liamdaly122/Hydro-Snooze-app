@@ -1492,9 +1492,8 @@ class Service:
     async def _button_power_toggle(self, said: str) -> None:
         """On/off, as one press and no waiting for the plug to agree.
 
-        `press_power` rather than `power_on` or `power_off`, changed on 22
-        September after a bedside press took three minutes and thirty-eight
-        seconds to do anything:
+        Not `power_on` or `power_off`, changed on 22 September after a bedside
+        press took three minutes and thirty-eight seconds to do anything:
 
             09:57:10  bedside button: button_power
             10:00:48  buttons: Bedside: on/off. ...
@@ -1515,10 +1514,15 @@ class Service:
         a bedside button is the most standing-in-front-of-the-bed thing in this
         project, and it was wired to the patient path anyway.
 
-        The unit's power button is a toggle, so one press is right whichever
-        state it is in. What this reads from the plug decides only what to say
-        to expect, never what to send, which is why a stale or unknown reading
-        costs nothing here.
+        And not `press_power` either, which is what replaced them for one
+        morning. A bare press of power on a running unit with a dark display
+        only wakes the display, and overnight the display is always dark. The
+        gesture sent now is the scheduled switch-off's own, wake then power,
+        without its two minute wait: see `Commands.toggle` for why that one
+        gesture is right from every starting state.
+
+        What this reads from the plug decides only what to say to expect, never
+        what to send, which is why a stale or unknown reading costs nothing.
         """
         power = self.state.power
         if power is Power.ON:
@@ -1529,9 +1533,17 @@ class Service:
             expect = "Nothing had confirmed which way it was"
         self.events.info(
             BUTTON_KIND,
-            f"{said}. One press sent. {expect}, and the plug says which within half a minute.",
+            f"{said}. Sent the on/off gesture. {expect}, and the plug says which "
+            "within half a minute.",
         )
-        await self.press_power()
+        async with self._lock:
+            try:
+                await self.commands.toggle()
+                # A toggle nothing has confirmed. The plug settles it on its next
+                # sample, and until then the honest state is not knowing.
+                self._set_state(power=Power.UNKNOWN, last_command_at=self.clock.now())
+            except CommandFailed as exc:
+                self._fail("power", exc, power=Power.UNKNOWN)
 
     async def _button_temperature(self, delta: int, said: str) -> None:
         """Warmer or cooler, by however many presses landed in the window.
