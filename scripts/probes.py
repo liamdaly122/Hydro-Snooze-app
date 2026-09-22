@@ -300,6 +300,30 @@ def die(*lines: str) -> None:
     raise SystemExit(1)
 
 
+#: The `board:` line, for reading back which one the file was built for.
+BOARD_LINE = re.compile(r"^\s*board:\s*(\S+)", re.M)
+
+
+def board_already_written() -> str | None:
+    """Which board the current file was built for, or None if there is no file.
+
+    `--keep` keeps the addresses, and it has to keep this too. Without it,
+    running `./scripts/probes.py --keep` a week after swapping to a XIAO
+    silently rebuilds for the SuperMini, and nothing says so: both are ESP32-C3
+    and it flashes perfectly happily, so the board runs on a platform definition
+    that is not its own until something subtle goes wrong months later.
+
+    Swapping boards is a thing that happens once. Remembering a flag forever
+    afterwards is not a reasonable thing to ask of anybody at 3am.
+    """
+    if not CONFIG.exists():
+        return None
+    found = BOARD_LINE.search(CONFIG.read_text())
+    if found is None:
+        return None
+    return next((name for name, value in BOARDS.items() if value == found.group(1)), None)
+
+
 def already_written() -> dict[str, str]:
     """The addresses in the file this script wrote last time, by role.
 
@@ -411,6 +435,14 @@ def main() -> int:
         roles = (known["water_flow"], known["water_return"], known["room"])
         print()
         print(f"{DIM}Keeping the three addresses already in the file.{RESET}")
+        # And the board, unless this run says otherwise. --seeed is how a swap
+        # is announced; after that the file remembers, because the alternative
+        # is remembering a flag forever.
+        if not args.seeed:
+            kept = board_already_written()
+            if kept is not None:
+                board = kept
+        print(f"{DIM}Building for the {board} board.{RESET}")
 
     # --- Stage 3: the real thing ---------------------------------------------
     if any(roles):
