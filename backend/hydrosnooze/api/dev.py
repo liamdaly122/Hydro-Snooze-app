@@ -69,6 +69,7 @@ async def post_reset(request: Request) -> dict[str, object]:
     # In place: a replacement object has no store, and every mark after it
     # would be held in memory and never written down.
     service.scheduler.fired.clear()
+    service._hold_underway(None)
     service.events.info("sim", "Simulated unit reset")
     snapshot = service.sim_snapshot()
     assert snapshot is not None

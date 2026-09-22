@@ -14,6 +14,7 @@ from ..models import (
     DeviceState,
     LearnedLead,
     Mode,
+    Preconditioning,
     Profile,
     Schedule,
     modes_for,
@@ -46,15 +47,18 @@ def schedule_json(
     *,
     bed_c: float | None = None,
     learned: LearnedLead | None = None,
+    pre: Preconditioning | None = None,
 ) -> dict[str, Any]:
     """The schedule, plus the two things about tonight that are not stored in it.
 
     `bed_c` is what the hose probes read now and `learned` is what previous
     nights measured. Both change how the bed gets ready, and leaving them out
     used to mean the card described the assumptions while the scheduler ran on
-    the real numbers.
+    the real numbers. `pre` is tonight's decision once it is already being
+    carried out, which then stands whatever the bed reads.
     """
-    pre = schedule.preconditioning(bed_c, learned)
+    if pre is None:
+        pre = schedule.preconditioning(bed_c, learned)
     return {
         "id": schedule.id,
         "name": schedule.name,

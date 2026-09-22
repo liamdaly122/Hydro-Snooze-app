@@ -21,7 +21,9 @@ from .models import (
     Schedule,
     SleepStage,
     Stage,
+    Preconditioning,
     Tonight,
+    Underway,
     default_stages,
     with_all_stages,
 )
@@ -142,6 +144,19 @@ CREATE TABLE IF NOT EXISTS power_samples (
 CREATE TABLE IF NOT EXISTS fired_jobs (
     key     TEXT PRIMARY KEY,
     wake_at TEXT NOT NULL
+);
+
+-- How tonight's getting ready was decided, once it has begun. One row, for one
+-- night, and a row for any other night is ignored. See models.Underway: the plan
+-- is worked out afresh from the bed on every tick, and once the bed is moving
+-- that reading is the pre-heat working, not a reason to change the night.
+CREATE TABLE IF NOT EXISTS underway (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    wake_on      TEXT    NOT NULL,
+    precool_at   TEXT    NOT NULL,
+    mode         TEXT,
+    lead_minutes INTEGER NOT NULL,
+    reason       TEXT    NOT NULL
 );
 
 -- Saved nights, by name. "Summer", "Winter", "Guest room".
@@ -643,6 +658,42 @@ class Database:
             self._db.executemany(
                 "INSERT INTO fired_jobs (key, wake_at) VALUES (?, ?)",
                 [(key, at.isoformat()) for key, at in marks.items()],
+            )
+
+    # --- Tonight's getting ready, once it has begun -----------------------------
+
+    def underway(self) -> Underway | None:
+        row = self._db.execute(
+            "SELECT wake_on, precool_at, mode, lead_minutes, reason FROM underway WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return Underway(
+            wake_on=date.fromisoformat(row["wake_on"]),
+            preconditioning=Preconditioning(
+                Mode(row["mode"]) if row["mode"] else None,
+                int(row["lead_minutes"]),
+                row["reason"],
+            ),
+            precool_at=datetime.fromisoformat(row["precool_at"]),
+        )
+
+    def set_underway(self, underway: Underway | None) -> None:
+        with self._db:
+            self._db.execute("DELETE FROM underway")
+            if underway is None:
+                return
+            pre = underway.preconditioning
+            self._db.execute(
+                "INSERT INTO underway (id, wake_on, precool_at, mode, lead_minutes, reason) "
+                "VALUES (1, ?, ?, ?, ?, ?)",
+                (
+                    underway.wake_on.isoformat(),
+                    underway.precool_at.isoformat(),
+                    pre.mode.value if pre.mode else None,
+                    pre.lead_minutes,
+                    pre.reason,
+                ),
             )
 
     # --- Power ----------------------------------------------------------------

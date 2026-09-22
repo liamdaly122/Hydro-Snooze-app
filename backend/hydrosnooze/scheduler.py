@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Callable, Literal
 
-from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep, Tonight
+from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep, Tonight, Underway
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +277,9 @@ class Scheduler:
     #: means a longer job, and until this existed the head start was worked out
     #: from an assumed 20C bedroom whatever the bed was actually doing.
     bed_now: Callable[[], float | None] | None = None
+    #: What tonight's getting ready was, once it has started. Set by the service
+    #: when pre-conditioning begins, and read back after a restart.
+    underway: Underway | None = None
 
     def plan_in_progress(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The night we are currently inside, or the next one.
@@ -303,7 +306,9 @@ class Scheduler:
             # perform. Over tonight either way, so skipping does not also undo a
             # lie-in: the stages are what skip cancels, not the deadline. `due`
             # below serves only the finishing jobs once `only_finishing` is true.
-            plan = self.shape(schedule, wake_on).plan_for(wake_on, self.learned_lead, bed)
+            plan = self._as_decided(
+                self.shape(schedule, wake_on).plan_for(wake_on, self.learned_lead, bed)
+            )
             if now < plan.wake_at + POWER_OFF_GRACE:
                 # Skipping is about a night that has not begun. Past its start
                 # it means the same as switching automation off mid-night: stop
@@ -428,10 +433,18 @@ class Scheduler:
             running = self.running(schedule, wake_on)
             if running is None:
                 continue  # a skipped night has nothing to report
-            plan = running.plan_for(wake_on, self.learned_lead)
+            plan = self._as_decided(running.plan_for(wake_on, self.learned_lead))
             if plan.wake_at < now:
                 return plan
         return None
+
+    def _as_decided(self, plan: NightPlan) -> NightPlan:
+        """A night whose getting ready has begun keeps what was decided for it.
+
+        See models.Underway. The stages, the alarm and everything else still
+        come from the plan as it is now; only how the bed was got ready is held.
+        """
+        return self.underway.over(plan) if self.underway is not None else plan
 
     def due(self, schedule: Schedule, now: datetime) -> Job | None:
         """The one job that should run right now, if any."""

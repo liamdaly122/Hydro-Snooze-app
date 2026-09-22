@@ -697,6 +697,35 @@ class NightPlan:
         return self.steps[0].temp_c if self.steps else 20
 
 
+@dataclass(frozen=True)
+class Underway:
+    """How a night's getting ready was decided, kept once it has begun.
+
+    The plan is worked out afresh on every tick from what the bed reads now,
+    which is right until the unit starts moving the bed. From then on the
+    reading is the pre-heat working rather than the night changing its mind. A
+    bed at 29.5C on its way to 30 looks like one with nothing to do, so
+    precool_at dropped out of the plan, and a minute before bedtime the night
+    was "evening" again: Bed early came back, the nudge went away, a skip
+    dropped the switch-off with the unit still heating, and the morning report
+    started its window at bedtime.
+    """
+
+    wake_on: date
+    preconditioning: Preconditioning
+    precool_at: datetime
+
+    def over(self, plan: NightPlan) -> NightPlan:
+        """The plan, with what was decided put back, if this is its night."""
+        if (
+            plan.rehearsal
+            or plan.wake_at.date() != self.wake_on
+            or self.precool_at >= plan.bedtime_at
+        ):
+            return plan
+        return replace(plan, preconditioning=self.preconditioning, precool_at=self.precool_at)
+
+
 #: How long a nudge lasts by default. "Cooler for half an hour" is the control it
 #: exists for, and half an hour is long enough to tell whether it helped.
 NUDGE_MINUTES = 30

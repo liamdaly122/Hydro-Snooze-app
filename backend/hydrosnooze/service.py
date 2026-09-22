@@ -53,6 +53,7 @@ from .models import (
     Stage,
     StageStep,
     Tonight,
+    Underway,
     mode_for_target,
     quieter_mode,
     range_for,
@@ -318,6 +319,10 @@ class Service:
         # meant a good night reporting itself as a failed one afterwards.
         self.scheduler.fired.store = self.db.set_fired_marks
         self.scheduler.fired.load(self.db.fired_marks())
+        # And how tonight's getting ready was decided, if it has begun, for the
+        # same reason: a restart part way through a pre-heat otherwise worked the
+        # night out again from a bed that was already nearly there.
+        self.scheduler.underway = self.db.underway()
         self.probes = Probes(
             self.clock,
             settings.probes_host,
@@ -815,7 +820,18 @@ class Service:
     def _shown(self, schedule: Schedule) -> dict[str, Any]:
         from .api.schemas import schedule_json
 
-        return schedule_json(schedule, bed_c=self.probes.bed_c, learned=self._learned_lead)
+        # While tonight's getting ready is under way, the card says what is being
+        # done rather than what a bed already nearly there would need.
+        plan = self.scheduler.plan_in_progress(self.schedule, self.clock.now())
+        held = self.scheduler.underway
+        pre = (
+            plan.preconditioning
+            if plan is not None and held is not None and plan.precool_at == held.precool_at
+            else None
+        )
+        return schedule_json(
+            schedule, bed_c=self.probes.bed_c, learned=self._learned_lead, pre=pre
+        )
 
     # --- Loops ----------------------------------------------------------------
 
@@ -1003,6 +1019,11 @@ class Service:
         watts = await self.power.read_watts()
         now = self.clock.now()
 
+        # Before the watcher, which would otherwise read this very sample as the
+        # bed arriving. Switched off with the remote is the case: nothing here
+        # hears about that except the plug.
+        if watts is not None and watts < self.settings.off_threshold_w:
+            self._abandon_precondition("the plug says the unit is off")
         self._watch_precondition(watts, now)
 
         # Every read is already a reachability check, so there is nothing extra
@@ -1044,7 +1065,13 @@ class Service:
         if watts is not None:
             power = Power.OFF if watts < self.settings.off_threshold_w else Power.ON
 
-        step = self.scheduler.stage_now(self.schedule, now)
+        # The same wait the tick has. A Pi back from a reboot mid-night believes
+        # it is whenever it last wrote the time down, and stage_now on that
+        # finds an earlier stage and sends its temperature. Once the clock
+        # caught up, the half hour dwell then held the bed there. Watching and
+        # recording carry on; only driving the night waits.
+        trusted = self._clock_trusted()
+        step = self.scheduler.stage_now(self.schedule, now) if trusted else None
         self._set_state(
             observed_power_w=watts,
             observed_flow_c=flow,
@@ -1054,9 +1081,13 @@ class Service:
             power=power,
             current_stage=step.stage if step and power is Power.ON else None,
         )
-        await self._correct_mode(step, power, now)
-        await self._follow_the_plan(step, power, now)
-        if watts is not None:
+        if trusted:
+            await self._correct_mode(step, power, now)
+            await self._follow_the_plan(step, power, now)
+        # Not written down either while the clock is unconfirmed. A sample filed
+        # an hour early lands in the wrong stage of the report, and a gap in the
+        # chart is the honest record of minutes nothing knew the time of.
+        if watts is not None and trusted:
             self.db.add_power_sample(
                 now,
                 watts,
@@ -1159,6 +1190,7 @@ class Service:
         self.scheduler.rehearsal = None
         self._set_state(rehearsal_ends_at=None, current_stage=None)
         self.events.info("rehearsal", "Rehearsal stopped.")
+        self._abandon_precondition("the rehearsal was stopped")
         if power_off:
             await self.power_off()
 
@@ -1247,6 +1279,24 @@ class Service:
                 f"Ran for {elapsed // 60} minutes without settling at {run.target_c}C, so that "
                 f"target may not be reachable in this room.{where}",
             )
+
+    def _abandon_precondition(self, why: str) -> None:
+        """Stop timing a pre-conditioning run the unit is no longer doing.
+
+        Written down nowhere, on purpose. Once the unit stops, the two hoses
+        drift to the room together, and the watcher read that closing gap as the
+        bed having arrived: reached, at room temperature, decided by the probes.
+        Those rows are what the lead times and the correction are learned from,
+        and three of them sent every warming command 4C high.
+        """
+        run = self._precondition
+        if run is None:
+            return
+        self._precondition = None
+        what = "pre-heat" if run.mode is Mode.WARMING else "pre-cool"
+        self.events.info(
+            "precool", f"Stopped timing the {what}: {why}. Nothing from it is kept for learning."
+        )
 
     def _end_precondition(
         self, run: PreconditionRun, elapsed: int, *, reached: bool, decided_by: str
@@ -1592,6 +1642,7 @@ class Service:
             f"{said}. Sent the on/off gesture. {expect}, and the plug says which "
             "within half a minute.",
         )
+        self._abandon_precondition("the bedside on/off was pressed")
         async with self._lock:
             try:
                 await self.commands.toggle()
@@ -1708,6 +1759,15 @@ class Service:
         # so `pre.mode` above already reflects a stage set for this night only,
         # and reading the temperature from somewhere else made that worse than
         # either: warming chosen for a 28C night and 21C sent.
+        # Held from here, before the first press. The plan is worked out again on
+        # every tick from what the bed reads, and once this starts moving the bed
+        # that reading would talk the night out of having started. Never for a
+        # rehearsal, which is not tonight.
+        if not plan.rehearsal and plan.precool_at is not None:
+            self._hold_underway(
+                Underway(plan.wake_at.date(), pre, plan.precool_at)
+            )
+
         target = plan.first_temp_c
         verb = "Pre-heating" if pre.mode is Mode.WARMING else "Pre-cooling"
         self.events.info(
@@ -1735,6 +1795,10 @@ class Service:
             except CommandFailed as exc:
                 self._fail("precool", exc)
                 return False
+
+    def _hold_underway(self, underway: Underway | None) -> None:
+        self.scheduler.underway = underway
+        self.db.set_underway(underway)
 
     async def _wake_blaster(self) -> bool:
         """Restart the blaster before the night that depends on it.
@@ -1873,6 +1937,7 @@ class Service:
         because nothing in this app ever switches the plug. It only reads it.
         """
         self.events.info("power_off", f"Night finished at {plan.wake_at:%H:%M}, switching off")
+        self._abandon_precondition("the night is over")
         async with self._lock:
             try:
                 await self._power_off_once(plan)
@@ -2050,6 +2115,7 @@ class Service:
         with the app in their hand, and they can reach the Restart blaster button
         themselves if the answer they get is that nothing arrived.
         """
+        self._abandon_precondition("the unit was switched off")
         async with self._lock:
             try:
                 await self.commands.power_off()
@@ -2071,6 +2137,7 @@ class Service:
         the next sample, within thirty seconds, and until then the app says so
         rather than showing a value nothing confirmed.
         """
+        self._abandon_precondition("the power button was pressed")
         async with self._lock:
             try:
                 await self.commands.press_power()
@@ -2151,6 +2218,18 @@ class Service:
 
         # Outside the lock: the presses have landed, and this is bookkeeping.
         #
+        # A typed number replaces a nudge rather than sitting under it. Left in
+        # force, the nudge was applied to the stage this is about to become, so
+        # 22 typed during "1C cooler" sent 22 and then a second whole sequence
+        # to 21, and the sampling beat would have done the same half a minute
+        # later if nothing else had.
+        tonight = self.tonight_state()
+        if tonight is not None and tonight.nudge_at(self.clock.now()):
+            self._change_tonight(nudge_c=0, nudge_until=None)
+            self.events.info(
+                TONIGHT_KIND, f"{target_c}C set by hand, so the nudge is over."
+            )
+
         # Tonight only. It used to write straight into the saved routine, which
         # made every 2am experiment permanent and silent. Making it stick is a
         # separate tap that says so.
@@ -2580,6 +2659,7 @@ class Service:
             # a new object has no store, so every mark after the first jump was
             # held in memory and never written down.
             self.scheduler.fired.clear()
+            self._hold_underway(None)
             self.events.info("sim", f"Jumped the clock to {target:%a %d %b %H:%M}")
 
     def sim_set_speed(self, speed: float) -> None:
