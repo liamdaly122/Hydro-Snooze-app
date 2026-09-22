@@ -55,13 +55,16 @@ def _things(n: int) -> str:
     return "One thing" if n == 1 else f"{n} things"
 
 
-def _kwh(samples: list[Sample]) -> float:
+def kwh(samples: list[Sample]) -> float:
     """Energy over the whole run, from the gaps between the readings themselves.
 
     Multiplying every sample by a fixed thirty seconds would quietly invent power
     across a gap where the plug was unreachable, and those gaps are exactly the
     nights worth being careful about. So each reading only counts for as long as
     it actually stood, and a gap longer than a few beats counts for one beat.
+
+    Autopilot reads this too. It had its own copy, line for line, which is one
+    edit away from the screen and the morning message giving two numbers.
     """
     if len(samples) < 2:
         return 0.0
@@ -207,7 +210,7 @@ def build(
     if swaps:
         lines.append(f"Swapped mode {_times(swaps)} to keep it quiet.")
 
-    energy = _kwh(samples)
+    energy = kwh(samples)
     if energy:
         lines.append(f"{energy} kWh.")
 

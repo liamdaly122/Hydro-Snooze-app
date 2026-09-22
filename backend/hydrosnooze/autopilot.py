@@ -28,12 +28,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from itertools import pairwise
 
 from .db import PreconditionRow, Sample
 from .events import Event
 from .models import QUIET_KIND, NightPlan, Stage, StageStep
-from .report import FALLBACK_SAMPLE_S
+from .report import FALLBACK_SAMPLE_S, kwh
 
 #: The event kind a stage boundary is logged under.
 #:
@@ -387,16 +386,6 @@ def _notes(events: list[Event]) -> list[str]:
     return [e.message for e in events if e.level in ("warning", "error")]
 
 
-def _energy(samples: list[Sample]) -> float:
-    if len(samples) < 2:
-        return 0.0
-    total = 0.0
-    for now, nxt in pairwise(samples):
-        held = (nxt.at - now.at).total_seconds()
-        total += now.watts * min(held, FALLBACK_SAMPLE_S * 3)
-    return round(total / 3_600_000, 2)
-
-
 def build(
     plan: NightPlan,
     samples: list[Sample],
@@ -437,7 +426,8 @@ def build(
         stages_total=len(plan.steps),
         missed=missed,
         cancelled=called_off,
-        energy_kwh=_energy(samples),
+        # The morning message's own sum, so the two can never disagree.
+        energy_kwh=kwh(samples),
         # The share of the night the bed was where it was asked to be. The
         # headline count says how often Autopilot acted; this says whether it
         # worked, which is the more interesting of the two and the one the

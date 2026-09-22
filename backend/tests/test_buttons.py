@@ -719,3 +719,25 @@ async def test_the_bedside_power_button_is_wake_then_power(service):
     await tap(service, BUTTON_POWER)
     sent = service.transmitter.sent[len(before):]
     assert sent == [Button.TEMP_DOWN, Button.TEMP_DOWN, Button.POWER]
+
+
+# --- How long the board has really been quiet -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconnecting_does_not_reset_how_long_it_has_been_quiet(fake_api):
+    """From the review of 22 September. Every connect set the silence clock to
+    now, so a board that had said nothing for an hour, and had reconnected
+    two minutes ago, was reported as "Nothing for 2 minutes". The fresh window
+    a new link gets before it is torn down again is a separate question."""
+    fake_api.extend([_Sensor(i, n) for i, n in enumerate(NAMES, 1)])
+    p = Probes(VirtualClock(NOW), host="192.0.2.9")
+    p.last_reading_at = NOW
+    p.clock.advance(timedelta(minutes=58))
+
+    await p._connect()
+    p.clock.advance(timedelta(minutes=2))
+
+    assert p.quiet_for == timedelta(hours=1), "since the last reading, not the last connect"
+    # And the new link still gets its full window before it is rebuilt.
+    assert p._silent_for() == timedelta(minutes=2)

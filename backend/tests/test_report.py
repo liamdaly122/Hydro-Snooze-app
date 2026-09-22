@@ -174,14 +174,14 @@ def test_energy_is_what_was_measured_rather_than_watts_times_a_constant():
     unreachable is not 0.9 kWh of invented electricity."""
     start = datetime(2026, 9, 11, 0, 0)
     steady = [Sample(start + timedelta(seconds=30 * i), 100.0) for i in range(121)]
-    assert report._kwh(steady) == 0.1
+    assert report.kwh(steady) == 0.1
 
     gap = [
         Sample(start, 300.0),
         Sample(start + timedelta(hours=3), 300.0),
         Sample(start + timedelta(hours=3, seconds=30), 300.0),
     ]
-    assert report._kwh(gap) < 0.05
+    assert report.kwh(gap) < 0.05
 
 
 def test_the_window_starts_before_the_bed_did(plan):

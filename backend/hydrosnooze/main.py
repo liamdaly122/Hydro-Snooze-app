@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -186,7 +186,15 @@ if _static is not None:
 
     @app.get("/{path:path}")
     async def spa(path: str) -> FileResponse:
-        """Serve the app shell, and any file next to it, but never for /api."""
+        """Serve the app shell, and any file next to it, but never for /api.
+
+        The docstring always said so and the code never checked. A GET to an
+        /api path with no route came back as the app page with a 200, and the
+        app then failed to read HTML as JSON, which says nothing about a URL
+        that does not exist. A 404 says exactly that.
+        """
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404, f"No such endpoint: /{path}")
         candidate = (_static / path).resolve()
         if path and _static in candidate.parents and candidate.is_file():
             return FileResponse(candidate)

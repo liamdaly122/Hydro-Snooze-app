@@ -218,3 +218,21 @@ def test_the_skip_card_stays_to_be_undone(client):
     assert body["skip"] is True
     assert body["phase"] == "evening", "the card that can undo it is still there"
     assert client.post("/api/tonight/skip", params={"skip": False}).json()["phase"] == "evening"
+
+
+# --- The app shell is not an API answer ------------------------------------------------
+
+
+def test_an_api_path_with_no_route_is_a_404_not_the_app(client):
+    """From the review of 22 September. The catch-all that serves the built app
+    said it never answered for /api, and did: an unknown endpoint came back as
+    index.html with a 200, and the app then failed to read HTML as JSON."""
+    import hydrosnooze.main as main
+
+    if main._static is None:
+        pytest.skip("no built frontend here, so there is no catch-all to test")
+
+    r = client.get("/api/no-such-thing")
+    assert r.status_code == 404
+    assert "No such endpoint" in r.json()["detail"]
+    assert client.get("/").headers["content-type"].startswith("text/html")

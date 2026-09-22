@@ -163,6 +163,11 @@ class Probes:
         #: probe is a wiring problem, and a board reporting nothing at all is a
         #: link problem, and the two want different answers.
         self.last_reading_at: datetime | None = None
+        #: When the current link came up. Only for deciding whether to tear it
+        #: down, so a fresh link gets a full window. Kept apart from
+        #: `last_reading_at`, which it used to overwrite: a board silent for an
+        #: hour that reconnected two minutes ago read as "Nothing for 2 minutes".
+        self._link_up_at: datetime | None = None
         #: How many times the link has had to be built again since start. Shown
         #: on the device bar, because a board that reconnects every few minutes
         #: is a Wi-Fi problem long before it becomes a missing reading.
@@ -270,6 +275,14 @@ class Probes:
             return None
         return self.clock.now() - self.last_reading_at
 
+    def _silent_for(self) -> timedelta | None:
+        """How long this link has gone without a reading, to decide on a rebuild.
+
+        From the last reading or the link coming up, whichever is later.
+        """
+        since = [t for t in (self.last_reading_at, self._link_up_at) if t is not None]
+        return self.clock.now() - max(since) if since else None
+
     # --- Staying connected ---------------------------------------------------
 
     async def start(self) -> None:
@@ -311,7 +324,7 @@ class Probes:
             # The clock rather than asyncio, so a test can drive three minutes of
             # silence without spending three minutes on it.
             await self.clock.sleep(CHECK_EVERY)
-            quiet = self.quiet_for
+            quiet = self._silent_for()
             if quiet is not None and quiet > SILENT_TOO_LONG:
                 self.rebuilds += 1
                 raise TimeoutError(
@@ -368,10 +381,10 @@ class Probes:
 
         client.subscribe_states(self._on_state)
         self.connected = True
-        # Start the silence clock here rather than leaving it wherever the last
-        # connection left it, so a fresh link gets a full window to deliver
-        # something before it is torn down again.
-        self.last_reading_at = self.clock.now()
+        # A fresh link gets a full window to deliver something before it is torn
+        # down again. Its own clock, so how long the board has really been quiet
+        # is still counted from the last thing it said.
+        self._link_up_at = self.clock.now()
         log.info(
             "probe board at %s: %d sensors, %d buttons",
             self.host,
