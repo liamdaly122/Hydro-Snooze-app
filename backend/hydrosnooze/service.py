@@ -1490,24 +1490,48 @@ class Service:
         await self._button_temperature(delta, said)
 
     async def _button_power_toggle(self, said: str) -> None:
-        """On/off, decided against what the plug last read rather than a guess."""
+        """On/off, as one press and no waiting for the plug to agree.
+
+        `press_power` rather than `power_on` or `power_off`, changed on 22
+        September after a bedside press took three minutes and thirty-eight
+        seconds to do anything:
+
+            09:57:10  bedside button: button_power
+            10:00:48  buttons: Bedside: on/off. ...
+
+        Those two are the scheduled sequences. They send the gesture and then
+        poll the plug for up to `power_confirm_s`, which is two minutes,
+        because at 07:30 nobody is awake to notice that it did not land. That
+        patience is right there and wrong here.
+
+        Worse than slow, it serialised. `_act_on_buttons` awaits each command
+        before it loops, so every press arriving inside those two minutes
+        queued behind it, and pressing twice answered three minutes later.
+
+        `press_power`'s own docstring had already said what this wants, about a
+        different button, months before this one existed: right for three in
+        the morning and wrong for someone standing in front of the bed, who
+        wants the button to do what the button on the remote does. A finger on
+        a bedside button is the most standing-in-front-of-the-bed thing in this
+        project, and it was wired to the patient path anyway.
+
+        The unit's power button is a toggle, so one press is right whichever
+        state it is in. What this reads from the plug decides only what to say
+        to expect, never what to send, which is why a stale or unknown reading
+        costs nothing here.
+        """
         power = self.state.power
         if power is Power.ON:
-            self.events.info(BUTTON_KIND, f"{said}. Switching the unit off.")
-            await self.power_off()
+            expect = "It should go off"
         elif power is Power.OFF:
-            self.events.info(BUTTON_KIND, f"{said}. Switching the unit on.")
-            await self.power_on()
+            expect = "It should come on"
         else:
-            # The plug has not settled since the last command, so there is no
-            # state to toggle against. One press, and the plug says which way it
-            # went within thirty seconds.
-            self.events.info(
-                BUTTON_KIND,
-                f"{said}. Nothing has confirmed whether the unit is on, so that is "
-                "one press and the plug will say which way it went.",
-            )
-            await self.press_power()
+            expect = "Nothing had confirmed which way it was"
+        self.events.info(
+            BUTTON_KIND,
+            f"{said}. One press sent. {expect}, and the plug says which within half a minute.",
+        )
+        await self.press_power()
 
     async def _button_temperature(self, delta: int, said: str) -> None:
         """Warmer or cooler, by however many presses landed in the window.

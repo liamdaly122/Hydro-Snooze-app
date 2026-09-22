@@ -361,7 +361,7 @@ back to 27, and the buttons should do the thing I already do.
 |---|---|
 | **warmer** | current stage temperature, plus the net number of presses |
 | **cooler** | current stage temperature, minus the net number of presses |
-| **on/off** | toggles the unit, against what the plug actually reads |
+| **on/off** | one press, and the plug says which way it went. The same thing the remote's own button does |
 
 Four cases the first version did not think about and now handles:
 

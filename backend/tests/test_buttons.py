@@ -39,7 +39,7 @@ from hydrosnooze.adapters.probes import (
 )
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
-from hydrosnooze.models import Mode, Power, Schedule, SleepStage, Stage
+from hydrosnooze.models import Button, Mode, Power, Schedule, SleepStage, Stage
 from hydrosnooze.service import BUTTON_SETTLE, Service
 
 #: The middle of the Deep stage on a night that arms at 22:30 and wakes at 06:30.
@@ -353,35 +353,52 @@ async def test_pressing_on_at_the_cap_says_so_rather_than_nothing(service):
 
 
 @pytest.mark.asyncio
-async def test_on_off_switches_a_running_unit_off(service):
+async def test_on_off_is_one_press_and_no_waiting(service):
+    """The whole of the 22 September fix.
+
+    It used to call power_off, which sends the gesture and then polls the plug
+    for up to power_confirm_s to be sure. Two minutes. At 07:30 that patience is
+    the difference between a bed that switched off and a bed that ran all day;
+    on a bedside button it is somebody pressing again because nothing happened.
+    """
+    started = service.clock.now()
     await tap(service, BUTTON_POWER)
-    assert service.state.power is Power.OFF
-    assert said(service) == ["Bedside: on/off. Switching the unit off."]
+
+    # A toggle, so the state is genuinely unknown until the plug reports. Saying
+    # OFF here would be the confident lie this whole project exists to avoid.
+    assert service.state.power is Power.UNKNOWN
+    assert said(service) == [
+        "Bedside: on/off. One press sent. It should go off, and the plug says "
+        "which within half a minute."
+    ]
+    # The clock is what proves it. power_off would have advanced it by the
+    # settle and the polling; one press costs the presses and nothing else.
+    assert service.clock.now() - started < timedelta(seconds=30)
 
 
 @pytest.mark.asyncio
-async def test_on_off_switches_a_stopped_unit_on(service):
+async def test_it_says_which_way_it_expects_the_toggle_to_go(service):
     service._set_state(power=Power.OFF)
     await tap(service, BUTTON_POWER)
-    assert said(service) == ["Bedside: on/off. Switching the unit on."]
+    assert "It should come on" in said(service)[0]
 
 
 @pytest.mark.asyncio
 async def test_pressing_it_twice_is_making_sure_not_a_round_trip(service):
     """A press is not a quantity, so it does not add up."""
     await tap(service, BUTTON_POWER, BUTTON_POWER)
-    assert said(service) == ["Bedside: on/off. Switching the unit off."]
-    assert service.state.power is Power.OFF
+    assert len(said(service)) == 1
 
 
 @pytest.mark.asyncio
-async def test_with_nothing_confirming_the_power_it_sends_one_press(service):
-    """No state to toggle against, so it does not invent one. One press, and the
-    plug says which way it went within thirty seconds."""
+async def test_a_stale_reading_costs_nothing_because_it_only_picks_the_wording(service):
+    """The plug decides what to expect, never what to send. So a state nothing
+    has confirmed still gets a press, rather than nothing."""
     service._set_state(power=Power.UNKNOWN)
+    before = service.transmitter.count(Button.POWER)
     await tap(service, BUTTON_POWER)
-    assert service.state.power is Power.UNKNOWN
-    assert "one press" in said(service)[0]
+    assert service.transmitter.count(Button.POWER) == before + 1
+    assert "Nothing had confirmed which way it was" in said(service)[0]
 
 
 @pytest.mark.asyncio
@@ -393,7 +410,8 @@ async def test_on_off_and_a_temperature_together_drops_the_temperature(service):
     assert stage_temp(service, Stage.DEEP) == 24
     assert said(service) == [
         "Bedside: on/off and 2 warmer. Doing the on/off and leaving the temperature alone.",
-        "Bedside: on/off. Switching the unit off.",
+        "Bedside: on/off. One press sent. It should go off, and the plug says "
+        "which within half a minute.",
     ]
 
 
