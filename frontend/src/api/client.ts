@@ -16,6 +16,7 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  Holiday,
   Mode,
   PowerSample,
   Profile,
@@ -61,6 +62,17 @@ export interface ApiClient {
   clearTonight(): Promise<TonightState>
   /** Save as my preference: tonight's temperatures become the usual ones. */
   keepTonight(): Promise<Schedule>
+
+  /**
+   * Away from home. Null when there is no holiday, or the one there was is over.
+   *
+   * Setting one replaces whatever was set before. Neither touches the routine,
+   * and a night away that has already started is switched off straight away.
+   */
+  getHoliday(): Promise<Holiday | null>
+  /** Both "YYYY-MM-DD". Rejects when coming back is not after leaving. */
+  setHoliday(leavesOn: string, backOn: string): Promise<Holiday | null>
+  clearHoliday(): Promise<void>
 
   /**
    * Last night, for the Autopilot screen. Rejects with a 404 message when there

@@ -2,11 +2,12 @@ import { Card } from '../components/Card'
 import { RehearsalCard } from '../components/RehearsalCard'
 import { Toggle } from '../components/Toggle'
 import { Flame, Snowflake } from '../components/Icons'
-import { DAY_INITIALS, formatDayTime, formatDays, formatDuration, formatTime, nextPlan } from '../domain'
+import { DAY_INITIALS, formatDays, formatDuration, formatTime, formatWhen, nextPlan } from '../domain'
 import {
   MIN_STAGE_MINUTES,
   STAGE_LABEL,
   type DeviceState,
+  type Holiday,
   type Schedule as ScheduleType,
 } from '../types'
 
@@ -21,6 +22,8 @@ interface Props {
   /** Null when there is no night to skip: automation off, or hours away. */
   skippingTonight: boolean | null
   onSkipTonight: (skip: boolean) => void
+  /** Stepped over when working out the next night, which the footnote names. */
+  holiday: Holiday | null
 }
 
 /** Boundaries move by a quarter of an hour, which is also a stage's floor. */
@@ -55,8 +58,9 @@ export function Schedule({
   state,
   onStartRehearsal,
   onStopRehearsal,
+  holiday,
 }: Props) {
-  const plan = nextPlan(draft)
+  const plan = nextPlan(draft, new Date(), holiday)
   const pre = draft.preconditioning
   const bedMinutes = toMinutes(draft.bed_time)
 
@@ -124,7 +128,7 @@ export function Schedule({
         </div>
         <p className="footnote">
           {formatDuration(draft.night_minutes)} in bed
-          {plan ? `, from ${formatDayTime(plan.bedtimeAt)}` : ''}. The wake time sets temperature
+          {plan ? `, from ${formatWhen(plan.bedtimeAt)}` : ''}. The wake time sets temperature
           only. It is not an alarm and cannot wake you.
         </p>
       </Card>

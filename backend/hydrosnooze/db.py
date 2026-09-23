@@ -16,6 +16,7 @@ from typing import NamedTuple
 from .events import Event, Level
 from .models import (
     MINUTES_IN_A_DAY,
+    Holiday,
     Profile,
     Mode,
     Schedule,
@@ -216,6 +217,18 @@ CREATE TABLE IF NOT EXISTS tonight (
     nudge_c     INTEGER NOT NULL DEFAULT 0,
     nudge_until TEXT,
     cooling_speed TEXT
+);
+
+-- Away from home. One row, like tonight, and for the same reason: it expires by
+-- the calendar moving past `back_on`, and the next holiday overwrites it.
+--
+-- Its own table rather than a flag on the schedule, because it is not a change
+-- to the routine. Nothing in the schedule is touched while it is set, so there
+-- is nothing to put back when it ends.
+CREATE TABLE IF NOT EXISTS holiday (
+    id        INTEGER PRIMARY KEY CHECK (id = 1),
+    leaves_on TEXT    NOT NULL,
+    back_on   TEXT    NOT NULL
 );
 
 -- The handful of settings that are not part of a schedule.
@@ -565,6 +578,29 @@ class Database:
 
     def clear_tonight(self) -> None:
         self._db.execute("DELETE FROM tonight WHERE id = 1")
+        self._db.commit()
+
+    def holiday(self) -> Holiday | None:
+        """The holiday, whether or not it is over. The service decides that."""
+        row = self._db.execute("SELECT * FROM holiday WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        return Holiday(
+            leaves_on=date.fromisoformat(row["leaves_on"]),
+            back_on=date.fromisoformat(row["back_on"]),
+        )
+
+    def save_holiday(self, holiday: Holiday) -> None:
+        self._db.execute(
+            "INSERT INTO holiday (id, leaves_on, back_on) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "leaves_on = excluded.leaves_on, back_on = excluded.back_on",
+            (holiday.leaves_on.isoformat(), holiday.back_on.isoformat()),
+        )
+        self._db.commit()
+
+    def clear_holiday(self) -> None:
+        self._db.execute("DELETE FROM holiday WHERE id = 1")
         self._db.commit()
 
     def save_schedule(self, schedule: Schedule) -> None:

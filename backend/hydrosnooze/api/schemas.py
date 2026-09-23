@@ -12,6 +12,7 @@ from typing import Any
 from ..models import (
     DeviceHealth,
     DeviceState,
+    Holiday,
     LearnedLead,
     Mode,
     Preconditioning,
@@ -242,6 +243,21 @@ def tonight_json(
         "nudge_until": (
             tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None
         ),
+    }
+
+
+def holiday_json(holiday: Holiday | None) -> dict[str, Any] | None:
+    """The two dates as they were picked, and how many nights that is.
+
+    None rather than an empty shape when there is no holiday, because "no
+    holiday" is not a holiday with blank dates.
+    """
+    if holiday is None:
+        return None
+    return {
+        "leaves_on": holiday.leaves_on.isoformat(),
+        "back_on": holiday.back_on.isoformat(),
+        "nights": holiday.nights,
     }
 
 

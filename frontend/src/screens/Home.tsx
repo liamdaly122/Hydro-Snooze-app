@@ -5,14 +5,17 @@ import { ModeSelector } from '../components/ModeSelector'
 import { StatusStrip } from '../components/StatusStrip'
 import { AutopilotTeaser } from '../components/AutopilotTeaser'
 import { TonightBanner } from '../components/TonightBanner'
+import { HolidayBanner } from '../components/HolidayBanner'
 import { KeepTonight, NudgeControls, ShiftControls } from '../components/TonightControls'
 import type { ApiClient } from '../api/client'
-import type { DeviceState, Mode, Schedule, Stage, TonightState } from '../types'
+import type { DeviceState, Holiday, Mode, Schedule, Stage, TonightState } from '../types'
 
 interface Props {
   client: ApiClient
   state: DeviceState
   schedule: Schedule
+  /** Shown, never changed, from here. It is set from the menu. */
+  holiday: Holiday | null
   maxC: number
   onOpenSchedule: () => void
   onOpenProfiles: () => void
@@ -31,6 +34,7 @@ export function Home({
   client,
   state,
   schedule,
+  holiday,
   maxC,
   onOpenSchedule,
   onOpenProfiles,
@@ -99,6 +103,8 @@ export function Home({
       */}
       <AutopilotTeaser client={client} onOpen={onOpenAutopilot} />
 
+      <HolidayBanner holiday={holiday} now={now} />
+
       {/*
         Above everything, and absent unless tonight is not your usual night.
         It is the only glance-level answer to "is anything different", and the
@@ -155,7 +161,13 @@ export function Home({
         )}
       </TemperatureCard>
 
-      <WakeCard draft={tonight?.running ?? draft} usual={schedule} onDraftChange={save} onOpen={onOpenSchedule}>
+      <WakeCard
+        draft={tonight?.running ?? draft}
+        usual={schedule}
+        holiday={holiday}
+        onDraftChange={save}
+        onOpen={onOpenSchedule}
+      >
         {/*
           Shaping the night, which is something you do before you are in it.
           "Bed early" goes once the bed is already getting ready; "sleep in"

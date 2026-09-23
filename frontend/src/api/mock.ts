@@ -17,6 +17,7 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  Holiday,
   Learning,
   LearningMode,
   Mode,
@@ -31,6 +32,7 @@ import type {
   TonightState,
 } from '../types'
 import { MAX_TEMPERATURE_C, MIN_STAGE_MINUTES, MODE_RANGE, WARMING_FLOOR_C } from '../types'
+import { daysBetween, isoDay } from '../domain'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -417,6 +419,38 @@ export class MockApiClient implements ApiClient {
     return this.schedule
   }
 
+  /**
+   * Holiday mode, in memory. `?holiday=2026-10-02,2026-10-05` on the URL starts
+   * with one set, so the banner and the calendar can be looked at without
+   * picking dates every time.
+   */
+  private holiday: Holiday | null = seedHoliday(
+    new URLSearchParams(location.search).get('holiday'),
+  )
+
+  async getHoliday(): Promise<Holiday | null> {
+    await sleep(80)
+    return this.holiday && { ...this.holiday }
+  }
+
+  async setHoliday(leaves_on: string, back_on: string): Promise<Holiday | null> {
+    await sleep(160)
+    // The same two refusals the service makes, in the same words.
+    if (back_on <= leaves_on) {
+      throw new ApiError('The day you get back has to be after the day you leave.')
+    }
+    if (back_on < isoDay(new Date())) {
+      throw new ApiError('Those dates are already over. Pick a day back from today on.')
+    }
+    this.holiday = { leaves_on, back_on, nights: daysBetween(leaves_on, back_on) }
+    return { ...this.holiday }
+  }
+
+  async clearHoliday(): Promise<void> {
+    await sleep(120)
+    this.holiday = null
+  }
+
   async getAutopilot(): Promise<AutopilotNight> {
     await sleep(120)
     return seedNight()
@@ -779,6 +813,13 @@ function seedNight(): AutopilotNight {
     energy_kwh: 1.21,
     notes: [],
   }
+}
+
+/** "2026-10-02,2026-10-05" off the URL, or nothing. */
+function seedHoliday(param: string | null): Holiday | null {
+  const [leaves_on, back_on] = (param ?? '').split(',')
+  if (!leaves_on || !back_on || back_on <= leaves_on) return null
+  return { leaves_on, back_on, nights: daysBetween(leaves_on, back_on) }
 }
 
 function round1(n: number): number {

@@ -14,6 +14,7 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  Holiday,
   Learning,
   Mode,
   PowerSample,
@@ -123,6 +124,18 @@ export class HttpApiClient implements ApiClient {
   clearTonight = () => request<TonightState>('/api/tonight', { method: 'DELETE' })
 
   keepTonight = () => request<Schedule>('/api/tonight/keep', { method: 'POST' })
+
+  getHoliday = () => request<Holiday | null>('/api/holiday')
+
+  setHoliday = (leaves_on: string, back_on: string) =>
+    request<Holiday | null>('/api/holiday', {
+      method: 'PUT',
+      body: JSON.stringify({ leaves_on, back_on }),
+    })
+
+  clearHoliday = async () => {
+    await request<null>('/api/holiday', { method: 'DELETE' })
+  }
 
   getAutopilot = () => request<AutopilotNight>('/api/autopilot')
 

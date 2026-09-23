@@ -43,6 +43,7 @@ from .models import (
     DeviceHealth,
     DeviceState,
     Health,
+    Holiday,
     Mode,
     NightPlan,
     Power,
@@ -94,6 +95,9 @@ REBOOT_AFTER_FAILURES = 2
 #: What a tonight-only change is logged under, so the morning report can tell a
 #: change you made for one night from the routine changing.
 TONIGHT_KIND = "tonight"
+
+#: Holiday mode going on and off, and anything it does to a night on its way.
+HOLIDAY_KIND = "holiday"
 
 #: The switch and the reset. Both change what the unit will be sent on future
 #: nights without anybody pressing a button, so both belong in the journal.
@@ -164,6 +168,11 @@ def _shifted(at: time_of_day, minutes: int) -> time_of_day:
     """A clock time moved by some minutes, wrapping midnight."""
     total = (at.hour * 60 + at.minute + minutes) % MINUTES_IN_A_DAY
     return time_of_day(total // 60, total % 60)
+
+
+def _day(on: date) -> str:
+    """"Fri 3 Oct". Built by hand because %-d is not on every platform."""
+    return f"{on:%a} {on.day} {on:%b}"
 
 
 def _retry_gap(job: Job) -> timedelta:
@@ -341,6 +350,13 @@ class Service:
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
 
         self.schedule: Schedule = self.db.load_schedule()
+        # A holiday, read back whether or not it is over. It only ever answers
+        # about dates, so one that finished last month says no to every night
+        # and needs nothing to tidy it away.
+        self.scheduler.holiday = self.db.holiday()
+        #: Switching off a night that turned out to be a night away. See
+        #: _switch_off_if_away.
+        self._away_task: asyncio.Task[None] | None = None
         # Whatever is different about tonight, read back the same way, and after
         # the schedule because finding which night we are in needs it. A restart
         # is routine, and forgetting a sleep-in halfway through would put the
@@ -746,6 +762,11 @@ class Service:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._button_task
             self._button_task = None
+        if self._away_task is not None:
+            self._away_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._away_task
+            self._away_task = None
         await self.probes.close()
         await self.notifier.close()
         await self.transmitter.close()
@@ -926,11 +947,18 @@ class Service:
         for job in self.scheduler.cancelled(self.schedule, now):
             self.scheduler.fired.mark(job, cancelled=True)
             assert job.step is not None
-            why = "automation is off" if not self.schedule.enabled else "tonight was skipped"
+            if not self.schedule.enabled:
+                why = "automation is off. The unit still switches off at the usual time."
+            elif self.scheduler.away(job.plan.wake_at.date()):
+                # Not "switches off at the usual time". Setting the holiday has
+                # already switched it off, or tried to; see _switch_off_if_away.
+                why = "holiday mode is on."
+            else:
+                why = "tonight was skipped. The unit still switches off at the usual time."
             self.events.info(
                 "stage",
                 f"The {job.step.label} stage at {job.step.starts_at:%H:%M} was not run, "
-                f"because {why}. The unit still switches off at the usual time.",
+                f"because {why}",
             )
 
         job = self.scheduler.due(self.schedule, now)
@@ -2556,6 +2584,98 @@ class Service:
         self.scheduler.tonight = None
         self._push_schedule()
         self.events.info(TONIGHT_KIND, "Tonight is back to your usual night.")
+
+    # --- Holiday mode -----------------------------------------------------------
+    #
+    # Skipping, for as many nights as you are away. There is no point getting an
+    # empty bed ready every evening for a week, and switching automation off to
+    # avoid it means remembering to switch it back on, from a suitcase, before
+    # the first night home. This ends by itself on the day you said.
+
+    def holiday_state(self) -> Holiday | None:
+        """The holiday, unless the last morning of it has been and gone."""
+        found = self.scheduler.holiday
+        if found is None or found.over_by(self.clock.now().date()):
+            return None
+        return found
+
+    async def set_holiday(self, leaves_on: date, back_on: date) -> Holiday:
+        """Nothing runs from the night you leave until the night you get back.
+
+        Async only so there is a loop to switch a running night off on. It does
+        not wait for that: switching off waits on the plug for up to two
+        minutes, and the phone that asked should not.
+        """
+        if back_on <= leaves_on:
+            raise ValueError("The day you get back has to be after the day you leave.")
+        if back_on < self.clock.now().date():
+            raise ValueError("Those dates are already over. Pick a day back from today on.")
+
+        holiday = Holiday(leaves_on, back_on)
+        self.db.save_holiday(holiday)
+        self.scheduler.holiday = holiday
+        self._push_schedule()
+        nights = holiday.nights
+        self.events.info(
+            HOLIDAY_KIND,
+            f"Holiday mode from {_day(leaves_on)} to {_day(back_on)}: {nights} "
+            f"night{'s' if nights != 1 else ''} with nothing switching on. The bed runs "
+            "again the night you get back, and your usual schedule is unchanged.",
+        )
+        self._switch_off_if_away()
+        return holiday
+
+    def clear_holiday(self) -> None:
+        """Back to the usual nights, from the next one that has not started."""
+        had = self.holiday_state()
+        self.db.clear_holiday()
+        self.scheduler.holiday = None
+        self._push_schedule()
+        if had is not None:
+            self.events.info(HOLIDAY_KIND, "Holiday mode is off. Back to your usual nights.")
+
+    def _switch_off_if_away(self) -> None:
+        """Switch off a night that has started and turns out to be a night away.
+
+        Skipping part way through a night keeps the unit running until the
+        usual switch-off, because somebody may be lying on it. That reasoning is
+        the other way round here. Holiday mode set for a night already under way
+        is almost always somebody who forgot before they left, and keeping the
+        promise means running an empty bed all night, which is the thing this
+        exists to stop.
+
+        So it goes off now. The scheduled switch-off is left where it was and
+        runs at the usual time anyway, where it finds the unit off and does
+        nothing. That is deliberate: if this one fails, that one is still owed,
+        and if the holiday is cancelled before morning and the night starts
+        again, the unit still has a switch-off coming.
+
+        Under way means something already ran for the night, or it is past
+        bedtime. Not plan_in_progress, which only keeps a night away that began,
+        and so misses one whose pre-heat is still being retried. And not merely
+        on: before bedtime with nothing run, a unit that is on was put on by
+        hand, by somebody who is still at home.
+        """
+        now = self.clock.now()
+        wake_on = self.scheduler.night_date(self.schedule, now)
+        if self.scheduler.rehearsal is not None or wake_on is None:
+            return
+        if not self.scheduler.away(wake_on) or self.state.power is Power.OFF:
+            return
+        plan = self.scheduler.shape(self.schedule, wake_on).plan_for(
+            wake_on, self.scheduler.learned_lead
+        )
+        under_way = self.scheduler.fired.began(plan) or plan.bedtime_at <= now
+        if not under_way or now >= plan.wake_at:
+            return
+        if self._away_task is not None and not self._away_task.done():
+            return
+        self.events.info(
+            HOLIDAY_KIND,
+            "Tonight is one of the nights away and it had already started, so the unit "
+            f"is being switched off now rather than at {plan.wake_at:%H:%M}.",
+        )
+        self._away_task = asyncio.create_task(self.power_off(), name="holiday")
 
     def _nudged(self, target_c: int, mode: Mode) -> int:
         """A scheduled temperature with any nudge in force applied.

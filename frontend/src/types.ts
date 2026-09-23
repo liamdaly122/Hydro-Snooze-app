@@ -344,6 +344,28 @@ export interface AutopilotNight {
  * window: shaping a night happens before it starts, nudging one happens from
  * inside it.
  */
+/* --- Holiday mode -------------------------------------------------------------
+ *
+ * Away from home, with nothing switching on for any of the nights in between.
+ * Mirrors Holiday in backend/hydrosnooze/models.py.
+ *
+ * Two dates, the way anyone says them. The first night off is the evening of
+ * `leaves_on` and the bed runs again the evening of `back_on`. In the wake
+ * mornings every night here is named by, that is every morning after the day
+ * you leave, up to and including the day you get back. See `awayOn` in
+ * domain.ts.
+ *
+ * The routine is not touched while it is set, and it ends by itself: the
+ * service stops returning it once the morning of `back_on` has gone.
+ */
+export interface Holiday {
+  /** "YYYY-MM-DD". The day you leave: that night is the first one off. */
+  leaves_on: string
+  /** "YYYY-MM-DD". The day you get back: that night runs as usual. */
+  back_on: string
+  nights: number
+}
+
 export type TonightPhase = 'none' | 'evening' | 'running' | 'after'
 
 export interface TonightState {

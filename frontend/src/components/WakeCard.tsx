@@ -2,14 +2,16 @@ import type { ReactNode } from 'react'
 import { Card } from './Card'
 import { Toggle } from './Toggle'
 import { Clock, Flame, Snowflake, Waves } from './Icons'
-import { formatDayTime, formatDays, formatDuration, formatTime, nextPlan, tint } from '../domain'
-import type { Schedule } from '../types'
+import { formatDays, formatDuration, formatTime, formatWhen, nextPlan, tint } from '../domain'
+import type { Holiday, Schedule } from '../types'
 
 interface Props {
   /** The night as it is actually being run, which is not always the routine. */
   draft: Schedule
   /** The routine, so a changed time can say what it usually is. */
   usual?: Schedule
+  /** Stepped over, so the next bedtime shown is one that will happen. */
+  holiday?: Holiday | null
   onDraftChange: (patch: Partial<Schedule>) => void
   onOpen: () => void
   children?: ReactNode
@@ -23,8 +25,8 @@ interface Props {
  * stopped being a choice, which leaves the question the card is actually for:
  * when does it wake me, is it on, and when does the unit switch itself on.
  */
-export function WakeCard({ draft, usual, onDraftChange, onOpen, children }: Props) {
-  const plan = nextPlan(draft)
+export function WakeCard({ draft, usual, holiday = null, onDraftChange, onOpen, children }: Props) {
+  const plan = nextPlan(draft, new Date(), holiday)
   const firstTemp = draft.stages[0]?.temp_c ?? 20
   const warming = draft.preconditioning.mode === 'warming'
 
@@ -67,7 +69,7 @@ export function WakeCard({ draft, usual, onDraftChange, onOpen, children }: Prop
       <div className="chips">
         <span className="chip">
           <Clock />
-          {plan ? `Bed ${formatDayTime(plan.bedtimeAt)}` : 'Not scheduled'}
+          {plan ? `Bed ${formatWhen(plan.bedtimeAt)}` : 'Not scheduled'}
         </span>
         <span className="chip">
           {warming ? <Flame /> : <Snowflake />}
