@@ -17,5 +17,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    // The 3D bed on the home screen is its own chunk, about 760 kB before
+    // compression and most of that Three.js. It is already loaded lazily, after
+    // everything else, so the usual 500 kB warning is only noise on every build.
+    chunkSizeWarningLimit: 800,
   },
 })

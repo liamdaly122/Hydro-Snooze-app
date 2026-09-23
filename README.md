@@ -129,7 +129,9 @@ backend/hydrosnooze/
 frontend/src/
   types.ts             the same vocabulary, mirrored for the app
   api/                 the client interface, the live client, and seed data
-  screens/Home.tsx     the temperature card, and nothing else that is always there
+  screens/Home.tsx     the bed and the temperature card, and nothing else that is always there
+  components/PodHero.tsx  the bed in 3D, glowing with whatever the plug says the unit is doing
+  pod/scene.ts         the 3D scene itself: the mattress, the pillows and the studio lights
   components/SideMenu.tsx  everything else: the device chips, and a way into each screen below
   screens/Autopilot.tsx  what it has learned, and how last night went
   screens/Alarm.tsx    the wake time, and the way into the whole schedule

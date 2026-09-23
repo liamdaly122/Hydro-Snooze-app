@@ -86,11 +86,15 @@ export class MockApiClient implements ApiClient {
 
   constructor() {
     this.seedEvents()
+    this.seedActivity(new URLSearchParams(location.search).get('activity'))
     // Nudge the watt reading every few seconds so the status strip and the chart
     // are never suspiciously still.
     this.drift = setInterval(() => {
       if (this.state.observed_power_w === null) return
-      const base = this.state.inferred_activity === 'cooling' ? 170 : 32
+      if (this.state.inferred_activity === 'off') return
+      const base = { cooling: 170, heating: 306, idle: 40, off: 0.4, unknown: 32 }[
+        this.state.inferred_activity
+      ]
       this.patchState({ observed_power_w: round1(base + (Math.random() - 0.5) * 14) })
     }, 4000)
   }
@@ -98,6 +102,27 @@ export class MockApiClient implements ApiClient {
   dispose(): void {
     if (this.drift) clearInterval(this.drift)
     this.listeners.clear()
+  }
+
+  /**
+   * `?activity=` on the URL starts the unit doing something other than
+   * cooling, so each look of the bed on the home screen can be judged without
+   * waiting for the real unit to do it: heating, holding, holding-warm, off or
+   * unknown.
+   */
+  private seedActivity(activity: string | null): void {
+    const set = (patch: Partial<DeviceState>) => (this.state = { ...this.state, ...patch })
+    if (activity === 'heating') {
+      set({ assumed_mode: 'warming', assumed_target_c: 28, observed_power_w: 306, inferred_activity: 'heating', observed_flow_c: 31.2, observed_return_c: 27.4 })
+    } else if (activity === 'holding') {
+      set({ observed_power_w: 41, inferred_activity: 'idle', observed_flow_c: 19.1, observed_return_c: 19.3 })
+    } else if (activity === 'holding-warm') {
+      set({ assumed_mode: 'warming', assumed_target_c: 28, observed_power_w: 41, inferred_activity: 'idle', observed_flow_c: 27.9, observed_return_c: 27.7 })
+    } else if (activity === 'off') {
+      set({ power: 'off', current_stage: null, assumed_mode: null, assumed_target_c: null, observed_power_w: 0.4, inferred_activity: 'off', observed_flow_c: 18.4, observed_return_c: 18.5 })
+    } else if (activity === 'unknown') {
+      set({ power: 'unknown', assumed_mode: null, assumed_target_c: null, observed_power_w: null, inferred_activity: 'unknown', observed_flow_c: null, observed_return_c: null })
+    }
   }
 
   async info(): Promise<ServiceInfo> {
