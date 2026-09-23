@@ -252,7 +252,7 @@ function StageNote({
     if (state.power === 'off')
       note = say(measured, 'The unit is off, so only the power button responds.')
     else if (state.power === 'unknown')
-      note = say(measured, 'Unit state unknown. Check the plug reading below.')
+      note = say(measured, 'Unit state unknown. The plug reading is under Status in the menu.')
     else if (value === null)
       note = say('Adjust the bed temp by hand with + and −.', measured)
     else if (state.current_stage !== null) {

@@ -47,26 +47,7 @@ const ORDER = ['service', 'blaster', 'plug', 'probes', 'alerts']
 export function DeviceBar({ health, connected }: Props) {
   const [open, setOpen] = useState<string | null>(null)
 
-  const devices: DeviceHealth[] = [
-    {
-      name: 'service',
-      health: connected ? 'ok' : 'down',
-      detail: connected
-        ? 'Connected. Live updates are arriving'
-        : 'Cannot reach the service. It may be restarting, or this phone may be off the network',
-      last_ok_at: null,
-    },
-    ...ORDER.slice(1).map(
-      (name) =>
-        health.find((d) => d.name === name) ?? {
-          name,
-          health: 'unknown' as Health,
-          detail: 'Not checked yet',
-          last_ok_at: null,
-        },
-    ),
-  ]
-
+  const devices = devicesFor(health, connected)
   const shown = devices.find((d) => d.name === open)
 
   return (
@@ -93,4 +74,49 @@ export function DeviceBar({ health, connected }: Props) {
       )}
     </div>
   )
+}
+
+/** Every chip, in order, with the service's own worked out from the socket. */
+function devicesFor(health: DeviceHealth[], connected: boolean): DeviceHealth[] {
+  return [
+    {
+      name: 'service',
+      health: connected ? 'ok' : 'down',
+      detail: connected
+        ? 'Connected. Live updates are arriving'
+        : 'Cannot reach the service. It may be restarting, or this phone may be off the network',
+      last_ok_at: null,
+    },
+    ...ORDER.slice(1).map(
+      (name) =>
+        health.find((d) => d.name === name) ?? {
+          name,
+          health: 'unknown' as Health,
+          detail: 'Not checked yet',
+          last_ok_at: null,
+        },
+    ),
+  ]
+}
+
+/**
+ * The worst of the chips, for the dot on the menu button. Null when nothing is
+ * wrong.
+ *
+ * The bar lived under the header on every screen, because a device going down
+ * matters wherever you happen to be looking. It lives in the side menu now, and
+ * this is what keeps that true: the chips are one tap away, and the fact that
+ * one of them has gone red is not.
+ *
+ * Simulated and unknown are not problems. One is a setup with no device there
+ * at all, the other is a device nothing has asked yet.
+ */
+export function needsAttention(
+  health: DeviceHealth[],
+  connected: boolean,
+): 'down' | 'degraded' | null {
+  const all = devicesFor(health, connected)
+  if (all.some((d) => d.health === 'down')) return 'down'
+  if (all.some((d) => d.health === 'degraded')) return 'degraded'
+  return null
 }
