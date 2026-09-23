@@ -100,23 +100,28 @@ function devicesFor(health: DeviceHealth[], connected: boolean): DeviceHealth[] 
 }
 
 /**
- * The worst of the chips, for the dot on the menu button. Null when nothing is
- * wrong.
+ * The whole row as one dot, for the menu button.
  *
  * The bar lived under the header on every screen, because a device going down
  * matters wherever you happen to be looking. It lives in the side menu now, and
  * this is what keeps that true: the chips are one tap away, and the fact that
  * one of them has gone red is not.
  *
- * Simulated and unknown are not problems. One is a setup with no device there
- * at all, the other is a device nothing has asked yet.
+ * Red or amber for the worst chip. Green only when every chip is green: the
+ * service connected and every device answering, which is the one glance that
+ * says the night is in hand without opening anything.
+ *
+ * Null otherwise, and that is deliberate. A simulated device is a setup with
+ * nothing there at all and an unknown one is a device nothing has asked yet.
+ * Neither is a problem, and neither is live, so neither earns green.
  */
-export function needsAttention(
+export function overallHealth(
   health: DeviceHealth[],
   connected: boolean,
-): 'down' | 'degraded' | null {
+): 'ok' | 'degraded' | 'down' | null {
   const all = devicesFor(health, connected)
   if (all.some((d) => d.health === 'down')) return 'down'
   if (all.some((d) => d.health === 'degraded')) return 'degraded'
+  if (all.every((d) => d.health === 'ok')) return 'ok'
   return null
 }

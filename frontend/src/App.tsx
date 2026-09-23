@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { BottomNav, type Screen } from './components/BottomNav'
 import { ChevronRight, MenuIcon } from './components/Icons'
 import { PowerButton } from './components/PowerButton'
-import { needsAttention } from './components/DeviceBar'
+import { overallHealth } from './components/DeviceBar'
 import { SideMenu, type MenuView } from './components/SideMenu'
 import { Home } from './screens/Home'
 import { History } from './screens/History'
@@ -60,7 +60,7 @@ export function App({ client }: { client: ApiClient }) {
 
   const ready = state !== null && schedule !== null
   const view: View | null = ready && screen === 'home' ? (stack[stack.length - 1] ?? null) : null
-  const attention = needsAttention(health, connected)
+  const overall = overallHealth(health, connected)
 
   // Re-read whenever the schedule is pushed. The service pushes it when a
   // holiday is set or cleared, from this phone or any other, which is the only
@@ -116,11 +116,13 @@ export function App({ client }: { client: ApiClient }) {
               type="button"
               className="app__menu"
               aria-label={
-                attention === 'down'
+                overall === 'down'
                   ? 'Menu. Something is not answering'
-                  : attention === 'degraded'
+                  : overall === 'degraded'
                     ? 'Menu. Something has gone quiet'
-                    : 'Menu'
+                    : overall === 'ok'
+                      ? 'Menu. Everything is answering'
+                      : 'Menu'
               }
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen(true)}
@@ -129,9 +131,10 @@ export function App({ client }: { client: ApiClient }) {
               {/*
                 The device chips used to sit under this header on every screen.
                 They are in the menu now, and this dot is what still reaches you
-                wherever you are when one of them goes amber or red.
+                wherever you are: amber or red when one of them does, green when
+                every one of them is.
               */}
-              {attention && <span className={`app__menu-dot app__menu-dot--${attention}`} />}
+              {overall && <span className={`app__menu-dot app__menu-dot--${overall}`} />}
             </button>
             <h1 className="app__title">HydroSnooze</h1>
           </div>
