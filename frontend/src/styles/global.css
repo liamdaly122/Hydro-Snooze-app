@@ -2218,8 +2218,9 @@ button:disabled {
   color: var(--text-faint);
 }
 
-/* Something in the menu has gone amber or red. Sits on the corner of the three
-   lines, with a ring of the header's own black so it reads at a glance. */
+/* The device chips in one dot: red or amber for the worst of them, green when
+   every one is green. Sits on the corner of the three lines, with a ring of the
+   header's own black so it reads at a glance. */
 .app__menu-dot {
   position: absolute;
   top: 5px;
@@ -2232,6 +2233,7 @@ button:disabled {
 
 .app__menu-dot--down { background: var(--red); }
 .app__menu-dot--degraded { background: var(--amber); }
+.app__menu-dot--ok { background: var(--green); }
 
 .drawer__chevron {
   flex: none;
