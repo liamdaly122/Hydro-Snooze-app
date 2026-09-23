@@ -129,10 +129,14 @@ backend/hydrosnooze/
 frontend/src/
   types.ts             the same vocabulary, mirrored for the app
   api/                 the client interface, the live client, and seed data
-  screens/Home.tsx     tonight: the stages, the temperatures, the wake time
+  screens/Home.tsx     the temperature card, and nothing else that is always there
+  components/SideMenu.tsx  everything else: the device chips, and a way into each screen below
   screens/Autopilot.tsx  what it has learned, and how last night went
+  screens/Alarm.tsx    the wake time, and the way into the whole schedule
+  screens/CoolingSpeed.tsx  the cooling speed, now or for tonight
+  screens/Status.tsx   what the unit is doing, as far as anything can tell
   screens/History.tsx  power, temperature and the event log
-  screens/Holiday.tsx  holiday mode, from the side menu: the day I leave and the day I am back
+  screens/Holiday.tsx  holiday mode: the day I leave and the day I am back
   screens/Dev.tsx      the time machine and the press log
 scripts/dev.sh         run the whole thing on this machine
 scripts/deploy.sh      copy the working tree to the Pi

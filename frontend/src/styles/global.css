@@ -1711,49 +1711,6 @@ button:disabled {
 .ap-notes li { margin-bottom: 8px; }
 .ap-notes li:last-child { margin-bottom: 0; }
 
-/* --- The way in, on the home screen ----------------------------------------- */
-
-.ap-teaser {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 16px 18px;
-  border: 0;
-  border-radius: var(--radius-card);
-  text-align: left;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-  background:
-    radial-gradient(130% 130% at 100% 0%, #354fe0 0%, #1b2a9e 40%, transparent 100%),
-    linear-gradient(150deg, #0c0c14 0%, #101540 100%);
-}
-
-.ap-teaser:active { opacity: 0.85; }
-
-.ap-teaser__mark { flex: none; filter: drop-shadow(0 0 10px rgb(140 176 255 / 0.6)); }
-
-.ap-teaser__text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.ap-teaser__title {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.ap-teaser__sub {
-  margin-top: 2px;
-  font-size: 13px;
-  color: rgb(255 255 255 / 0.6);
-}
-
-.ap-teaser__chevron { flex: none; color: rgb(255 255 255 / 0.5); }
-
 /* The Autopilot mark beside the placeholder in the Temperature card. Inline with
    the text rather than absolute, so it moves with a line that wraps at 390px. */
 .stage__mark {
@@ -2157,6 +2114,8 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: calc(var(--safe-top) + 14px) 10px calc(var(--safe-bottom) + 16px);
   border-radius: 0 24px 24px 0;
   background: #1c1c1e;
@@ -2240,6 +2199,39 @@ button:disabled {
 .drawer__sub--on {
   color: var(--amber);
 }
+
+/* The device chips, at the top of the menu. The bar's own padding was for the
+   width of the screen; in here it lines up with the rows under it instead. */
+.drawer__devices {
+  padding: 4px 10px 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.drawer__devices .devices {
+  padding: 0;
+}
+
+.drawer__waiting {
+  margin: 8px 10px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* Something in the menu has gone amber or red. Sits on the corner of the three
+   lines, with a ring of the header's own black so it reads at a glance. */
+.app__menu-dot {
+  position: absolute;
+  top: 5px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.app__menu-dot--down { background: var(--red); }
+.app__menu-dot--degraded { background: var(--amber); }
 
 .drawer__chevron {
   flex: none;
