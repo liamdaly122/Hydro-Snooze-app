@@ -420,12 +420,13 @@ export function createPod(
     underglow.color.copy(glow.mid).lerp(glow.bright, 0.35)
     underglow.intensity = TUNE.underglow * glow.glow * breath
 
-    // A slow sway, and whatever a finger has added. The finger's turn springs
-    // back once it lets go.
+    // Square on to the screen, so its front edge runs parallel to the card
+    // below. It used to sway a few degrees either way on its own, and caught
+    // mid-swing it just looked crooked. A finger can still turn it, and it
+    // springs back to square once it lets go.
     const kt = options.still ? 1 : 1 - Math.exp(-dt * 6)
     turn += (turnTarget - turn) * kt
-    const sway = options.still ? 0 : Math.sin(time * 0.35) * 0.07
-    bed.rotation.y = sway + turn
+    bed.rotation.y = turn
   }
 
   function render(now: number) {
