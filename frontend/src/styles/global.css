@@ -2395,3 +2395,86 @@ button:disabled {
   place-items: center;
   color: #8fc3ff;
 }
+
+/* --- The bed ----------------------------------------------------------------------
+ *
+ * Edge to edge rather than inside a card, and faded into the page at every edge,
+ * so it reads as the bed sitting in the dark rather than a picture of one in a
+ * box. The same height before the 3D has loaded as after, so the Temperature card
+ * below does not jump when it arrives.
+ */
+
+.pod {
+  position: relative;
+  height: clamp(220px, 64vw, 300px);
+  margin: -8px calc(-1 * var(--gutter)) 0;
+}
+
+/* What a finger turns. The canvas inside it is made by the component, fresh on
+   every mount, so the styling is here rather than on anything React renders. */
+.pod__stage {
+  position: absolute;
+  inset: 0;
+  /* Sideways turns the bed; up and down is still the page scrolling. */
+  touch-action: pan-y;
+  cursor: grab;
+}
+
+.pod__stage:active {
+  cursor: grabbing;
+}
+
+.pod__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-mask-image:
+    linear-gradient(to bottom, transparent 0, #000 12%, #000 80%, transparent 100%),
+    linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to bottom, transparent 0, #000 12%, #000 80%, transparent 100%),
+    linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.pod__caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-mid);
+  pointer-events: none;
+}
+
+.pod__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.pod__dot--cooling,
+.pod__dot--holding-cool {
+  background: #8f7dff;
+  box-shadow: 0 0 8px #6a52ff;
+}
+
+.pod__dot--heating,
+.pod__dot--holding-warm {
+  background: #ff8a4c;
+  box-shadow: 0 0 8px #ff5a1f;
+}
+
+.pod__dot--holding-cool,
+.pod__dot--holding-warm {
+  box-shadow: none;
+}

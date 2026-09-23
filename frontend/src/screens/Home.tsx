@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { TemperatureCard } from '../components/TemperatureCard'
 import { TonightBanner } from '../components/TonightBanner'
 import { HolidayBanner } from '../components/HolidayBanner'
 import { KeepTonight, NudgeControls } from '../components/TonightControls'
 import type { ApiClient } from '../api/client'
 import type { DeviceState, Holiday, Schedule, Stage, TonightState } from '../types'
+
+// Its own chunk, fetched after the rest of the screen is up. A 3D engine is
+// most of the app by weight, and the temperature should never wait for it.
+const PodHero = lazy(() => import('../components/PodHero'))
 
 interface Props {
   client: ApiClient
@@ -21,13 +25,13 @@ interface Props {
 }
 
 /**
- * The temperature, and nothing else that is always there.
+ * The bed, and the temperature.
  *
  * Alarm, cooling speed, status and Autopilot each moved to a screen of their own
  * behind the side menu, along with the device chips. What stays is the card
- * you actually reach for at night, and the two lines that only appear when
- * tonight is not your usual night, because one of them is the undo for what
- * this card changes.
+ * you actually reach for at night, the bed above it showing what the unit is
+ * doing, and the two lines that only appear when tonight is not your usual
+ * night, because one of them is the undo for what this card changes.
  */
 export function Home({
   client,
@@ -75,6 +79,11 @@ export function Home({
           onClear={() => run(client.clearTonight())}
         />
       )}
+
+      {/* The same height while it loads, so the card below does not jump. */}
+      <Suspense fallback={<div className="pod" aria-hidden="true" />}>
+        <PodHero state={state} />
+      </Suspense>
 
       <TemperatureCard
         state={state}
