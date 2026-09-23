@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import (
     autopilot_json,
+    holiday_json,
     learning_json,
     schedule_json,
     health_json,
@@ -292,6 +293,42 @@ async def post_tonight_keep(request: Request) -> dict[str, object]:
         service.update_schedule({"cooling_speed": tonight.cooling_speed})
         service.set_speed_tonight(tonight.cooling_speed)
     return schedule_json(service.schedule)
+
+
+# --- Holiday mode ----------------------------------------------------------------
+#
+# Skipping, for every night you are away. The routine is not touched, and it ends
+# by itself on the day you get back.
+
+
+class HolidayBody(BaseModel):
+    #: The day you leave. The first night off is that evening.
+    leaves_on: date
+    #: The day you get back. That evening the bed runs again.
+    back_on: date
+
+
+@router.get("/holiday")
+async def get_holiday(request: Request) -> dict[str, object] | None:
+    """The holiday, or null when there is none or it is over."""
+    return holiday_json(_service(request).holiday_state())
+
+
+@router.put("/holiday")
+async def put_holiday(request: Request, body: HolidayBody) -> dict[str, object] | None:
+    """Set the dates, replacing any holiday already set."""
+    service = _service(request)
+    try:
+        await service.set_holiday(body.leaves_on, body.back_on)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return holiday_json(service.holiday_state())
+
+
+@router.delete("/holiday")
+async def delete_holiday(request: Request) -> None:
+    """Holiday mode off. The next night that has not started runs as usual."""
+    _service(request).clear_holiday()
 
 
 @router.get("/autopilot")

@@ -22,7 +22,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Callable, Literal
 
-from .models import LearnedLead, NightPlan, Schedule, Stage, StageStep, Tonight, Underway
+from .models import (
+    Holiday,
+    LearnedLead,
+    NightPlan,
+    Schedule,
+    Stage,
+    StageStep,
+    Tonight,
+    Underway,
+)
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +204,26 @@ class FiredMarks:
         """Which jobs were called off for this night rather than run or missed."""
         return self._outcomes(plan, self.CANCELLED)
 
+    def began(self, plan: NightPlan) -> bool:
+        """Whether this night got as far as driving the unit.
+
+        Getting the bed ready or a stage, however it ended. One that ran or was
+        given up on means the night was under way; one called off means it was
+        already being wound up, and has to carry on being wound up on the next
+        tick rather than vanish half way. The blaster restart does not count,
+        because it happens before the unit is touched at all.
+        """
+        head = self.night(plan) + self.SEP
+        for key in self.done:
+            if not key.startswith(head):
+                continue
+            job = key[len(head):]
+            for prefix in (self.GAVE_UP, self.CANCELLED):
+                job = job.removeprefix(prefix)
+            if job == "precool" or job.startswith("stage:"):
+                return True
+        return False
+
     def _outcomes(self, plan: NightPlan, prefix: str) -> set[str]:
         head = self.night(plan) + self.SEP
         out: set[str] = set()
@@ -270,6 +299,9 @@ class Scheduler:
     learned_lead: LearnedLead | None = None
     #: The exception to the routine, for one night. None most of the time.
     tonight: Tonight | None = None
+    #: Away from home. Every night inside it is treated the way a skipped night
+    #: is, so nothing below has to know the difference. None most of the time.
+    holiday: Holiday | None = None
     #: What the hose probes read right now, or None when they are not reporting.
     #:
     #: A callable rather than a number, because the plan is worked out fresh on
@@ -317,6 +349,14 @@ class Scheduler:
                 # the app was left holding a perfectly good plan for the wrong
                 # night while tonight's bed ran until the Shelly caught it.
                 if skipped and now < plan.starts_at:
+                    continue
+                # A night away that never began is not a night at all, however
+                # late it gets. The clock alone cannot say that: past its start
+                # time, a night skipped a week in advance looks exactly like one
+                # skipped at 2am, and winding it up meant a line for every stage,
+                # a switch-off, and a morning report about a bed nobody was in,
+                # for every night of the holiday. What ran for it can say it.
+                if self.away(wake_on) and not self.fired.began(plan):
                     continue
                 # Switching automation off stops the next night. It does not
                 # abandon one already under way.
@@ -379,13 +419,22 @@ class Scheduler:
         laid over it when there are any. None when the night is being skipped,
         which leaves the weekly routine exactly as it was: skipping a Tuesday is
         not the same as deciding you no longer sleep on Tuesdays.
+
+        A night away on holiday is None too, for the same reason and ahead of
+        anything tonight says. Tonight's temperatures are for somebody in the bed.
         """
+        if self.away(wake_on):
+            return None
         tonight = self.tonight
         if tonight is None or not tonight.applies_on(wake_on):
             return schedule
         if tonight.skip:
             return None
         return tonight.over(schedule)
+
+    def away(self, wake_on: date) -> bool:
+        """Whether this night is one of the nights away on holiday."""
+        return self.holiday is not None and self.holiday.away_on(wake_on)
 
     def only_finishing(self, schedule: Schedule, now: datetime) -> bool:
         """Whether tonight is being wound up rather than run.
@@ -400,19 +449,23 @@ class Scheduler:
         holding last night's row cancelled every stage of a night that was going
         to run perfectly well, which is a worse failure than the one that change
         was made to fix: that lost a switch-off, this loses the whole night.
+
+        A holiday says it about a run of nights, and is asked the same way. It
+        only changes anything for a night that had already started when the
+        holiday was set. One that had not is never planned at all, so there is
+        nothing of it to wind up.
         """
         if self.rehearsal is not None:
             return False
         if not schedule.enabled:
             return True
         wake_on = self.night_date(schedule, now)
+        if wake_on is None:
+            return False
+        if self.away(wake_on):
+            return True
         tonight = self.tonight
-        return (
-            wake_on is not None
-            and tonight is not None
-            and tonight.applies_on(wake_on)
-            and tonight.skip
-        )
+        return tonight is not None and tonight.applies_on(wake_on) and tonight.skip
 
     def last_finished(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The most recent night that is over, for the morning report to describe.

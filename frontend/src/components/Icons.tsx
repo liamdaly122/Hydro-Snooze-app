@@ -168,6 +168,25 @@ export function Moon({ size = 15 }: IconProps) {
   )
 }
 
+/** Opens the side menu. Three lines, the one menu mark nobody has to learn. */
+export function MenuIcon({ size = 22 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16" {...stroke} strokeWidth={1.8} />
+    </svg>
+  )
+}
+
+/** Holiday mode. */
+export function Suitcase({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="7.5" width="17" height="12" rx="2.2" {...stroke} />
+      <path d="M9 7.5V5.2a1 1 0 011-1h4a1 1 0 011 1v2.3M8 7.5v12M16 7.5v12" {...stroke} />
+    </svg>
+  )
+}
+
 /** Closes a pushed screen. */
 export function Close({ size = 20, className }: IconProps) {
   return (

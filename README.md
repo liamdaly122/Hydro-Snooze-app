@@ -132,6 +132,7 @@ frontend/src/
   screens/Home.tsx     tonight: the stages, the temperatures, the wake time
   screens/Autopilot.tsx  what it has learned, and how last night went
   screens/History.tsx  power, temperature and the event log
+  screens/Holiday.tsx  holiday mode, from the side menu: the day I leave and the day I am back
   screens/Dev.tsx      the time machine and the press log
 scripts/dev.sh         run the whole thing on this machine
 scripts/deploy.sh      copy the working tree to the Pi

@@ -833,6 +833,47 @@ class Tonight:
         )
 
 
+@dataclass(frozen=True)
+class Holiday:
+    """Away from home for a run of nights, with nothing switching on for any of them.
+
+    Two dates, the way anyone says them: the day you leave and the day you get
+    back. The first night off is the evening you leave and the first night back
+    is the evening you get home.
+
+    Every night in this project is named by its wake morning, so in those terms
+    the nights off are every morning after the day you leave, up to and
+    including the day you get back. Leave on Friday and get back on Sunday, and
+    Friday and Saturday night are off: the Saturday and Sunday mornings.
+    Thursday night still runs, and so does Sunday night.
+
+    Skipping, for longer, and not a change to the routine for the same reason
+    skipping one night is not. A week away is not deciding you no longer sleep on
+    Tuesdays, and getting home should not mean remembering which days to put
+    back. It expires by the calendar too, like Tonight: nothing has to remember
+    to switch it off.
+    """
+
+    leaves_on: date
+    back_on: date
+
+    def away_on(self, wake_on: date) -> bool:
+        """Whether the night ending on this morning is one of the nights away."""
+        return self.leaves_on < wake_on <= self.back_on
+
+    @property
+    def nights(self) -> int:
+        return (self.back_on - self.leaves_on).days
+
+    def over_by(self, today: date) -> bool:
+        """Spent once the last morning away has been and gone.
+
+        Not on the day you get back. The last night away ends that morning, and
+        a restart at 3am on it still has to know that night is being wound up.
+        """
+        return today > self.back_on
+
+
 def plan_for_wake(
     wake_on: date,
     wake_time: time,

@@ -8,6 +8,7 @@ import {
   MODE_RANGE,
   WARMING_FLOOR_C,
   type DeviceState,
+  type Holiday,
   type Mode,
   type Schedule,
   type SleepStage,
@@ -84,18 +85,128 @@ export function planForWake(wakeOn: Date, schedule: Schedule): NightPlan {
   return { precoolAt, bedtimeAt, wakeAt, steps }
 }
 
-/** The next night that has not started yet, or null if the schedule is off. */
-export function nextPlan(schedule: Schedule, now: Date = new Date()): NightPlan | null {
+/**
+ * The next night that has not started yet, or null if the schedule is off.
+ *
+ * A holiday's nights are stepped over, and the search runs a week past the day
+ * you get back rather than a week from now. Without that, a fortnight away left
+ * the Alarm card promising a bedtime nothing was going to keep, and then "Not
+ * scheduled" for a routine that was only resting.
+ */
+export function nextPlan(
+  schedule: Schedule,
+  now: Date = new Date(),
+  holiday: Holiday | null = null,
+): NightPlan | null {
   if (!schedule.enabled || schedule.days_of_week.length === 0) return null
-  for (let offset = 0; offset < 8; offset += 1) {
+  const away = holiday ? Math.max(0, daysBetween(isoDay(now), holiday.back_on)) : 0
+  for (let offset = 0; offset < 8 + away; offset += 1) {
     const day = new Date(now)
     day.setDate(day.getDate() + offset)
     if (!schedule.days_of_week.includes(mondayFirstDay(day))) continue
+    if (awayOn(holiday, day)) continue
     const plan = planForWake(day, schedule)
     const startsAt = plan.precoolAt ?? plan.bedtimeAt
     if (startsAt.getTime() > now.getTime()) return plan
   }
   return null
+}
+
+// --- Calendar days ------------------------------------------------------------
+//
+// A holiday is two calendar days, not two moments, and the service writes them
+// as "2026-10-02". `new Date("2026-10-02")` reads that as midnight UTC, which in
+// a British summer is one in the morning and anywhere west of Greenwich is the
+// day before. So they are taken apart and put back together by hand, in local
+// time, and compared as strings, which sort correctly as they are.
+
+export const MONTH_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+export const MONTH_LONG = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+/** "2026-10-02", in local time. */
+export function isoDay(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** Local midnight on that day. */
+export function parseDay(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y!, m! - 1, d!)
+}
+
+/** Whole days from one to the other. Rounded, so a clock change is not a day. */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((parseDay(to).getTime() - parseDay(from).getTime()) / 86_400_000)
+}
+
+/** The same day, `days` later. */
+export function addDays(iso: string, days: number): string {
+  const d = parseDay(iso)
+  d.setDate(d.getDate() + days)
+  return isoDay(d)
+}
+
+/** "Fri 2 Oct". */
+export function formatDay(d: Date): string {
+  return `${DAY_SHORT[mondayFirstDay(d)]} ${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`
+}
+
+/**
+ * "Mon 22:30" when it is this week, "Mon 12 Oct 22:30" when it is not.
+ *
+ * A weekday on its own is only an answer while there is one of each ahead. Two
+ * weeks away and "Mon" could be either of two Mondays.
+ */
+export function formatWhen(d: Date, now: Date = new Date()): string {
+  const far = d.getTime() - now.getTime() > 6 * 86_400_000
+  return far ? `${formatDay(d)} ${formatTime(d)}` : formatDayTime(d)
+}
+
+/**
+ * Whether the night ending on this morning is one of the nights away.
+ *
+ * Mirrors Holiday.away_on. Every morning after the day you leave, up to and
+ * including the day you get back: leave on Friday, back on Sunday, and the
+ * Saturday and Sunday mornings are the Friday and Saturday nights.
+ */
+export function awayOn(holiday: Holiday | null, wakeOn: Date): boolean {
+  if (!holiday) return false
+  const day = isoDay(wakeOn)
+  return day > holiday.leaves_on && day <= holiday.back_on
+}
+
+/**
+ * The first night the bed runs after a holiday, as a plan.
+ *
+ * Not always the night you get back. A schedule that has Sunday nights off
+ * starts again on Monday, and saying "tonight" to somebody walking in on a
+ * Sunday would be the kind of promise this app does not make.
+ */
+export function firstNightBack(schedule: Schedule, holiday: Holiday): NightPlan | null {
+  if (!schedule.enabled || schedule.days_of_week.length === 0) return null
+  for (let offset = 1; offset <= 7; offset += 1) {
+    const wakeOn = parseDay(addDays(holiday.back_on, offset))
+    if (schedule.days_of_week.includes(mondayFirstDay(wakeOn))) {
+      return planForWake(wakeOn, schedule)
+    }
+  }
+  return null
+}
+
+/** How many of the nights away the bed would otherwise have run. */
+export function scheduledNightsAway(schedule: Schedule, holiday: Holiday): number {
+  let count = 0
+  for (let n = 1; n <= holiday.nights; n += 1) {
+    const wakeOn = parseDay(addDays(holiday.leaves_on, n))
+    if (schedule.days_of_week.includes(mondayFirstDay(wakeOn))) count += 1
+  }
+  return count
 }
 
 export function formatTime(d: Date): string {

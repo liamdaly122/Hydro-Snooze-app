@@ -2099,3 +2099,305 @@ button:disabled {
 .learn .footnote {
   margin: 16px 0 0;
 }
+
+/* --- The side menu -------------------------------------------------------------
+ *
+ * For the things worth having and not worth a place on the home screen. It
+ * slides over everything, including the bottom nav, because it is a place you go
+ * rather than a panel beside where you are.
+ */
+
+.app__lead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.app__menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: -4px 0 -4px -8px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+}
+
+/* Drawn at 36 and hit at 44, the same as the power button opposite it. */
+.app__menu::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+.app__menu:active {
+  background: var(--control);
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(6px);
+  animation: drawer-fade 0.2s var(--ease);
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(300px, 82vw);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: calc(var(--safe-top) + 14px) 10px calc(var(--safe-bottom) + 16px);
+  border-radius: 0 24px 24px 0;
+  background: #1c1c1e;
+  animation: drawer-in 0.28s var(--ease);
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 12px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.drawer__title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-mid);
+}
+
+.drawer__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+}
+
+.drawer__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.drawer__item:active {
+  background: var(--control-active);
+}
+
+.drawer__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--control);
+  color: var(--text-label);
+}
+
+.drawer__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer__label {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.drawer__sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* On is the unusual state, and the one worth noticing on the way past. */
+.drawer__sub--on {
+  color: var(--amber);
+}
+
+.drawer__chevron {
+  flex: none;
+  color: var(--text-faint);
+}
+
+@keyframes drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes drawer-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --- Holiday mode ----------------------------------------------------------------
+ *
+ * A month at a time, with the stretch you are away shaded between the two days
+ * picked. Blue, the colour this app already uses for doing something on purpose.
+ */
+
+.cal__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.cal__month {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cal__step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--control);
+  color: var(--text-label);
+}
+
+.cal__step:disabled {
+  opacity: 0.3;
+}
+
+.cal__back {
+  transform: rotate(180deg);
+}
+
+.cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 2px;
+  margin-top: 12px;
+}
+
+.cal__dow {
+  padding-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.cal__day {
+  position: relative;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal__day span {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.cal__day:disabled {
+  color: var(--text-faint);
+  opacity: 0.5;
+}
+
+.cal__day.is-today span {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+/* The band behind the nights away. Half a cell on each end, so it starts and
+   stops under the middle of the two circles rather than at their edges. */
+.cal__day.is-between::before,
+.cal__day.has-end::before,
+.cal__day.is-end::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  right: 0;
+  background: rgb(10 132 255 / 0.18);
+}
+
+.cal__day.has-end::before { left: 50%; }
+.cal__day.is-end::before { right: 50%; }
+
+.cal__day.is-start span,
+.cal__day.is-end span {
+  background: var(--blue);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.holiday__day {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.holiday__day--unset {
+  color: var(--text-faint);
+}
+
+/* Turning it on is the point of the screen, so it is the one blue button on it. */
+.holiday__save:not(:disabled) {
+  background: var(--blue);
+  color: #fff;
+}
+
+.footnote--error {
+  color: var(--red);
+}
+
+/* On the home screen: one line, nothing to tap. See HolidayBanner. */
+.holiday-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border-radius: 16px;
+  background: linear-gradient(120deg, rgb(10 132 255 / 0.18), rgb(10 132 255 / 0.06));
+  border: 1px solid rgb(10 132 255 / 0.35);
+}
+
+.holiday-banner__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: #8fc3ff;
+}
