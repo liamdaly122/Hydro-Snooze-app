@@ -12,6 +12,21 @@ body,
   height: 100%;
 }
 
+/* On the iPhone Home Screen, 100% is short by the height of the status bar.
+ *
+ * The status bar is black-translucent, so iOS draws the page up underneath it,
+ * and 100% is then measured as though the status bar still took its share.
+ * A page that scrolls never notices, because it is taller than the screen
+ * anyway. Home fits the screen exactly, so it did: the page ended a status bar
+ * short of the bottom and the bottom bar sat raised with it, on that screen
+ * and no other.
+ *
+ * Adding the status bar back makes the page the full height of the screen. In
+ * a browser the inset is 0 and this changes nothing. */
+html {
+  min-height: calc(100% + env(safe-area-inset-top, 0px));
+}
+
 body {
   margin: 0;
   background: var(--bg);
