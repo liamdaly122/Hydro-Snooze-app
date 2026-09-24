@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { BedByStage } from '../components/BedByStage'
 import { Hypnogram, STAGE_COLOUR, STAGE_LABEL, STAGE_ORDER } from '../components/Hypnogram'
 import { Bed, ChevronRight, Clock, Moon, Sparkle } from '../components/Icons'
 import { ScoreGauge } from '../components/ScoreGauge'
@@ -336,6 +337,17 @@ function Night({ night }: { night: HealthNight }) {
 
         <StageRow name="REM sleep" colour={STAGE_COLOUR.rem} against={night.rem} />
         <StageRow name="Deep sleep" colour={STAGE_COLOUR.deep} against={night.deep} />
+      </section>
+
+      <section className="card hr-card">
+        <h3 className="hr-card__title">Bed temperature</h3>
+        <p className="hr-card__sub">What the bed was doing in each stage of your sleep.</p>
+        <BedByStage
+          bed={night.bed}
+          stages={night.stages}
+          outOfBed={night.out_of_bed}
+          endsAt={night.in_bed.ends_at}
+        />
       </section>
 
       <section className="card hr-card">

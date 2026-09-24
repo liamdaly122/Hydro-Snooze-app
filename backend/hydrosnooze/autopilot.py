@@ -16,23 +16,27 @@ three real reasons the app ever changes anything:
     ambient    getting the bed ready before anyone is in it
     response   a correction made mid-stage, because the bed drifted
 
-**The boosts are invented and say so.** Liam asked for them, and asked for them
-to be fun. They are still the one thing in this project that is not measured, so
-two rules keep them honest: they are derived from how tightly the bed actually
-held its setpoints, so the same night always gives the same figures and a badly
-tracked night gives smaller ones, and the card they sit on says out loud that
-nothing here measures sleep.
+**The sleep at the top is measured.** It used to be three invented "boosts",
+worked out from how tightly the bed held its setpoints, because nothing in the
+house could see sleep and Liam wanted the card anyway. The Sleep Analyzer can,
+so they are gone: deep sleep, REM and time to fall asleep are the mat's, each
+set against my usual. They say what changed, never that Autopilot changed it.
+See withings/health.py, against_usual.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from .db import PreconditionRow, Sample
 from .events import Event
-from .models import QUIET_KIND, NightPlan, Stage, StageStep
+from .models import QUIET_KIND, NightPlan, StageStep
 from .report import FALLBACK_SAMPLE_S, kwh
+
+if TYPE_CHECKING:
+    from .withings.health import AgainstUsual
 
 #: The event kind a stage boundary is logged under.
 #:
@@ -106,15 +110,6 @@ DRIFTED_C = 2.5
 #: settled, so anything tighter would be measuring the probes rather than the bed.
 ON_TARGET_C = 0.5
 
-#: A perfectly tracked stage is worth this much made-up improvement, and a stage
-#: this far off on average is worth none of it.
-#:
-#: Both numbers are chosen to land the figures somewhere plausible rather than
-#: derived from anything. That is the whole point of this pair of constants
-#: sitting on their own with a comment saying so.
-BOOST_CEILING = 32
-BOOST_FLOOR_C = 2.5
-
 
 @dataclass(frozen=True)
 class Mark:
@@ -154,13 +149,6 @@ class Point:
 
 
 @dataclass(frozen=True)
-class Boost:
-    key: str
-    label: str
-    percent: int
-
-
-@dataclass(frozen=True)
 class Band:
     """One stage, for shading the chart behind the line."""
 
@@ -177,7 +165,6 @@ class Night:
     marks: list[Mark]
     track: list[Point]
     bands: list[Band]
-    boosts: list[Boost]
     stages_landed: int
     stages_total: int
     missed: list[str]
@@ -195,6 +182,9 @@ class Night:
     typical_off_c: float | None
     ready: PreconditionRow | None
     notes: list[str]
+    #: The mat's deep sleep, REM and time to fall asleep for this night, each
+    #: against my usual. Empty when the mat has nothing for the morning.
+    sleep: list[AgainstUsual] = field(default_factory=list)
 
     @property
     def adjustments(self) -> int:
@@ -334,54 +324,6 @@ def _bands(plan: NightPlan) -> list[Band]:
     ]
 
 
-def _held(plan: NightPlan, samples: list[Sample], stage: Stage) -> float | None:
-    """Mean distance from setpoint across every stretch of a given stage."""
-    steps = [s for s in plan.steps if s.stage is stage]
-    if not steps:
-        return None
-    off: list[float] = []
-    for sample in samples:
-        if sample.return_c is None:
-            continue
-        step = next((s for s in steps if s.starts_at <= sample.at < s.ends_at), None)
-        if step is not None:
-            off.append(abs(sample.return_c - step.temp_c))
-    return sum(off) / len(off) if off else None
-
-
-def _boosts(plan: NightPlan, samples: list[Sample], ready: PreconditionRow | None) -> list[Boost]:
-    """The made-up ones.
-
-    Every number here comes from how close the bed actually sat to the stage it
-    was in, so it moves with the night and repeats exactly on the same night. It
-    is still invented, and the card it lands on says so.
-    """
-    out: list[Boost] = []
-    for key, stage, label in (
-        ("deep", Stage.DEEP, "Increased deep sleep"),
-        ("rem", Stage.REM, "Increased REM sleep"),
-    ):
-        held = _held(plan, samples, stage)
-        if held is None:
-            continue
-        quality = max(0.0, 1.0 - held / BOOST_FLOOR_C)
-        percent = round(BOOST_CEILING * quality)
-        if percent:
-            out.append(Boost(key=key, label=label, percent=percent))
-
-    # The third one is about the half hour before anyone is in the bed, which is
-    # the only stretch of the night this system genuinely controls on its own.
-    if ready is not None and ready.reached:
-        out.append(
-            Boost(
-                key="ready",
-                label="Fell asleep faster",
-                percent=max(4, 20 - ready.seconds // 120),
-            )
-        )
-    return out
-
-
 def _notes(events: list[Event]) -> list[str]:
     return [e.message for e in events if e.level in ("warning", "error")]
 
@@ -394,6 +336,7 @@ def build(
     ready: PreconditionRow | None = None,
     *,
     cancelled: set[str] = frozenset(),
+    sleep: list[AgainstUsual] | None = None,
 ) -> Night:
     """One night, as the app draws it. Reads what was recorded; decides nothing."""
     landed = [s for s in plan.steps if f"stage:{s.stage.value}" in fired]
@@ -421,7 +364,6 @@ def build(
         marks=_marks(plan, events, track),
         track=track,
         bands=_bands(plan),
-        boosts=_boosts(plan, samples, ready),
         stages_landed=len(landed),
         stages_total=len(plan.steps),
         missed=missed,
@@ -441,4 +383,5 @@ def build(
         typical_off_c=round(sum(off) / len(off), 1) if off else None,
         ready=ready,
         notes=_notes(events),
+        sleep=list(sleep or []),
     )

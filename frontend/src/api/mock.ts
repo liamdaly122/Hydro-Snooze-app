@@ -14,6 +14,7 @@
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   AutopilotNight,
+  AutopilotSleep,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -481,7 +482,7 @@ export class MockApiClient implements ApiClient {
 
   async getAutopilot(): Promise<AutopilotNight> {
     await sleep(120)
-    return seedNight()
+    return { ...seedNight(), sleep: (await this.health()).autopilot_sleep }
   }
 
   /**
@@ -775,6 +776,7 @@ interface HealthSeed {
   latest: string
   status: WithingsStatus
   reports: Record<string, HealthReport>
+  autopilot_sleep: AutopilotSleep[]
 }
 
 /** Seven empty days, Sunday first, around a morning. */
@@ -881,11 +883,9 @@ function seedNight(): AutopilotNight {
       ends_at: b.ends_at.toISOString(),
       temp_c: b.temp_c,
     })),
-    boosts: [
-      { key: 'deep', label: 'Increased deep sleep', percent: 30, for_fun: true },
-      { key: 'rem', label: 'Increased REM sleep', percent: 27, for_fun: true },
-      { key: 'ready', label: 'Fell asleep faster', percent: 6, for_fun: true },
-    ],
+    // Filled in by getAutopilot from seed-health.json, where the real
+    // against_usual worked it out for the seed's last night.
+    sleep: [],
     stages: { landed: 3, total: 3, missed: [], cancelled: [] },
     on_target: Math.round((100 * off.filter((o) => o <= 0.5).length) / off.length),
     // Seed data is written as though the app had always recorded its target.

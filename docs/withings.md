@@ -380,7 +380,8 @@ following night.
 So a night seen once is not a night finished. The loop has to store each one
 against its `id` and replace it every time `lastupdate` hands it back, never append
 it. That the `id` stays the same while a night grows is an assumption: one capture
-cannot show it.
+cannot show it. The loop now writes down what it sees as it happens, under
+[Still unknown](#still-unknown).
 
 ---
 
@@ -464,6 +465,43 @@ Four decisions that are not obvious from the code alone:
   refresh token stays good for eight hours after a rotation whose answer never
   arrived, so a refusal can pass by itself
 
+### The bed against the sleep
+
+This is what the integration is for. `health.py` puts the bed's temperature on the
+same one-minute grid as the stages, from getting into bed to getting out for the
+last time, and averages it within each state: deep, REM, light, awake and out of
+bed. The Health Report draws it as the bed's line over the night, the temperature
+the schedule asked for as a dashed staircase, and the stages as a strip underneath,
+so whatever the bed was doing sits directly above the stage it was doing it in.
+
+**The bed is the return hose**, the water that has just been through the mattress,
+with the outgoing hose standing in when the return probe is quiet. That is the same
+rule the live readings use. A minute with no reading is a gap, never a line drawn
+across it, and each average says how many of its minutes had one.
+
+**The two tables do not keep time the same way.** Everything from Withings is unix
+time. `power_samples.at` is local time with no offset, because that is how the rest
+of the service stores it. Most of the year that converts one way only. On the night
+the clocks go back, 01:00 to 02:00 happens twice and every sample in it has two
+possible meanings an hour apart. The join reads the samples in the order they were
+written, not the order of their timestamps, and gives each one the earlier meaning
+that does not put it before the sample in front of it. The first sample takes
+whichever meaning falls inside the night. A test runs a whole night across the
+change, and it fails if either of those rules is taken out.
+
+What it shows is two things side by side, never one causing the other. A night with
+more deep sleep under a colder bed is a coincidence until enough nights say
+otherwise.
+
+### The Autopilot screen
+
+The three "boosts" at the top of the Autopilot screen are gone. They were worked
+out from the water and labelled as sleep, from before anything in the house
+measured sleep. In their place are deep sleep, REM and time to fall asleep from the
+mat, for the same morning, each against my usual: the median of up to fourteen
+nights before it within the last sixty days. The change appears once there are
+three. With no night on the mat for that morning, the section is not drawn at all.
+
 To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
 restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report
 tab and press Connect Withings. The first pass fetches the last month.
@@ -501,10 +539,22 @@ intervals cover the night, and which fields come back. Seven real nights answere
 all four, above. These are what is left, and none of them has been measured.
 
 **Whether `completed` is ever false.** All seven nights were captured after the
-fact. One capture in the small hours, after getting up and before getting back in,
-would show what an unfinished night looks like.
+fact. Rather than a capture at 3am, the loop now writes down what it sees as it
+happens: a night that is not completed yet, the pass that finds it completed, a
+completed night that grows anyway, and a night that comes back under a new id. On
+the Pi:
 
-**Whether a night's `id` survives it growing.** The same capture would show that.
+```bash
+journalctl -u hydrosnooze | grep "Withings observed"
+```
+
+The loop runs every half hour, so a night that is only unfinished for twenty
+minutes can slip between two passes. Any morning after a trip out of bed in the
+small hours should leave a line.
+
+**Whether a night's `id` survives it growing.** The same lines will show that. The
+store already copes either way, because it matches a night on its start as well as
+its id.
 
 **What 255 means in `mvt_score`.** It is the top value, seven times, all awake,
 sitting on a spread that runs up to 245. That reads as the ceiling of the scale
@@ -513,5 +563,8 @@ rather than a code for "no reading", but it is a guess.
 **The 5xx row in the error table.** `aiowithings`, the client Home Assistant uses,
 treats only 522 as a timeout and 524 as a bad state, and files most of 501 to 533
 as invalid parameters or other errors. It also counts 401 as an authentication
-failure and 2553 to 2555 as unauthorised. Check that against `openapi.yaml` before
-the loop's error handling is written.
+failure and 2553 to 2555 as unauthorised. The loop is written to the table above,
+and it still needs checking against `openapi.yaml`. `developer.withings.com` is not
+reachable from the cloud sessions this was built in, so the file has to be
+downloaded on the Mac and handed over, or the domain allowed in the session's
+network settings.

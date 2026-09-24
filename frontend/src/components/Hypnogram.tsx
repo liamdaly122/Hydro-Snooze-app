@@ -39,8 +39,19 @@ const ROW = HEIGHT / STAGE_ORDER.length
 const BAR = 13
 const HOUR = 60 * 60 * 1000
 
-function hourLabel(at: number): string {
+export function hourLabel(at: number): string {
   return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit' }).slice(0, 2)
+}
+
+/**
+ * Every whole hour inside a night. Whole hours in UTC are whole hours in London,
+ * clocks going back included, and on that night one of them is labelled twice,
+ * which is what actually happened.
+ */
+export function wholeHours(first: number, last: number): number[] {
+  const hours: number[] = []
+  for (let t = Math.ceil(first / HOUR) * HOUR; t <= last; t += HOUR) hours.push(t)
+  return hours
 }
 
 export function Hypnogram({
@@ -61,11 +72,7 @@ export function Hypnogram({
     (((typeof iso === 'number' ? iso : new Date(iso).getTime()) - first) / span) * WIDTH
   const middle = (stage: SleepStateName) => ROW * STAGE_ORDER.indexOf(stage) + ROW / 2
 
-  // Every whole hour inside the night. Whole hours in UTC are whole hours in
-  // London, clocks going back included, and on that night one of them is
-  // labelled twice, which is what actually happened.
-  const hours: number[] = []
-  for (let t = Math.ceil(first / HOUR) * HOUR; t <= last; t += HOUR) hours.push(t)
+  const hours = wholeHours(first, last)
 
   return (
     <div className="hypno">

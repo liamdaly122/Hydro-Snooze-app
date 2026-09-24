@@ -17,6 +17,10 @@ constants below** so that changing one is one edit:
 The numbers under the choices are Withings' own: the score is its sleep_score,
 Quality is its sleep_efficiency, and the durations are its.
 
+**And the bed, beside the sleeper**, which is what the whole integration is for.
+The probes' temperature for every minute in bed, against what the bed was being
+asked for, and what it averaged in each state of sleep. See _bed.
+
 Built on request rather than stored, like the Autopilot report. Everything it
 reads was written down when Withings sent it, so a stored copy would know
 nothing more and would be one more thing to migrate.
@@ -25,12 +29,13 @@ nothing more and would be one more thing to migrate.
 from __future__ import annotations
 
 import statistics
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ..db import Database, StoredNight
-from .parse import SLEEPING, STATE_NAMES
+from ..db import Database, Sample, StoredNight
+from .parse import AWAKE, SLEEPING, STATE_NAMES
 
 # --- The choices ---------------------------------------------------------------
 
@@ -64,6 +69,11 @@ RANGE_NEEDS = 7
 
 #: The week along the top starts on Sunday, as the screenshots have it.
 WEEK_STARTS_ON = 6  # Monday is 0
+
+#: What "usual" means where a night is set against it on the Autopilot screen:
+#: the median of up to USUAL_NIGHTS nights before it, once there are USUAL_NEEDS.
+USUAL_NIGHTS = 14
+USUAL_NEEDS = 3
 
 
 # --- Building it -----------------------------------------------------------------
@@ -194,7 +204,171 @@ def _night(db: Database, night: StoredNight) -> dict[str, Any]:
             "disturbances": d.get("breathing_disturbances_intensity"),
             "apnea_hypopnea_index": d.get("apnea_hypopnea_index"),
         },
+        "bed": _bed(db, night, tz),
     }
+
+
+# --- The bed, beside the sleeper ----------------------------------------------------
+
+
+def _bed(db: Database, night: StoredNight, tz: tzinfo | None) -> dict[str, Any]:
+    """The bed's temperature for every minute in bed, and in each state of sleep.
+
+    The bed is the return hose: the water that has just been through it. The
+    outgoing hose stands in when the return probe is quiet, which is the same
+    rule the live readings use (Probes.bed_c).
+
+    A minute grid from getting into bed to getting out for the last time, so it
+    lines up with the stages minute for minute. A minute the probes said nothing
+    in is None, and the chart leaves a gap there rather than drawing across it.
+    Time out of bed is on the grid too: what the bed did while nobody was in it
+    is worth seeing.
+    """
+    start, end = night.start_at, night.end_at
+    width = max(0, (end - start) // 60)
+    rows = db.samples_as_written(_local(start, tz) - timedelta(minutes=2),
+                                 _local(end, tz) + timedelta(minutes=2))
+
+    sums = [0.0] * width
+    counts = [0] * width
+    target: list[int | None] = [None] * width
+    for at, sample in _as_unix(rows, tz, start, end):
+        i = int((at - start) // 60)
+        if not 0 <= i < width:
+            continue
+        bed = sample.return_c if sample.return_c is not None else sample.flow_c
+        if bed is not None:
+            sums[i] += bed
+            counts[i] += 1
+        if sample.target_c is not None:
+            target[i] = sample.target_c
+    bed_c = [round(sums[i] / counts[i], 2) if counts[i] else None for i in range(width)]
+
+    # Which state each minute was in, from the mat. A minute with no state is a
+    # minute out of bed.
+    state: list[int | None] = [None] * width
+    for m in db.sleep_minutes(night.id):
+        i = (m.at - start) // 60
+        if 0 <= i < width:
+            state[i] = m.state
+
+    by_stage: dict[str, dict[str, Any]] = {}
+    for key, want in [(STATE_NAMES[s], s) for s in (AWAKE, *sorted(SLEEPING))] + [
+        ("out_of_bed", None)
+    ]:
+        picked = [i for i in range(width) if state[i] == want]
+        read = [bed_c[i] for i in picked if bed_c[i] is not None]
+        if not picked:
+            continue
+        by_stage[key] = {
+            "mean_c": round(sum(read) / len(read), 1) if read else None,
+            "minutes": len(read),
+            "of": len(picked),
+        }
+
+    return {
+        "starts_at": _iso(start, tz),
+        "step_s": 60,
+        "bed_c": bed_c,
+        "target_c": target,
+        "by_stage": by_stage,
+        "measured": any(v is not None for v in bed_c),
+    }
+
+
+def _local(ts: int, tz: tzinfo | None) -> datetime:
+    """A unix time as the local time a power sample would have been stamped with."""
+    return datetime.fromtimestamp(ts, tz).replace(tzinfo=None)
+
+
+def _as_unix(
+    samples: list[Sample], tz: tzinfo | None, start: int, end: int
+) -> list[tuple[float, Sample]]:
+    """Each sample's local time as a unix time, the clocks going back included.
+
+    Inside the repeated hour a local time means two moments an hour apart. The
+    samples arrive in the order they were taken, so each is given the earlier of
+    its two meanings that does not go back before the sample in front of it. The
+    first is given whichever meaning falls in the night. Outside that hour there
+    is only one meaning and nothing to choose.
+    """
+    out: list[tuple[float, Sample]] = []
+    last: float | None = None
+    for sample in samples:
+        naive = sample.at.replace(tzinfo=None)
+        meanings = sorted(
+            {
+                (naive.replace(tzinfo=tz, fold=f) if tz else naive.replace(fold=f)).timestamp()
+                for f in (0, 1)
+            }
+        )
+        if last is None:
+            pick = next((t for t in meanings if start - 3600 <= t <= end + 3600), meanings[0])
+        else:
+            pick = next((t for t in meanings if t >= last - 1), meanings[-1])
+        out.append((pick, sample))
+        last = pick
+    return out
+
+
+# --- Against usual, for the Autopilot screen --------------------------------------
+
+
+@dataclass(frozen=True)
+class AgainstUsual:
+    """One measurement from the mat, and how it compares with my usual.
+
+    Says what changed and never why. The Autopilot screen it appears on is about
+    what the bed did, and a night with more deep sleep after a colder Deep stage
+    is two facts side by side, not a result. Enough nights of the join above will
+    say whether one follows the other; one night never can.
+    """
+
+    key: str
+    label: str
+    seconds: int
+    #: The median of the nights before, or None until there are USUAL_NEEDS.
+    usual_seconds: int | None
+    nights: int
+    change_pct: int | None
+    #: More deep and more REM is better; less time to fall asleep is better.
+    #: None with nothing to compare against, or no change.
+    better: bool | None
+
+
+#: What the Autopilot screen shows in place of the invented boosts, in its order.
+_AGAINST = (
+    ("deep", "deepsleepduration", "Deep sleep", True),
+    ("rem", "remsleepduration", "REM sleep", True),
+    ("asleep", "sleep_latency", "Time to fall asleep", False),
+)
+
+
+def against_usual(db: Database, wake_on: str) -> list[AgainstUsual]:
+    """The night ending on `wake_on`, set against the nights before it.
+
+    Empty when the mat has no night for that morning, which is every morning
+    before it went in and any morning it missed.
+    """
+    night = db.sleep_night_on(wake_on)
+    if night is None:
+        return []
+    morning = date.fromisoformat(wake_on)
+    before = db.sleep_nights(
+        (morning - timedelta(days=60)).isoformat(), (morning - timedelta(days=1)).isoformat()
+    )[-USUAL_NIGHTS:]
+
+    out = []
+    for key, field, label, more_is_better in _AGAINST:
+        seconds = _int(night.data.get(field))
+        if seconds is None:
+            continue
+        earlier = [v for v in (_int(n.data.get(field)) for n in before) if v is not None]
+        usual = round(statistics.median(earlier)) if len(earlier) >= USUAL_NEEDS else None
+        change = None if not usual else round(100 * (seconds - usual) / usual)
+        better = None if usual is None or seconds == usual else (seconds > usual) == more_is_better
+        out.append(AgainstUsual(key, label, seconds, usual, len(earlier), change, better))
+    return out
 
 
 # --- The pieces --------------------------------------------------------------------

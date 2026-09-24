@@ -64,6 +64,7 @@ from . import autopilot, clocksync, pi, report, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
+from .withings import health as withings_health
 from .withings.sync import WithingsSync
 
 log = logging.getLogger(__name__)
@@ -1899,6 +1900,10 @@ class Service:
             self.scheduler.fired.keys_for(plan),
             self.db.precondition_since(start, end),
             cancelled=self.scheduler.fired.cancelled_for(plan),
+            # The same morning off the mat, if it was there. The plan's wake is
+            # local time, and Withings dates a night by its morning in the same
+            # timezone, so the two name the same night.
+            sleep=withings_health.against_usual(self.db, plan.wake_at.date().isoformat()),
         )
 
     def _send_report(self, plan: NightPlan) -> bool:

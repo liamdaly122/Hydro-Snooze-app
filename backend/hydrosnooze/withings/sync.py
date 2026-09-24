@@ -36,7 +36,7 @@ from typing import Any, TypeVar
 
 from .. import clocksync
 from ..config import Settings
-from ..db import Database
+from ..db import Database, StoredNight
 from ..events import EventLog
 from . import parse
 from .client import REDIRECT_HOSTS, WithingsClient, WithingsError, redirect_uri
@@ -264,8 +264,12 @@ class WithingsSync:
                     lambda token, start=start, end=end: client.intervals(token, start, end)
                 )
                 night = parse.night(summary, intervals)
+                # Looked up by start rather than id: a night under a new id is
+                # still the same night, and is not news a second time.
+                before = self.db.sleep_night_starting(night.start_at)
+                self._observe(before, night)
                 self.db.save_sleep_night(night)
-                if held is None:
+                if before is None:
                     arrived.append(night.wake_on)
                 else:
                     log.info("Withings: the night ending %s changed, replaced", night.wake_on)
@@ -282,6 +286,46 @@ class WithingsSync:
             more = f" and {len(arrived) - 3} more" if len(arrived) > 3 else ""
             self.events.info(KIND, f"Sleep arrived from Withings for {said}{more}.")
         return True
+
+    def _observe(self, before: StoredNight | None, night: parse.Night) -> None:
+        """Write down what an unfinished night looks like, as the loop meets one.
+
+        Two things docs/withings.md lists as unknown can only be seen while a
+        night is still going: whether `completed` is ever false, and whether a
+        night keeps its id as it grows. The loop fetches every half hour, so a
+        trip out of bed in the small hours puts an unfinished night in front of
+        it without anybody setting an alarm. Each answer goes to the journal,
+        once, and never to the phone:
+
+            journalctl -u hydrosnooze | grep "Withings observed"
+        """
+        ends = _day(night.wake_on)
+        if night.completed is False and (before is None or before.completed is not False):
+            log.info(
+                "Withings observed: the night ending %s is not completed yet. "
+                "In bed from %s, last out at %s so far.",
+                ends, _clock(night.start_at), _clock(night.end_at),
+            )
+        if before is None:
+            return
+        if before.completed is False and night.completed:
+            log.info(
+                "Withings observed: the night ending %s is completed now. It ran on "
+                "from %s to %s after it was first seen.",
+                ends, _clock(before.end_at), _clock(night.end_at),
+            )
+        if before.completed and night.end_at > before.end_at:
+            log.info(
+                "Withings observed: the night ending %s grew after it was marked "
+                "completed, from %s to %s. Completed does not mean finished.",
+                ends, _clock(before.end_at), _clock(night.end_at),
+            )
+        if before.id != night.id:
+            log.info(
+                "Withings observed: the night ending %s came back under a new id, "
+                "%s where it was %s. The same night, kept once.",
+                ends, night.id, before.id,
+            )
 
     async def _authorised(self, call: Callable[[str], Awaitable[list[T]]]) -> list[T]:
         """A call with a good token, and once more with a new one if refused.
@@ -382,6 +426,10 @@ class WithingsSync:
 
 def _iso(ts: int | None) -> str | None:
     return None if ts is None else datetime.fromtimestamp(ts).astimezone().isoformat()
+
+
+def _clock(ts: int) -> str:
+    return datetime.fromtimestamp(ts).astimezone().strftime("%H:%M")
 
 
 def _day(wake_on: str) -> str:

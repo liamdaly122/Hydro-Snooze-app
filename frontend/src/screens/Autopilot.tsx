@@ -3,7 +3,7 @@ import { AdjustmentsChart, KIND_COLOUR } from '../components/AdjustmentsChart'
 import { Moon, Sparkle } from '../components/Icons'
 import { LearningCard } from '../components/LearningCard'
 import type { ApiClient } from '../api/client'
-import type { AutopilotNight, Learning, Mode } from '../types'
+import type { AutopilotNight, AutopilotSleep, Learning, Mode } from '../types'
 
 /**
  * What the bed did last night.
@@ -15,9 +15,9 @@ import type { AutopilotNight, Learning, Mode } from '../types'
  * says how many times the service changed something, when, and whether the bed
  * ended up where it was asked to be.
  *
- * One thing on it is invented and it is marked twice: the boosts carry `for_fun`
- * from the service, and the card they sit on says out loud that nothing here
- * measures sleep. Everything else was written down while it happened.
+ * The sleep in the hero is the mat's, set against my usual. It replaced three
+ * invented "boosts" worked out from the water, from before anything in the house
+ * could see sleep. Everything else was written down while it happened.
  */
 
 /**
@@ -55,6 +55,27 @@ function howItHeld(off: number | null): string {
   if (off <= 0.8) return `Typically ${off.toFixed(1)}° off its setpoint after lights out`
   if (off <= 2.0) return `Ran ${off.toFixed(1)}° off its setpoint on average after lights out`
   return `Drifted ${off.toFixed(1)}° off its setpoint on average after lights out`
+}
+
+function minutes(seconds: number): string {
+  const m = Math.round(seconds / 60)
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
+}
+
+/**
+ * The change against usual, as an arrow and a percentage. The arrow says which
+ * way the number went; the colour says whether that is the good way, which for
+ * time to fall asleep is down.
+ */
+function Change({ s }: { s: AutopilotSleep }) {
+  if (s.change_pct === null) return null
+  const arrow = s.change_pct > 0 ? '\u2191' : s.change_pct < 0 ? '\u2193' : ''
+  const tone = s.better === null ? '' : s.better ? ' ap-sleep__change--better' : ' ap-sleep__change--worse'
+  return (
+    <span className={`ap-sleep__change${tone}`}>
+      {arrow} {Math.abs(s.change_pct)}%
+    </span>
+  )
 }
 
 export function Autopilot({ client }: { client: ApiClient }) {
@@ -122,26 +143,28 @@ export function Autopilot({ client }: { client: ApiClient }) {
         <h2 className="ap-hero__title">Autopilot adjustments</h2>
         <p className="ap-hero__date">{nightLabel(night.starts_at, night.wake_at)}</p>
 
-        {night.boosts.length > 0 && (
-          <div className="ap-boosts">
-            {night.boosts.map((boost) => (
-              <div key={boost.key} className="ap-boost">
-                <span className="ap-boost__label">
+        {night.sleep.length > 0 && (
+          <div className="ap-sleep">
+            {night.sleep.map((s) => (
+              <div key={s.key} className="ap-sleep__row">
+                <span className="ap-sleep__label">
                   <Moon />
-                  {boost.label}
+                  {s.label}
                 </span>
-                <span className="ap-boost__value">&uarr; {boost.percent}%</span>
+                <span className="ap-sleep__value">
+                  {minutes(s.seconds)} <Change s={s} />
+                </span>
               </div>
             ))}
           </div>
         )}
       </section>
 
-      {night.boosts.length > 0 && (
+      {night.sleep.length > 0 && (
         <p className="footnote">
-          The sleep figures above are for fun. Nothing in this bed measures sleep, so they are worked out from
-          how tightly the water held its setpoints rather than from you. Not medical advice, and not
-          a measurement.
+          {night.sleep.some((s) => s.usual_seconds === null)
+            ? 'Measured by the Sleep Analyzer. The change against your usual appears once there are three nights before this one.'
+            : `Measured by the Sleep Analyzer, against your usual: the middle of your last ${night.sleep[0]!.nights} nights. It says what changed, not what changed it.`}
         </p>
       )}
 
