@@ -109,6 +109,11 @@ const TUNE = {
   fov: 36,
   elevation: 26,
   fit: 1.18,
+  // Where the camera looks, and how much height it leaves room for. Low
+  // enough that the bed sits in the middle of its space with clear room
+  // under it for the line of text, which it used to all but sit on.
+  aimY: 0.02,
+  fitHeight: 1.06,
   wave: 0.6,
   caustics: 0.4,
 }
@@ -161,7 +166,7 @@ export function createPod(
   scene.environmentIntensity = TUNE.environment
 
   const camera = new THREE.PerspectiveCamera(TUNE.fov, 1, 0.1, 40)
-  const aim = new THREE.Vector3(0, 0.16, -0.08)
+  const aim = new THREE.Vector3(0, TUNE.aimY, -0.08)
 
   const bed = new THREE.Group()
   scene.add(bed)
@@ -378,7 +383,7 @@ export function createPod(
     const halfV = THREE.MathUtils.degToRad(camera.fov / 2)
     const halfH = Math.atan(Math.tan(halfV) * aspect)
     const across = (W * 0.5 * TUNE.fit) / Math.tan(halfH)
-    const up = 1.02 / Math.tan(halfV)
+    const up = TUNE.fitHeight / Math.tan(halfV)
     const distance = Math.max(across, up)
     camera.position.set(0, aim.y + Math.sin(elevation) * distance, aim.z + Math.cos(elevation) * distance)
     camera.lookAt(aim)
