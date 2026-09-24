@@ -928,6 +928,10 @@ button:disabled {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.nav--four {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 /* --- Stage durations ------------------------------------------------------- */
 
 .stages {
@@ -2477,4 +2481,472 @@ button:disabled {
 .pod__dot--holding-cool,
 .pod__dot--holding-warm {
   box-shadow: none;
+}
+
+/* --- Health Report ------------------------------------------------------------
+ *
+ * Modelled on the Eight Sleep report: the week in rings, the score on a lit
+ * arc, three tiles, the stages, the vitals. Sentence-case titles rather than the
+ * small capitals the rest of the app uses for card labels, because that is how
+ * the reference sets them and this screen is meant to read as that report.
+ */
+
+.hr {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hr-head__title {
+  margin: 4px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.hr-head__date {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.hr-banner {
+  display: block;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: rgb(255 179 64 / 0.12);
+  color: var(--amber);
+  font-size: 13px;
+  line-height: 1.45;
+  text-decoration: none;
+}
+
+/* The week. Seven rings, evenly spread across the width. */
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin: 2px -4px 0;
+  touch-action: pan-y;
+}
+
+.week__day {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding-bottom: 10px;
+}
+
+.week__day:disabled { opacity: 0.45; }
+
+.week__day svg { display: block; }
+
+.week__letter {
+  position: absolute;
+  top: 0;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-mid);
+}
+
+.week__day--picked .week__letter { color: var(--text); }
+
+.week__dot {
+  position: absolute;
+  bottom: 1px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.week__day--picked .week__dot { background: var(--text); }
+
+/* The score. A soft blue haze behind the arc, the way the reference lights it. */
+
+.hr-score {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 10px 0 2px;
+  isolation: isolate;
+}
+
+.hr-score::before {
+  content: '';
+  position: absolute;
+  inset: 20px 10% -10px;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgb(64 72 214 / 0.32), rgb(40 30 120 / 0.12) 60%, transparent);
+  pointer-events: none;
+}
+
+.hr-score__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.gauge {
+  position: relative;
+  width: min(250px, 72vw);
+  aspect-ratio: 1;
+  margin-top: 4px;
+}
+
+.gauge__svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.gauge__middle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.gauge__value {
+  margin: 0;
+  font-size: 68px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The small coloured word under a number. */
+
+.verdict {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.verdict--good { color: var(--green); background: rgb(48 209 88 / 0.14); }
+.verdict--fair { color: var(--amber); background: rgb(255 179 64 / 0.14); }
+.verdict--low { color: var(--red); background: rgb(255 107 107 / 0.14); }
+.verdict--quiet { color: var(--text-mid); background: rgb(255 255 255 / 0.08); }
+
+/* Three tiles. */
+
+.hr-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.hr-tile {
+  min-width: 0;
+  padding: 12px 11px 13px;
+  border-radius: 16px;
+  background: var(--card);
+}
+
+/* One line, always. "Time slept" wrapped at phone width and dropped its number
+   below the other two, and the three reading as one row is the point of them. */
+.hr-tile__name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-label);
+  white-space: nowrap;
+}
+
+.hr-tile__name svg { flex: none; }
+
+.hr-tile__value {
+  margin: 12px 0 8px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hr-tile__value small,
+.hr-stage__time small,
+.hr-metric__value small {
+  font-size: 0.58em;
+  font-weight: 500;
+  color: var(--text-mid);
+  letter-spacing: 0;
+}
+
+.hr-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 2px 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.hr-section span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Cards on this screen: a title in sentence case, then the content. */
+
+.hr-card { padding: 16px; }
+
+.hr-card__title {
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.hr-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--text-mid);
+}
+
+.hr-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hr-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.hr-legend__swatch--out {
+  background: rgb(255 255 255 / 0.12);
+  outline: 1px dashed rgb(255 255 255 / 0.25);
+}
+
+/* The hypnogram. The SVG stretches; the hour labels are HTML so they do not. */
+
+.hypno__svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
+
+.hypno__axis {
+  position: relative;
+  height: 18px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hypno__axis span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.hr-ends {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 16px;
+}
+
+.hr-ends p {
+  display: grid;
+  margin: 0;
+  gap: 1px;
+}
+
+.hr-ends strong {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-ends span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hr-ends__right { text-align: right; }
+
+/* REM and deep against their targets. */
+
+.hr-stage {
+  display: grid;
+  grid-template-columns: 32% minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--divider);
+}
+
+.hr-stage__bar {
+  position: relative;
+  height: 34px;
+  border-radius: 9px;
+  background: #222228;
+  overflow: hidden;
+}
+
+.hr-stage__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 9px;
+}
+
+.hr-stage__percent {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  padding-left: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+}
+
+.hr-stage__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.hr-stage__name {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* One line. "Under 1h 30m" is wider than "Over", and it pushed "1h 21m" onto two. */
+.hr-stage__time {
+  font-size: 20px;
+  font-weight: 600;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The vitals, three across. */
+
+.hr-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.hr-metric { min-width: 0; }
+
+.hr-metric__name {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.hr-metric__value {
+  margin: 4px 0 8px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hr-learning {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.hr-metric__range {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Autopilot's night beside the sleeper's. */
+
+.hr-recap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 12px;
+  width: 100%;
+  text-align: left;
+}
+
+.hr-recap__label {
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--label-size);
+  font-weight: 600;
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: #8fb2ff;
+}
+
+.hr-recap__text {
+  grid-column: 1;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.hr-recap__chevron {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+/* Where the numbers come from. */
+
+.hr-source__line {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.hr-source__line--warn { color: var(--amber); }
+
+.hr-source .pills { margin-top: 12px; }
+
+.hr-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  padding: 28px 20px 22px;
+  color: var(--text-mid);
+}
+
+.hr-empty .hr-card__title {
+  margin: 12px 0 8px;
+  color: var(--text);
+}
+
+a.pill {
+  text-decoration: none;
+}
+
+.pill--connect {
+  background: var(--blue);
+  color: var(--text);
+  font-weight: 600;
 }

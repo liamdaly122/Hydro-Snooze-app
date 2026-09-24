@@ -64,6 +64,7 @@ from . import autopilot, clocksync, pi, report, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
+from .withings.sync import WithingsSync
 
 log = logging.getLogger(__name__)
 
@@ -348,6 +349,9 @@ class Service:
         self._button_task: asyncio.Task[None] | None = None
         self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
+        # The sleeper rather than the machine. Its own loop, its own lock, and
+        # nothing the bed does waits for it. See withings/sync.py.
+        self.withings = WithingsSync(settings, self.db, self.events)
 
         self.schedule: Schedule = self.db.load_schedule()
         # A holiday, read back whether or not it is over. It only ever answers
@@ -740,6 +744,9 @@ class Service:
                 asyncio.create_task(self._heartbeat_loop(), name="heartbeat")
             )
 
+        if self.withings.configured:
+            self._tasks.append(asyncio.create_task(self.withings.run(), name="withings"))
+
         if self.notifier.enabled:
             self.events.info("service", "Notifications on. Problems will reach the phone.")
         if self.heartbeat.enabled:
@@ -768,6 +775,7 @@ class Service:
                 await self._away_task
             self._away_task = None
         await self.probes.close()
+        await self.withings.close()
         await self.notifier.close()
         await self.transmitter.close()
         await self.power.close()

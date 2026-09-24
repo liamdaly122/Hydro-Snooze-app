@@ -514,11 +514,22 @@ API rather than read. Read that before writing any of it.
 - [x] Read `llms.md` and download `openapi.yaml`, which is the one that wins
 - [x] Prove the token exchange against the live API, unsigned, using the demo account
 - [x] Write it all down in `docs/withings.md`
-- [ ] Sleep a night on the mat, then save the raw `getsummary` and `get` responses
-- [ ] Answer what only a real payload can settle, starting with whether `night_events` is populated
-- [ ] Commit both responses as fixtures, with the device hash stripped from every entry
-- [ ] The backend, offline and against those fixtures: settings, token store, schema, parser, loop
-- [ ] The OAuth routes and a card on the Autopilot screen
+- [x] Sleep a night on the mat, then save the raw `getsummary` and `get` responses.
+      `./scripts/withings-capture.py` on the Mac does it: one sign-in, the responses byte for byte
+      into `backend/data/withings/`, which git never sees, and a printout of what they settled.
+      **Seven nights, captured 24 September**
+- [x] Answer what only a real payload can settle, starting with whether `night_events` is populated.
+      **It is, as JSON inside a string, and it holds the whole night.** Written up in
+      [docs/withings.md](docs/withings.md#what-seven-real-nights-settled), with what is still open
+- [x] Commit fixtures. **Invented, because the repository is public.** `./scripts/withings-fixtures.py`
+      writes four made-up nights with the same keys, types and rules as the real seven into
+      `backend/tests/fixtures/withings/`, and `--check` holds any real capture to the same rules
+- [x] The backend, offline and against those fixtures: settings, token store, schema, parser, loop.
+      **83 tests**, including one that holds the command lock and fetches anyway
+- [x] The OAuth routes, and `/api/health-report` for the screen to draw
+- [x] The Health Report: its own tab in the bottom bar, between Home and History, modelled on the
+      Eight Sleep report. **Built, and seen at phone size against invented nights.** Not yet seen
+      with a real one, which is the next box
 - [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet
 - [ ] Join the two tables and look at one night
 - [ ] Retire the invented numbers on the Autopilot screen, because something measures sleep now

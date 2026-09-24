@@ -112,6 +112,29 @@ export function ChartIcon({ size = 25 }: IconProps) {
   )
 }
 
+/**
+ * History, since the bar chart went to the Health Report: a line that has been
+ * somewhere, which is what the power and bed charts on that screen are.
+ */
+export function TrendIcon({ size = 25 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 4v15.5a.5.5 0 00.5.5H20" {...stroke} strokeWidth={2} />
+      <path d="M7.5 15l3.8-4.4 3.2 2.6 5-6.2" {...stroke} strokeWidth={2.2} />
+    </svg>
+  )
+}
+
+/** Routine, on the Health Report. A bed, side on. */
+export function Bed({ size = 15 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 18.5V6M3 14h18v4.5M21 14v-2.4a2.6 2.6 0 00-2.6-2.6H11V14" {...stroke} strokeWidth={1.9} />
+      <circle cx="7" cy="11.2" r="1.9" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function WrenchIcon({ size = 24 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

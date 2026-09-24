@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     #: raised by something outside the house rather than by the Pi.
     heartbeat_url: str = ""
 
+    # --- The Sleep Analyzer ---------------------------------------------------
+    #: The application registered at developer.withings.com. Both empty means no
+    #: Withings at all, which is what the simulator and the tests get. The secret
+    #: lives here and in the password manager, nowhere else.
+    withings_client_id: str = ""
+    withings_client_secret: str = ""
+
     # --- Power thresholds, measured ------------------------------------------
     #
     # Taken off a King HS1001 through a Shelly Plug S Gen3, walking the unit

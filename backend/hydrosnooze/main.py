@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import dev, routes
+from .api import withings as withings_routes
 from .api.schemas import health_json, state_json
 from .config import get_settings
 from .service import Service
@@ -133,6 +134,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="HydroSnooze", lifespan=lifespan)
 app.include_router(routes.router)
 app.include_router(dev.router)
+app.include_router(withings_routes.router)
 
 
 @app.websocket("/api/live")

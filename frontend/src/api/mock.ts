@@ -17,6 +17,8 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  HealthDay,
+  HealthReport,
   Holiday,
   Learning,
   LearningMode,
@@ -30,6 +32,7 @@ import type {
   Stage,
   TonightPhase,
   TonightState,
+  WithingsStatus,
 } from '../types'
 import { MAX_TEMPERATURE_C, MIN_STAGE_MINUTES, MODE_RANGE, WARMING_FLOOR_C } from '../types'
 import { daysBetween, isoDay } from '../domain'
@@ -481,6 +484,46 @@ export class MockApiClient implements ApiClient {
     return seedNight()
   }
 
+  /**
+   * The Health Report, from a fortnight of invented nights put through the real
+   * report builder by scripts/health-seed.py, so the seed site draws exactly what
+   * the service would send. Loaded on first use rather than bundled, so the live
+   * app never downloads it.
+   */
+  private healthSeed: Promise<HealthSeed> | null = null
+  private withingsConnected = true
+
+  private health(): Promise<HealthSeed> {
+    this.healthSeed ??= import('./seed-health.json').then((m) => m.default as unknown as HealthSeed)
+    return this.healthSeed
+  }
+
+  async getHealthReport(date?: string): Promise<HealthReport> {
+    const seed = await this.health()
+    await sleep(180)
+    const on = date ?? seed.latest
+    const held = seed.reports[on]
+    if (held) return held
+    // A week the seed has nothing for, so it can still be stepped through.
+    return { week: emptyWeek(on), earliest: seed.earliest, latest: seed.latest, night: null }
+  }
+
+  async getWithings(): Promise<WithingsStatus> {
+    const seed = await this.health()
+    return { ...seed.status, connected: this.withingsConnected }
+  }
+
+  async syncWithings(): Promise<WithingsStatus & { asked: boolean }> {
+    await sleep(700)
+    return { ...(await this.getWithings()), last_sync_at: nowIso(), asked: true }
+  }
+
+  async disconnectWithings(): Promise<WithingsStatus> {
+    await sleep(200)
+    this.withingsConnected = false
+    return this.getWithings()
+  }
+
   async getLearning(): Promise<Learning> {
     await sleep(120)
     return this.learningJson()
@@ -727,6 +770,24 @@ export class MockApiClient implements ApiClient {
  * the shape in the line: a long climb to each new stage and then a flat stretch
  * holding it.
  */
+interface HealthSeed {
+  earliest: string
+  latest: string
+  status: WithingsStatus
+  reports: Record<string, HealthReport>
+}
+
+/** Seven empty days, Sunday first, around a morning. */
+function emptyWeek(on: string): HealthDay[] {
+  const day = new Date(`${on}T12:00:00`)
+  const sunday = new Date(day.getTime() - day.getDay() * 86_400_000)
+  return Array.from({ length: 7 }, (_, i) => ({
+    date: new Date(sunday.getTime() + i * 86_400_000).toISOString().slice(0, 10),
+    score: null,
+    has_night: false,
+  }))
+}
+
 function seedNight(): AutopilotNight {
   const wake = new Date()
   wake.setHours(7, 30, 0, 0)

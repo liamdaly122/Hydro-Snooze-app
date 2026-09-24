@@ -6,9 +6,10 @@ schedule runs on a guess about when I sleep and how I sleep. A Sleep Analyzer un
 the mattress is the first measurement of the sleeper rather than the machine.
 
 Everything below was established on **13 September 2026**, most of it against the
-live API rather than from reading. Where something is documented but unproven I say
-so, because this project has already been bitten twice by an inference wearing the
-costume of a fact.
+live API rather than from reading. What a real night looks like was settled on
+**24 September**, against seven nights on my own mat. Where something is documented
+but unproven I say so, because this project has already been bitten twice by an
+inference wearing the costume of a fact.
 
 **The bed never depends on any of this.** The integration runs in its own loop, in
 its own module, and never takes the command lock. An internet outage must be a
@@ -126,6 +127,22 @@ arrived.
 Not to be confused with the `getdemoaccess` endpoint, which is a different thing
 and does require a nonce and signature.
 
+### Capturing real nights
+
+`./scripts/withings-capture.py` on the Mac. One sign-in through the `127.0.0.1:8910`
+redirect, then every `getsummary` and `get` response for the last week written to
+`backend/data/withings/` byte for byte, which git never sees. Tokens are never
+saved. It prints what the responses settled in structure and durations, never
+vitals, which is the part that is safe to paste anywhere.
+
+### Testing against invented nights
+
+The repository is public, so the tests never see a real night. `./scripts/withings-fixtures.py`
+writes four invented ones into `backend/tests/fixtures/withings/`, with the same keys,
+types and key order as the real seven and every rule below built in. It refuses
+to write a night that breaks one. `--check <capture folder>` holds a real capture
+to the same rules, so a rule that stops being true gets noticed.
+
 ---
 
 ## Fetching sleep
@@ -191,6 +208,11 @@ Each entry is **one sleep-state interval carrying its own metrics**, and each
 metric is a map from unix timestamp to value. Samples are **60 seconds apart**. A
 nine-hour night came back as 110 intervals of varying length.
 
+**The demo account was the same hardware as mine.** Every interval off my own mat
+also says `"model": "Aura Sensor V2"`, `"model_id": 63`. Aura Sensor V2 is what
+Withings calls the Sleep Analyzer internally. So whatever the demo nights lacked,
+they lacked because of the demo data, not because of the device.
+
 Sleep states:
 
 | Value | Meaning |
@@ -202,6 +224,9 @@ Sleep states:
 | 4 | manual |
 | 5 | unspecified |
 | 15 | out of bed (needs a specific plan) |
+
+My mat only ever sent 0 to 3. Time out of bed is not a state 15 interval, it is a
+**gap between intervals**. See below.
 
 Deep, REM and awake line up with three of the four stages the schedule already
 runs, which is convenient but coincidental. These are measurements, not targets,
@@ -215,10 +240,11 @@ model  model_id  created  modified  completed  data
 ```
 
 `data` holds every requested field. `modified` is what `lastupdate` compares
-against. `completed` looks like the "has Withings finished with this night" flag,
-though I have not proven that.
+against. `completed` is a boolean, and it was `true` on all seven real nights, but
+all seven were captured after the fact. Whether it is `false` while a night is
+still going is not proven.
 
-### Three traps in the parser
+### Seven traps in the parser
 
 **The timestamp keys are strings.** JSON object keys always are. `int()` every one
 on the way in, or a join against `power_samples` compares `"1680467403"` to
@@ -232,6 +258,129 @@ them, and then grep for the real value to prove none survived.
 **Unsupported fields vanish without complaint.** Ask for something the device does
 not do and it is simply absent from the response, with no error. Absent and null
 both mean "not available" and neither may ever become a zero.
+
+**`night_events` is JSON inside a string.** Not an object: a string that has to be
+decoded a second time. What is inside it is set out in the next section. A parser
+that reads it as a plain value gets text and nothing useful out of it.
+
+**`model` means two different things.** On a summary, and at the top of a `get`
+body, it is the number `32`. On every interval it is the name `"Aura Sensor V2"`.
+`model_id` is `63` in all three places. Read `model_id`, never `model`.
+
+**An interval is not a stage.** On real nights about four in five neighbouring
+intervals have the same state. Withings cuts the time in bed into whole minutes,
+one to ten at a time and usually two, whatever the sleep is doing. My nights had
+about twenty stage changes each and came back as 123 to 147 intervals. Merge runs of the same state
+before calling anything a stage, and never count intervals as if they were one.
+
+**Zero heart-rate variability means no reading.** `sdnn_1` is 0 on 116 of 4,059
+minutes, 113 of them awake, and `rmssd` is 0 on every one of those too, plus six
+more. Nobody has 0 ms of variability, and moving about is what stops it being
+measured, so parse a 0 in either as None. This one is my inference rather than
+something Withings says. `hr`, `rr` and `chest_movement_rate` were never 0.
+
+---
+
+## What seven real nights settled
+
+Seven nights off my own mat, 16 to 23 September. Everything in this section was
+checked against all seven, not read off one.
+
+**`user.activity` on its own is enough.** Signed in asking for nothing else, was
+granted exactly that, and every sleep call answered. The backend asks for this and
+nothing more.
+
+### `night_events` is there, and it is the whole night
+
+The field that came back null on the demo account, and the only thing the Drift
+stage could ever be anchored on. It is populated on every real night. Decoded, it
+looks like this, from an invented night with the same shape as mine:
+
+```json
+{"1": [0, 25500], "2": [1200, 24600], "3": [24900, 3600], "4": [25200, 3600]}
+```
+
+| Key | Event |
+|---|---|
+| 1 | got into bed |
+| 2 | fell asleep |
+| 3 | woke up |
+| 4 | got out of bed |
+
+**Each list is gaps, not times.** The first number is seconds after the summary's
+`startdate`, and each one after it is seconds after the previous event *of the same
+kind*. Add them up per key, then add `startdate`. The example reads: in bed at 0,
+asleep at 1200, awake at 24900, out at 25200, back in at 25500, asleep at 25800,
+awake at 28500, out at 28800.
+
+Those four meanings are my reading, not Withings' words, so here is why I trust
+them. Decoded that way, on all seven nights:
+
+- the first "fell asleep" is exactly `sleep_latency`
+- the night's length minus the last "woke up" is exactly `wakeup_latency`
+- the asleep spans add up to exactly `total_sleep_time`, and the awake spans
+  between them to exactly `waso`
+- "woke up" happens `wakeupcount` + 1 times, the last one being the morning
+- each "out of bed" to the next "into bed" is exactly one of the gaps between the
+  `get` intervals, and there are `out_of_bed_count` of them
+
+Nineteen checks, seven nights, no exceptions.
+
+### The intervals cover the time in bed, and nothing else
+
+The `get` intervals start and end exactly on the summary's `startdate` and
+`enddate`, never overlap, and leave a gap only where I was out of bed. So there are
+three kinds of time, and the join has to keep them apart:
+
+| | How it shows |
+|---|---|
+| asleep | an interval in state 1, 2 or 3 |
+| awake in bed | an interval in state 0 |
+| out of bed | no interval at all |
+
+Summed per state, the intervals match `lightsleepduration`, `deepsleepduration`,
+`remsleepduration` and `wakeupduration` to the second, and `total_timeinbed` is the
+night's length minus the gaps. The summary is arithmetic on the intervals, which
+makes the pair of them check each other and makes them a good fixture.
+
+Every metric has one sample per minute in bed, all on the same minutes, each one
+inside its own interval: from `startdate`, up to but not including `enddate`.
+
+### What a UK Sleep Analyzer fills in
+
+| | Came back | Did not |
+|---|---|---|
+| `getsummary` | 27 of the 29 fields asked for, plus `breathing_quality_assessment` unasked | `asleepduration`, `withings_index` |
+| `get` | `hr`, `rr`, `snoring`, `sdnn_1`, `rmssd`, `hrv_quality`, `mvt_score`, `chest_movement_rate` | `withings_index`, `breathing_sounds` |
+
+Everything that did not come back was absent, not null. `snoring` was 0 on every
+one of 4,059 minutes, which is either true or a sensor that never fires. Nothing
+here can tell those apart.
+
+**`chest_movement_rate` is `rr`**, value for value, on every minute of every night.
+Two names, one measurement, so never treat them as two.
+
+**The summary's heart rate is over sleep only.** `hr_min` and `hr_max` are the
+lowest and highest per-minute `hr` while asleep, on all seven nights. `hr_average`
+is within a beat of the sleeping mean but not exactly it, so it is not something
+to recompute. `rr_min` and `rr_max` are over every minute in bed.
+
+### When a night turns up
+
+**A night exists a minute or two after I first get out of bed**, not when the
+morning comes. On all seven, `created` was 69 to 110 seconds after the first "out
+of bed". A 4am trip to the bathroom creates the night hours early, and it then
+stretches every time I get back in: `enddate` moves and the intervals grow. On a
+morning with no trip, that puts the night in the API about two minutes after I get
+up, well inside the twenty the morning report waits.
+
+**It is modified again 9 to 22 hours later**, five of the seven times during the
+following night.
+
+So a night seen once is not a night finished. The loop has to store each one
+against its `id` and replace it every time `lastupdate` hands it back, never append
+it. That the `id` stays the same while a night grows is an assumption: one capture
+cannot show it.
 
 ---
 
@@ -262,10 +411,74 @@ Observed, separately: an empty result came back as `status=0` with an empty
 
 ### The clock
 
-The loop is gated on `_clock_ok`. `expires_at` and `lastupdate` are both unix
-timestamps, so a Pi back from a power cut with the wrong time refreshes a token
-that has not expired and asks for every night since 1970. It has to wait for NTP
-before it does anything.
+`expires_at` and `lastupdate` are both unix timestamps, so a Pi back from a power
+cut with the wrong time refreshes a token that has not expired and asks for nights
+that have not happened. It has to wait for NTP before it does anything.
+
+**Not on `_clock_ok`, though, which was the plan.** That one gives up after ten
+minutes and runs on whatever clock it has, which is right for the bed, because no
+night at all is worse than a night at the wrong hour. Nothing here is worth that.
+The loop asks `clocksync.synchronised()` itself and waits for as long as it takes.
+A Pi with no NTP most likely has no internet either, so the wait costs nothing.
+
+---
+
+## What is built
+
+Everything lives in `backend/hydrosnooze/withings/`, with its routes in
+`backend/hydrosnooze/api/withings.py`:
+
+| | |
+|---|---|
+| `client.py` | Talking to Withings and nothing else. Pages on `more`, takes the server's offset |
+| `parse.py` | Nights, stages and minutes, with every trap above stepped round |
+| `sync.py` | The loop, every half hour |
+| `health.py` | The Health Report, built on request from what is stored |
+
+| Route | |
+|---|---|
+| `GET /api/withings` | Where the connection is up to |
+| `GET /api/withings/connect` | Sends the browser to sign in |
+| `GET /api/withings/callback` | Where Withings sends it back. Trades the code in at once |
+| `POST /api/withings/sync` | Fetch now, at most every ten minutes |
+| `DELETE /api/withings` | Disconnect. The nights stay |
+| `GET /api/health-report?date=` | One night as the Health Report draws it, and its week |
+
+**The rule that outranks the rest holds in code, with a test for each half.** The
+loop is its own task and never takes the command lock: a test holds the lock and
+fetches anyway. Nothing it says can reach the phone at 3am: a test checks its
+warning against the notifier. Every failure ends as a line of text on the Health
+Report and nothing else.
+
+Four decisions that are not obvious from the code alone:
+
+- **Tokens are written with a full sync to disk**, and before the new access
+  token is used. The rest of the database runs `synchronous=NORMAL`, which can
+  lose a commit in a power cut. Losing this one would mean signing in by hand
+- **It keeps real time, not the service clock.** The simulator runs that at up to
+  120 times real speed, and "every half hour" would become every fifteen seconds
+  against Withings
+- **A night is replaced whole every time it changes**, matched on its start as
+  well as its id, so a night whose id changed as it grew cannot be counted twice
+- **A refused refresh says reconnect once and keeps trying every pass.** An old
+  refresh token stays good for eight hours after a rotation whose answer never
+  arrived, so a refusal can pass by itself
+
+To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
+restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report
+tab and press Connect Withings. The first pass fetches the last month.
+
+### The screen
+
+`frontend/src/screens/HealthReport.tsx`, the middle tab of the bottom bar. It
+draws what `/api/health-report` sends and decides nothing itself: every verdict
+and every "Learning, 3 more nights" comes from `health.py`.
+
+To see it with no mat, `backend/.venv/bin/python scripts/health-seed.py --db
+/tmp/sleep.db` invents a fortnight of nights through the same machinery as the
+test fixtures, and `HS_DB_PATH=/tmp/sleep.db ./scripts/dev.sh` runs the service
+against them. The same script writes `frontend/src/api/seed-health.json`, which is
+what the seed site serves. Never point `--db` at the Pi's database.
 
 ---
 
@@ -283,25 +496,22 @@ specification wins. It has been wrong once already, on status 100.
 
 ## Still unknown
 
-Everything above the line was measured or read. These were not.
+This section used to hold four questions: `night_events`, the scope, whether the
+intervals cover the night, and which fields come back. Seven real nights answered
+all four, above. These are what is left, and none of them has been measured.
 
-**`night_events` came back null.** Requested, and explicitly null rather than
-absent, on the demo account's Aura Sensor V2. That is the field that carries when I
-got into bed, fell asleep, woke and got out, and it is the entire basis for ever
-anchoring the Drift stage to when I actually fell asleep. It may be populated by a
-Sleep Analyzer, which is newer hardware, and the specification documents it with no
-device restriction. But it is now a risk rather than an assumption, and it is the
-first thing to check on my own first night.
+**Whether `completed` is ever false.** All seven nights were captured after the
+fact. One capture in the small hours, after getting up and before getting back in,
+would show what an unfinished night looks like.
 
-**Which scope carries sleep data.** `user.activity` was granted and the demo
-account returned nights, but the demo account also had no recent data, so this has
-not been isolated. Three independent projects say `user.activity`. Not proven here.
+**Whether a night's `id` survives it growing.** The same capture would show that.
 
-**Whether the intervals tile a night without gaps.** One entry tells me the shape,
-not the coverage.
+**What 255 means in `mvt_score`.** It is the top value, seven times, all awake,
+sitting on a spread that runs up to 245. That reads as the ceiling of the scale
+rather than a code for "no reading", but it is a guess.
 
-**Which optional fields a UK Sleep Analyzer populates.** The Aura Sensor V2 did not
-return `mvt_score`, `hrv_quality`, `withings_index` or `breathing_sounds`. The
-specification says `mvt_score` is EU Sleep Analyzer only, so it should appear on
-mine. If it does and `night_events` is still null, that tells me the null is
-deliberate rather than a device limitation.
+**The 5xx row in the error table.** `aiowithings`, the client Home Assistant uses,
+treats only 522 as a timeout and 524 as a bad state, and files most of 501 to 533
+as invalid parameters or other errors. It also counts 401 as an authentication
+failure and 2553 to 2555 as unauthorised. Check that against `openapi.yaml` before
+the loop's error handling is written.

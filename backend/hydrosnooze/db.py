@@ -28,6 +28,10 @@ from .models import (
     default_stages,
     with_all_stages,
 )
+# Renamed on the way in. `Stage` here already means Drift, Deep, REM and Wake:
+# what the bed is asked for. This is what the sleeper was measured doing.
+from .withings.parse import Minute, Night
+from .withings.parse import Stage as SleepStateRun
 
 #: Nights needed before the measured figure replaces the estimate. One night is
 #: an anecdote, and the estimate it would replace is at least consistent.
@@ -89,6 +93,36 @@ class PreconditionRow(NamedTuple):
     end_c: float | None = None
     room_c: float | None = None
     decided_by: str | None = None
+
+
+class WithingsAccount(NamedTuple):
+    """The stored connection to Withings. Two of these fields are keys to my
+    health data, so nothing ever logs one of these whole."""
+
+    user_id: str | None
+    access_token: str
+    refresh_token: str
+    expires_at: int
+    scope: str | None
+    connected_at: int
+    last_update: int | None
+    needs_reconnect: bool
+
+
+class StoredNight(NamedTuple):
+    """A night as stored: the summary, without its stages and minutes, which are
+    read separately because most questions about a week never need them."""
+
+    id: int
+    wake_on: str
+    start_at: int
+    end_at: int
+    timezone: str | None
+    modified: int
+    completed: bool | None
+    data: dict[str, object]
+    events: dict[str, list[int]] | None
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule (
@@ -254,6 +288,80 @@ CREATE TABLE IF NOT EXISTS precondition_runs (
     room_c      REAL,
     decided_by  TEXT
 );
+
+-- The Withings account. One row, and the only one in this database that cannot
+-- be put back by anything short of me signing in again by hand. See
+-- save_withings_tokens for why it is written differently from everything else.
+--
+-- Every time on the Withings side is a unix timestamp, including these.
+CREATE TABLE IF NOT EXISTS withings_account (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id         TEXT,
+    access_token    TEXT    NOT NULL,
+    refresh_token   TEXT    NOT NULL,
+    expires_at      INTEGER NOT NULL,
+    scope           TEXT,
+    connected_at    INTEGER NOT NULL,
+    -- getsummary's lastupdate: the newest `modified` stored so far.
+    last_update     INTEGER,
+    -- Withings refused the refresh token. Kept so the app still says so after a
+    -- restart, and cleared by the next refresh that works.
+    needs_reconnect INTEGER NOT NULL DEFAULT 0
+);
+
+-- One night off the mat, as Withings last described it.
+--
+-- Unix time, not the local time the power samples use. A night that runs
+-- through the clocks going back has an hour that happens twice, and a unix
+-- timestamp is the one kind of time that does not.
+--
+-- Replaced whole every time it changes, because a night grows: it exists a
+-- minute or two after the first time out of bed, stretches each time I get back
+-- in, and is modified again the following night.
+CREATE TABLE IF NOT EXISTS sleep_nights (
+    id        INTEGER PRIMARY KEY,
+    wake_on   TEXT    NOT NULL,
+    start_at  INTEGER NOT NULL,
+    end_at    INTEGER NOT NULL,
+    timezone  TEXT,
+    modified  INTEGER NOT NULL,
+    completed INTEGER,
+    -- The summary fields as sent, as JSON, less night_events.
+    data      TEXT    NOT NULL,
+    -- night_events decoded into absolute times, as JSON. NULL when none came.
+    events    TEXT
+);
+CREATE INDEX IF NOT EXISTS sleep_nights_start ON sleep_nights (start_at);
+
+-- Runs of one sleep state. Merged from Withings' intervals, which are cut far
+-- shorter than a stage, and never across a gap, because a gap is out of bed.
+CREATE TABLE IF NOT EXISTS sleep_stages (
+    night_id INTEGER NOT NULL,
+    start_at INTEGER NOT NULL,
+    end_at   INTEGER NOT NULL,
+    state    INTEGER NOT NULL,
+    PRIMARY KEY (night_id, start_at)
+);
+
+-- One row a minute in bed. This is the half of the join against the bed
+-- temperature that sleep brings: both sides have a reading every minute or so,
+-- and this side knows which state I was in for each one.
+--
+-- NULL is not available, never zero. Heart-rate variability of 0 is stored as
+-- NULL too, because it is Withings saying it could not measure it.
+CREATE TABLE IF NOT EXISTS sleep_minutes (
+    at          INTEGER PRIMARY KEY,
+    night_id    INTEGER NOT NULL,
+    state       INTEGER NOT NULL,
+    hr          INTEGER,
+    rr          INTEGER,
+    sdnn_1      INTEGER,
+    rmssd       INTEGER,
+    hrv_quality INTEGER,
+    mvt_score   INTEGER,
+    snoring     INTEGER
+);
+CREATE INDEX IF NOT EXISTS sleep_minutes_night ON sleep_minutes (night_id);
 """
 
 #: Every column the schedule table has now, in the order SCHEMA declares them.
@@ -1065,6 +1173,229 @@ class Database:
         self.flush_power()
         self._db.execute("DELETE FROM power_samples WHERE at < ?", (before.isoformat(),))
         self._db.commit()
+
+    # --- Withings -----------------------------------------------------------------
+
+    def withings_account(self) -> WithingsAccount | None:
+        row = self._db.execute("SELECT * FROM withings_account WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        return WithingsAccount(
+            user_id=row["user_id"],
+            access_token=row["access_token"],
+            refresh_token=row["refresh_token"],
+            expires_at=row["expires_at"],
+            scope=row["scope"],
+            connected_at=row["connected_at"],
+            last_update=row["last_update"],
+            needs_reconnect=bool(row["needs_reconnect"]),
+        )
+
+    def save_withings_tokens(
+        self,
+        *,
+        access_token: str,
+        refresh_token: str,
+        expires_at: int,
+        scope: str | None,
+        user_id: str | None,
+        now: int,
+    ) -> None:
+        """The one write in this database that has to survive a power cut.
+
+        Everything else here runs with synchronous=NORMAL, which in WAL mode can
+        lose the last few commits if the power goes, and for a power sample or an
+        event that is a fair price. For these it is not. Withings replaces the
+        refresh token every time it is used and the old one stops working eight
+        hours later, so a Pi that lost the new pair and stayed off longer than that
+        would come back disconnected for good. So this one commit waits for the
+        disk before it returns.
+
+        Called before the new access token is used, never after. A token that has
+        been used and not kept is exactly the failure this exists to prevent.
+
+        A saved pair means the connection works, so it clears needs_reconnect.
+        """
+        # Anything pending belongs to somebody else and should not ride along,
+        # and the setting only changes outside a transaction.
+        self._db.commit()
+        self._db.execute("PRAGMA synchronous=FULL")
+        try:
+            with self._db:
+                self._db.execute(
+                    "INSERT INTO withings_account (id, user_id, access_token, refresh_token, "
+                    "expires_at, scope, connected_at, needs_reconnect) "
+                    "VALUES (1, ?, ?, ?, ?, ?, ?, 0) "
+                    "ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, "
+                    "access_token = excluded.access_token, "
+                    "refresh_token = excluded.refresh_token, "
+                    "expires_at = excluded.expires_at, scope = excluded.scope, "
+                    "needs_reconnect = 0",
+                    (user_id, access_token, refresh_token, expires_at, scope, now),
+                )
+        finally:
+            self._db.execute("PRAGMA synchronous=NORMAL")
+
+    def set_withings_last_update(self, at: int) -> None:
+        self._db.execute("UPDATE withings_account SET last_update = ? WHERE id = 1", (at,))
+        self._db.commit()
+
+    def set_withings_needs_reconnect(self, needs: bool) -> None:
+        self._db.execute(
+            "UPDATE withings_account SET needs_reconnect = ? WHERE id = 1", (int(needs),)
+        )
+        self._db.commit()
+
+    def forget_withings(self) -> None:
+        """Disconnect. The tokens go; the nights stay, because they happened."""
+        self._db.execute("DELETE FROM withings_account WHERE id = 1")
+        self._db.commit()
+
+    def save_sleep_night(self, night: Night) -> None:
+        """One night, replacing whatever was stored for it, in one transaction.
+
+        Replaced whole rather than merged, because a night grows and a merge
+        would keep whatever the smaller version said that the bigger one no
+        longer does.
+
+        Matched on its start as well as its id. That the id stays the same while
+        a night grows is assumed, not proven, and a night stored twice would be
+        counted twice in every average on the Health Report.
+        """
+        with self._db:
+            stale = [
+                r["id"]
+                for r in self._db.execute(
+                    "SELECT id FROM sleep_nights WHERE id = ? OR start_at = ?",
+                    (night.id, night.start_at),
+                )
+            ]
+            for old in stale:
+                self._db.execute("DELETE FROM sleep_minutes WHERE night_id = ?", (old,))
+                self._db.execute("DELETE FROM sleep_stages WHERE night_id = ?", (old,))
+                self._db.execute("DELETE FROM sleep_nights WHERE id = ?", (old,))
+            self._db.execute(
+                "INSERT INTO sleep_nights (id, wake_on, start_at, end_at, timezone, modified, "
+                "completed, data, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    night.id,
+                    night.wake_on,
+                    night.start_at,
+                    night.end_at,
+                    night.timezone,
+                    night.modified,
+                    None if night.completed is None else int(night.completed),
+                    json.dumps(night.data),
+                    None if night.events is None else json.dumps(night.events),
+                ),
+            )
+            self._db.executemany(
+                "INSERT INTO sleep_stages (night_id, start_at, end_at, state) VALUES (?, ?, ?, ?)",
+                [(night.id, s.start_at, s.end_at, s.state) for s in night.stages],
+            )
+            # OR REPLACE because two nights cannot share a minute. If Withings
+            # ever sent two that overlapped, the newer one wins that minute rather
+            # than the whole save failing and losing both.
+            self._db.executemany(
+                "INSERT OR REPLACE INTO sleep_minutes (at, night_id, state, hr, rr, sdnn_1, "
+                "rmssd, hrv_quality, mvt_score, snoring) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (m.at, night.id, m.state, m.hr, m.rr, m.sdnn_1, m.rmssd, m.hrv_quality,
+                     m.mvt_score, m.snoring)
+                    for m in night.minutes
+                ],
+            )
+
+    def sleep_night_modified(self, night_id: int) -> int | None:
+        """When the stored copy of a night was last changed by Withings, if held."""
+        row = self._db.execute(
+            "SELECT modified FROM sleep_nights WHERE id = ?", (night_id,)
+        ).fetchone()
+        return None if row is None else row["modified"]
+
+    def sleep_nights(
+        self, first_wake_on: str | None = None, last_wake_on: str | None = None
+    ) -> list[StoredNight]:
+        """Nights, oldest first, optionally between two mornings inclusive."""
+        rows = self._db.execute(
+            "SELECT * FROM sleep_nights WHERE wake_on >= ? AND wake_on <= ? ORDER BY start_at",
+            (first_wake_on or "", last_wake_on or "9999"),
+        ).fetchall()
+        return [_stored_night(r) for r in rows]
+
+    def sleep_night_on(self, wake_on: str) -> StoredNight | None:
+        """The night that ended on this morning.
+
+        The longest, if there is more than one. A nap may yet turn up as a night of
+        its own, and "the night of the 23rd" means the one I slept, not the one I
+        dozed through on the sofa.
+        """
+        row = self._db.execute(
+            "SELECT * FROM sleep_nights WHERE wake_on = ? ORDER BY end_at - start_at DESC LIMIT 1",
+            (wake_on,),
+        ).fetchone()
+        return None if row is None else _stored_night(row)
+
+    def earliest_sleep_wake_on(self) -> str | None:
+        row = self._db.execute("SELECT MIN(wake_on) AS first FROM sleep_nights").fetchone()
+        return row["first"]
+
+    def latest_sleep_night(self) -> StoredNight | None:
+        row = self._db.execute(
+            "SELECT * FROM sleep_nights ORDER BY start_at DESC LIMIT 1"
+        ).fetchone()
+        return None if row is None else _stored_night(row)
+
+    def sleep_stages(self, night_id: int) -> list[SleepStateRun]:
+        rows = self._db.execute(
+            "SELECT start_at, end_at, state FROM sleep_stages WHERE night_id = ? ORDER BY start_at",
+            (night_id,),
+        ).fetchall()
+        return [SleepStateRun(r["start_at"], r["end_at"], r["state"]) for r in rows]
+
+    def sleep_vitals(self, night_ids: list[int]) -> dict[int, tuple[float | None, float | None]]:
+        """Each night's average heart-rate variability (RMSSD) and breathing rate,
+        over the minutes spent asleep.
+
+        Asleep only, the way Withings works out its own heart rate figures. AVG
+        passes over NULL, which is where a zero variability reading went, so no
+        "could not measure" drags an average down.
+        """
+        if not night_ids:
+            return {}
+        marks = ",".join("?" * len(night_ids))
+        rows = self._db.execute(
+            "SELECT night_id, AVG(rmssd) AS hrv, AVG(rr) AS rr FROM sleep_minutes "
+            f"WHERE state != 0 AND night_id IN ({marks}) GROUP BY night_id",
+            night_ids,
+        ).fetchall()
+        return {r["night_id"]: (r["hrv"], r["rr"]) for r in rows}
+
+    def sleep_minutes(self, night_id: int) -> list[Minute]:
+        rows = self._db.execute(
+            "SELECT * FROM sleep_minutes WHERE night_id = ? ORDER BY at", (night_id,)
+        ).fetchall()
+        return [
+            Minute(
+                r["at"], r["state"], r["hr"], r["rr"], r["sdnn_1"], r["rmssd"],
+                r["hrv_quality"], r["mvt_score"], r["snoring"],
+            )
+            for r in rows
+        ]
+
+
+def _stored_night(row: sqlite3.Row) -> StoredNight:
+    return StoredNight(
+        id=row["id"],
+        wake_on=row["wake_on"],
+        start_at=row["start_at"],
+        end_at=row["end_at"],
+        timezone=row["timezone"],
+        modified=row["modified"],
+        completed=None if row["completed"] is None else bool(row["completed"]),
+        data=json.loads(row["data"]),
+        events=None if row["events"] is None else json.loads(row["events"]),
+    )
 
 
 def _schedule_from(row: sqlite3.Row) -> Schedule:
