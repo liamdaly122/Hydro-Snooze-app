@@ -134,6 +134,7 @@ frontend/src/
   components/PodHero.tsx  the bed in 3D, glowing with whatever the plug says the unit is doing
   pod/scene.ts         the 3D scene itself: the mattress, the pillows and the studio lights
   components/SideMenu.tsx  everything else: the device chips, and a way into each screen below
+  screens/HealthReport.tsx  last night off the Sleep Analyzer: the score, the stages, the vitals
   screens/Autopilot.tsx  what it has learned, and how last night went
   screens/Alarm.tsx    the wake time, and the way into the whole schedule
   screens/CoolingSpeed.tsx  the cooling speed, now or for tonight

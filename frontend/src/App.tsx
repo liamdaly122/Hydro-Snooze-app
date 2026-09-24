@@ -6,6 +6,7 @@ import { overallHealth } from './components/DeviceBar'
 import { SideMenu, type MenuView } from './components/SideMenu'
 import { Home } from './screens/Home'
 import { History } from './screens/History'
+import { HealthReport } from './screens/HealthReport'
 import { Profiles } from './screens/Profiles'
 import { Autopilot } from './screens/Autopilot'
 import { Schedule } from './screens/Schedule'
@@ -41,8 +42,23 @@ const TITLE: Record<View, string> = {
   profiles: 'Saved nights',
 }
 
+/**
+ * Back from signing in to Withings, the service sends the browser to
+ * `/?withings=connected` or `/?withings=failed`. Either way the Health Report is
+ * where the answer is, so that is where the app opens, and the word comes off
+ * the address so a reload does not do it again.
+ */
+function firstScreen(): Screen {
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('withings')) return 'home'
+  params.delete('withings')
+  const rest = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`)
+  return 'report'
+}
+
 export function App({ client }: { client: ApiClient }) {
-  const [screen, setScreen] = useState<Screen>('home')
+  const [screen, setScreen] = useState<Screen>(firstScreen)
   // What is pushed over the home screen, innermost last. A stack rather than a
   // flag per screen, because the schedule is two deep now, under Alarm, and
   // Back from it should land on Alarm rather than all the way home.
@@ -166,6 +182,8 @@ export function App({ client }: { client: ApiClient }) {
           <Dev state={state} realPlug={!(info?.fake_power_monitor ?? true)} />
         ) : screen === 'history' ? (
           <History power={power} events={events} />
+        ) : screen === 'report' ? (
+          <HealthReport client={client} onOpenAutopilot={() => openFromMenu('autopilot')} />
         ) : view === 'holiday' ? (
           <Holiday client={client} schedule={schedule} holiday={holiday} onChanged={setHoliday} />
         ) : view === 'autopilot' ? (

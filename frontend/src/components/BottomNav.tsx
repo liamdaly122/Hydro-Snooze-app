@@ -1,10 +1,15 @@
-import { ChartIcon, HomeIcon, WrenchIcon } from './Icons'
+import type { ReactNode } from 'react'
+import { ChartIcon, HomeIcon, TrendIcon, WrenchIcon } from './Icons'
 
-export type Screen = 'home' | 'history' | 'dev'
+export type Screen = 'home' | 'report' | 'history' | 'dev'
 
 /**
- * Two icons, as designed. The third only appears when the service reports a fake
- * transmitter, so it is never there on the Pi with real hardware attached.
+ * Home, the Health Report and History, in that order. The fourth only appears
+ * when the service reports a fake transmitter, so it is never there on the Pi
+ * with real hardware attached.
+ *
+ * The bar chart is the Health Report's, because it is in the report this is
+ * modelled on. History, which had it until then, took a line instead.
  */
 export function BottomNav({
   screen,
@@ -15,37 +20,23 @@ export function BottomNav({
   onChange: (screen: Screen) => void
   showDev?: boolean
 }) {
+  const item = (to: Screen, label: string, icon: ReactNode) => (
+    <button
+      type="button"
+      className="nav__item"
+      aria-current={screen === to ? 'page' : undefined}
+      aria-label={label}
+      onClick={() => onChange(to)}
+    >
+      {icon}
+    </button>
+  )
   return (
-    <nav className={`nav${showDev ? ' nav--three' : ''}`} aria-label="Sections">
-      <button
-        type="button"
-        className="nav__item"
-        aria-current={screen === 'home' ? 'page' : undefined}
-        aria-label="Home"
-        onClick={() => onChange('home')}
-      >
-        <HomeIcon />
-      </button>
-      <button
-        type="button"
-        className="nav__item"
-        aria-current={screen === 'history' ? 'page' : undefined}
-        aria-label="History"
-        onClick={() => onChange('history')}
-      >
-        <ChartIcon />
-      </button>
-      {showDev && (
-        <button
-          type="button"
-          className="nav__item"
-          aria-current={screen === 'dev' ? 'page' : undefined}
-          aria-label="Simulator"
-          onClick={() => onChange('dev')}
-        >
-          <WrenchIcon />
-        </button>
-      )}
+    <nav className={`nav ${showDev ? 'nav--four' : 'nav--three'}`} aria-label="Sections">
+      {item('home', 'Home', <HomeIcon />)}
+      {item('report', 'Health Report', <ChartIcon />)}
+      {item('history', 'History', <TrendIcon />)}
+      {showDev && item('dev', 'Simulator', <WrenchIcon />)}
     </nav>
   )
 }

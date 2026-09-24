@@ -212,7 +212,7 @@ def test_a_night_like_the_others_is_in_range_and_a_racing_heart_is_not(db):
 
     db.save_sleep_night(moved(night, 1, hr_average=90))
     racing = health.report(db, "2026-10-23")["night"]["vitals"]["heart_rate"]
-    assert racing["verdict"] == "above" and racing["label"] == "Above your usual"
+    assert racing["verdict"] == "above" and racing["label"] == "Above usual"
 
 
 def test_hrv_is_averaged_over_sleep_and_ignores_the_minutes_it_could_not_measure(db):

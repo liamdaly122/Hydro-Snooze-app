@@ -280,9 +280,9 @@ def _vital(now: float | None, before: list, unit: str, places: int) -> dict[str,
     low, high = shown(deciles[0]), shown(deciles[-1])
     out["range"] = [low, high]
     if value < low:
-        return {**out, "verdict": "below", "label": "Below your usual"}
+        return {**out, "verdict": "below", "label": "Below usual"}
     if value > high:
-        return {**out, "verdict": "above", "label": "Above your usual"}
+        return {**out, "verdict": "above", "label": "Above usual"}
     return {**out, "verdict": "in_range", "label": "In range"}
 
 

@@ -381,3 +381,105 @@ export interface TonightState {
   nudge_c: number
   nudge_until: string | null
 }
+
+/* --- Health Report -------------------------------------------------------------
+ *
+ * One night off the Withings Sleep Analyzer, the way the Health Report draws it.
+ * Mirrors backend/hydrosnooze/withings/health.py.
+ *
+ * Every number is the mat's, or worked out from what the mat measured. Every
+ * verdict and label comes from the service rather than being decided here, for
+ * the same reason the learning sentences do: a screen that judges a number it
+ * was handed can drift from the service that measured it.
+ */
+
+export type Verdict =
+  | 'excellent'
+  | 'good'
+  | 'fair'
+  | 'low'
+  | 'learning'
+  | 'in_range'
+  | 'above'
+  | 'below'
+
+export interface Judged {
+  verdict: Verdict | null
+  label: string | null
+  /** Only when learning: how many more nights before there is a number. */
+  nights_needed?: number
+}
+
+export interface HealthDay {
+  /** "YYYY-MM-DD", the morning the night ended. */
+  date: string
+  score: number | null
+  has_night: boolean
+}
+
+export type SleepStateName = 'awake' | 'light' | 'deep' | 'rem'
+
+export interface HealthStage {
+  stage: SleepStateName
+  starts_at: string
+  ends_at: string
+}
+
+export interface HealthAgainst {
+  seconds: number | null
+  /** Share of the time asleep, not of the time in bed. */
+  percent: number | null
+  target_seconds: number
+  met: boolean
+}
+
+export interface HealthVital extends Judged {
+  value: number | null
+  unit: string
+  /** The middle 80% of my own recent nights, once there are enough of them. */
+  range: [number, number] | null
+}
+
+export interface HealthNight {
+  wake_on: string
+  timezone: string | null
+  completed: boolean | null
+  updated_at: string | null
+  in_bed: { starts_at: string; ends_at: string }
+  fell_asleep_at: string | null
+  woke_up_at: string | null
+  score: Judged & { value: number | null }
+  tiles: {
+    quality: Judged & { percent: number | null; means: string }
+    routine: Judged & { percent: number | null; means: string }
+    time_slept: Judged & { seconds: number | null }
+  }
+  /** Runs of one state, in order. Gaps between them are time out of bed. */
+  stages: HealthStage[]
+  out_of_bed: { starts_at: string; ends_at: string }[]
+  totals: Record<SleepStateName, number | null>
+  rem: HealthAgainst
+  deep: HealthAgainst
+  vitals: { heart_rate: HealthVital; hrv: HealthVital; breath_rate: HealthVital }
+  breathing: { disturbances: number | null; apnea_hypopnea_index: number | null }
+}
+
+export interface HealthReport {
+  /** Seven days, Sunday first, around the night asked for. */
+  week: HealthDay[]
+  earliest: string | null
+  latest: string | null
+  /** Null for a morning the mat has no night for. */
+  night: HealthNight | null
+}
+
+export interface WithingsStatus {
+  /** Whether this machine has the client ID and secret at all. */
+  configured: boolean
+  connected: boolean
+  needs_reconnect: boolean
+  waiting_for_clock: boolean
+  last_sync_at: string | null
+  last_error: string | null
+  latest_night: string | null
+}

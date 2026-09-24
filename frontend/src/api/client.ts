@@ -12,6 +12,7 @@
 
 import type {
   AutopilotNight,
+  HealthReport,
   Learning,
   DeviceEvent,
   DeviceHealth,
@@ -24,7 +25,15 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  WithingsStatus,
 } from '../types'
+
+/**
+ * Where Connect goes. A page the browser navigates to rather than a fetch,
+ * because signing in happens on Withings' own site and comes back to the
+ * service, not to this script.
+ */
+export const WITHINGS_CONNECT_URL = '/api/withings/connect'
 
 /** Pushed over the WebSocket whenever anything changes, so the app is never stale. */
 export interface LiveUpdate {
@@ -93,6 +102,19 @@ export interface ApiClient {
   setLearning(on: boolean): Promise<Learning>
   /** Start again. The nights are kept; they stop counting towards what is measured. */
   forgetLearning(mode?: Mode): Promise<Learning>
+
+  /**
+   * One night off the Sleep Analyzer, the way the Health Report draws it: the
+   * night ending on `date`, "YYYY-MM-DD", or the latest one. Rejects when there
+   * is no sleep at all yet, which getWithings then explains.
+   */
+  getHealthReport(date?: string): Promise<HealthReport>
+  /** Where the Withings connection is up to. */
+  getWithings(): Promise<WithingsStatus>
+  /** Fetch now. `asked` is false when it was too soon after the last time. */
+  syncWithings(): Promise<WithingsStatus & { asked: boolean }>
+  /** Forget the tokens. The nights already fetched stay. */
+  disconnectWithings(): Promise<WithingsStatus>
 
   /** Whether we are talking to a simulated unit, and the safety cap in force. */
   info(): Promise<ServiceInfo>

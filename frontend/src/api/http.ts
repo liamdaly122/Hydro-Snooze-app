@@ -14,6 +14,7 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  HealthReport,
   Holiday,
   Learning,
   Mode,
@@ -23,6 +24,7 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  WithingsStatus,
 } from '../types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -138,6 +140,13 @@ export class HttpApiClient implements ApiClient {
   }
 
   getAutopilot = () => request<AutopilotNight>('/api/autopilot')
+
+  getHealthReport = (date?: string) =>
+    request<HealthReport>(`/api/health-report${date ? `?date=${date}` : ''}`)
+  getWithings = () => request<WithingsStatus>('/api/withings')
+  syncWithings = () =>
+    request<WithingsStatus & { asked: boolean }>('/api/withings/sync', { method: 'POST' })
+  disconnectWithings = () => request<WithingsStatus>('/api/withings', { method: 'DELETE' })
 
   getLearning = () => request<Learning>('/api/learning')
 

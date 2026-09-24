@@ -527,8 +527,9 @@ API rather than read. Read that before writing any of it.
 - [x] The backend, offline and against those fixtures: settings, token store, schema, parser, loop.
       **83 tests**, including one that holds the command lock and fetches anyway
 - [x] The OAuth routes, and `/api/health-report` for the screen to draw
-- [ ] The Health Report: its own tab in the bottom bar, between Home and History, modelled on the
-      Eight Sleep report
+- [x] The Health Report: its own tab in the bottom bar, between Home and History, modelled on the
+      Eight Sleep report. **Built, and seen at phone size against invented nights.** Not yet seen
+      with a real one, which is the next box
 - [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet
 - [ ] Join the two tables and look at one night
 - [ ] Retire the invented numbers on the Autopilot screen, because something measures sleep now

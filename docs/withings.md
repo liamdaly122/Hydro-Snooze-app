@@ -465,8 +465,20 @@ Four decisions that are not obvious from the code alone:
   arrived, so a refusal can pass by itself
 
 To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
-restart, open the app at `http://hydrosnooze.local:8000` and press Connect. The
-first pass fetches the last month.
+restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report
+tab and press Connect Withings. The first pass fetches the last month.
+
+### The screen
+
+`frontend/src/screens/HealthReport.tsx`, the middle tab of the bottom bar. It
+draws what `/api/health-report` sends and decides nothing itself: every verdict
+and every "Learning, 3 more nights" comes from `health.py`.
+
+To see it with no mat, `backend/.venv/bin/python scripts/health-seed.py --db
+/tmp/sleep.db` invents a fortnight of nights through the same machinery as the
+test fixtures, and `HS_DB_PATH=/tmp/sleep.db ./scripts/dev.sh` runs the service
+against them. The same script writes `frontend/src/api/seed-health.json`, which is
+what the seed site serves. Never point `--db` at the Pi's database.
 
 ---
 
