@@ -521,7 +521,9 @@ API rather than read. Read that before writing any of it.
 - [x] Answer what only a real payload can settle, starting with whether `night_events` is populated.
       **It is, as JSON inside a string, and it holds the whole night.** Written up in
       [docs/withings.md](docs/withings.md#what-seven-real-nights-settled), with what is still open
-- [ ] Commit both responses as fixtures, with the device hash stripped from every entry
+- [x] Commit fixtures. **Invented, because the repository is public.** `./scripts/withings-fixtures.py`
+      writes four made-up nights with the same keys, types and rules as the real seven into
+      `backend/tests/fixtures/withings/`, and `--check` holds any real capture to the same rules
 - [ ] The backend, offline and against those fixtures: settings, token store, schema, parser, loop
 - [ ] The OAuth routes and a card on the Autopilot screen
 - [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet

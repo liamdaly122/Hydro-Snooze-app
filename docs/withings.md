@@ -135,6 +135,14 @@ redirect, then every `getsummary` and `get` response for the last week written t
 saved. It prints what the responses settled in structure and durations, never
 vitals, which is the part that is safe to paste anywhere.
 
+### Testing against invented nights
+
+The repository is public, so the tests never see a real night. `./scripts/withings-fixtures.py`
+writes four invented ones into `backend/tests/fixtures/withings/`, with the same keys,
+types and key order as the real seven and every rule below built in. It refuses
+to write a night that breaks one. `--check <capture folder>` holds a real capture
+to the same rules, so a rule that stops being true gets noticed.
+
 ---
 
 ## Fetching sleep
@@ -236,7 +244,7 @@ against. `completed` is a boolean, and it was `true` on all seven real nights, b
 all seven were captured after the fact. Whether it is `false` while a night is
 still going is not proven.
 
-### Six traps in the parser
+### Seven traps in the parser
 
 **The timestamp keys are strings.** JSON object keys always are. `int()` every one
 on the way in, or a join against `power_samples` compares `"1680467403"` to
@@ -258,6 +266,12 @@ that reads it as a plain value gets text and nothing useful out of it.
 **`model` means two different things.** On a summary, and at the top of a `get`
 body, it is the number `32`. On every interval it is the name `"Aura Sensor V2"`.
 `model_id` is `63` in all three places. Read `model_id`, never `model`.
+
+**An interval is not a stage.** On real nights about four in five neighbouring
+intervals have the same state. Withings cuts the time in bed into whole minutes,
+one to ten at a time and usually two, whatever the sleep is doing. My nights had
+about twenty stage changes each and came back as 123 to 147 intervals. Merge runs of the same state
+before calling anything a stage, and never count intervals as if they were one.
 
 **Zero heart-rate variability means no reading.** `sdnn_1` is 0 on 116 of 4,059
 minutes, 113 of them awake, and `rmssd` is 0 on every one of those too, plus six
@@ -342,6 +356,14 @@ inside its own interval: from `startdate`, up to but not including `enddate`.
 Everything that did not come back was absent, not null. `snoring` was 0 on every
 one of 4,059 minutes, which is either true or a sensor that never fires. Nothing
 here can tell those apart.
+
+**`chest_movement_rate` is `rr`**, value for value, on every minute of every night.
+Two names, one measurement, so never treat them as two.
+
+**The summary's heart rate is over sleep only.** `hr_min` and `hr_max` are the
+lowest and highest per-minute `hr` while asleep, on all seven nights. `hr_average`
+is within a beat of the sleeping mean but not exactly it, so it is not something
+to recompute. `rr_min` and `rr_max` are over every minute in bed.
 
 ### When a night turns up
 
