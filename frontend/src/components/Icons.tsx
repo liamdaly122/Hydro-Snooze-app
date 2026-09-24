@@ -179,7 +179,7 @@ export function Sparkle({ size = 24, className, glow = false }: IconProps & { gl
   )
 }
 
-/** Beside a boost. The one place in this app that talks about sleep. */
+/** Beside each measure of sleep on the Autopilot screen. */
 export function Moon({ size = 15 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

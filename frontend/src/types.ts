@@ -218,14 +218,10 @@ export interface Profile {
  *
  * Last night, as the Autopilot screen draws it.
  *
- * Everything here except `boosts` is something that was written down while the
- * night happened: a count of what the service did, the moments it did it, and
- * how far the bed sat from what it was being asked for at the time.
- *
- * `boosts` is the exception and carries `for_fun` so the screen cannot forget
- * it. Nothing in this project measures sleep. Those three figures are worked
- * out from how tightly the bed held its setpoints, which makes them stable and
- * makes them respond to a real night, and they are still invented.
+ * Everything here was written down while the night happened: a count of what
+ * the service did, the moments it did it, and how far the bed sat from what it
+ * was being asked for at the time. `sleep` is the mat's own measurements of the
+ * same night, which replaced three invented "boosts".
  */
 
 /**
@@ -260,12 +256,22 @@ export interface AutopilotBand {
   temp_c: number
 }
 
-export interface AutopilotBoost {
-  key: string
+/**
+ * One of the mat's measurements for the Autopilot night, against my usual.
+ *
+ * Says what changed, never why: a better night after a colder stage is two
+ * facts side by side, not a result.
+ */
+export interface AutopilotSleep {
+  key: 'deep' | 'rem' | 'asleep'
   label: string
-  percent: number
-  /** Always true. See the note at the top of this block. */
-  for_fun: boolean
+  seconds: number
+  /** The median of the nights before, or null until there are three. */
+  usual_seconds: number | null
+  nights: number
+  change_pct: number | null
+  /** More deep and REM is better; less time to fall asleep is better. */
+  better: boolean | null
 }
 
 /**
@@ -311,7 +317,7 @@ export interface AutopilotNight {
   marks: AutopilotMark[]
   track: AutopilotPoint[]
   bands: AutopilotBand[]
-  boosts: AutopilotBoost[]
+  sleep: AutopilotSleep[]
   /** `cancelled` is stages called off by switching automation off or skipping
    * mid-night, which is not a failure and is drawn apart from `missed`. */
   stages: { landed: number; total: number; missed: string[]; cancelled: string[] }
@@ -462,6 +468,29 @@ export interface HealthNight {
   deep: HealthAgainst
   vitals: { heart_rate: HealthVital; hrv: HealthVital; breath_rate: HealthVital }
   breathing: { disturbances: number | null; apnea_hypopnea_index: number | null }
+  bed: HealthBed
+}
+
+/** How the bed sat through one state of sleep. */
+export interface BedInState {
+  mean_c: number | null
+  /** Minutes in this state the probes had a reading for, out of `of`. */
+  minutes: number
+  of: number
+}
+
+/**
+ * The bed beside the sleeper: the return hose's temperature for every minute
+ * from getting into bed to getting out, on the same minutes as the stages, and
+ * what it averaged in each state. Null where the probes said nothing.
+ */
+export interface HealthBed {
+  starts_at: string
+  step_s: number
+  bed_c: (number | null)[]
+  target_c: (number | null)[]
+  by_stage: Partial<Record<SleepStateName | 'out_of_bed', BedInState>>
+  measured: boolean
 }
 
 export interface HealthReport {

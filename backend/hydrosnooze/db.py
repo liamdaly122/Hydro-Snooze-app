@@ -916,6 +916,34 @@ class Database:
             for r in rows
         ]
 
+    def samples_as_written(self, start: datetime, end: datetime) -> list[Sample]:
+        """Every sample between two local times, in the order they were taken.
+
+        The order they were taken is not the order of their timestamps for one
+        hour a year. Samples carry local time with no zone, so on the night the
+        clocks go back 01:00 to 02:00 happens twice, and sorting by the time
+        shuffles the two hours together. Rows are written as the samples are
+        taken, so the row order is the order they happened in, and it is what
+        lets the sleep join tell the first 01:30 from the second.
+        """
+        self.flush_power()
+        rows = self._db.execute(
+            "SELECT at, watts, flow_c, return_c, room_c, target_c FROM power_samples "
+            "WHERE at >= ? AND at <= ? ORDER BY rowid",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        return [
+            Sample(
+                datetime.fromisoformat(r["at"]),
+                r["watts"],
+                r["flow_c"],
+                r["return_c"],
+                r["room_c"],
+                None if r["target_c"] is None else int(r["target_c"]),
+            )
+            for r in rows
+        ]
+
     # --- What the bed actually does -------------------------------------------
 
     def record_precondition(
@@ -1322,6 +1350,13 @@ class Database:
             (first_wake_on or "", last_wake_on or "9999"),
         ).fetchall()
         return [_stored_night(r) for r in rows]
+
+    def sleep_night_starting(self, start_at: int) -> StoredNight | None:
+        """The night held for this start, under whatever id it was stored with."""
+        row = self._db.execute(
+            "SELECT * FROM sleep_nights WHERE start_at = ? LIMIT 1", (start_at,)
+        ).fetchone()
+        return None if row is None else _stored_night(row)
 
     def sleep_night_on(self, wake_on: str) -> StoredNight | None:
         """The night that ended on this morning.

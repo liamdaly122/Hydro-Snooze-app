@@ -530,9 +530,16 @@ API rather than read. Read that before writing any of it.
 - [x] The Health Report: its own tab in the bottom bar, between Home and History, modelled on the
       Eight Sleep report. **Built, and seen at phone size against invented nights.** Not yet seen
       with a real one, which is the next box
-- [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet
-- [ ] Join the two tables and look at one night
-- [ ] Retire the invented numbers on the Autopilot screen, because something measures sleep now
+- [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet.
+      **Deployed and connected.** The refresh, the reboot and the hour offline are still to prove
+- [x] Join the two tables and look at one night. **The bed temperature card on the Health Report**,
+      the bed in each stage of sleep, clocks going back included. Seen against invented nights;
+      the first real one is the next thing to look at
+- [x] Retire the invented numbers on the Autopilot screen, because something measures sleep now.
+      **Deep sleep, REM and time to fall asleep from the mat**, each against my usual
+- [ ] See what an unfinished night looks like. The Pi writes it down by itself now:
+      `journalctl -u hydrosnooze | grep "Withings observed"` on a morning after a trip out of bed
+- [ ] Check the error table in [docs/withings.md](docs/withings.md#errors) against `openapi.yaml`
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

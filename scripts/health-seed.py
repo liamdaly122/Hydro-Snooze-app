@@ -17,6 +17,12 @@ One morning in the fortnight has no night, the way a mat that missed one looks,
 so the empty ring is on the seed site too. Writes
 frontend/src/api/seed-health.json.
 
+The bed's temperature is invented alongside, the way the probes would have
+recorded it: a reading every thirty seconds in local time, easing towards what
+each stage asks for, a degree warmer with somebody in it. And the Autopilot
+screen's sleep for the last night is worked out by the real against_usual, so
+the mock serves what the service would for that too.
+
     backend/.venv/bin/python scripts/health-seed.py --db /tmp/sleep.db
 
 keeps the nights in that database as well, so the real service can be run
@@ -39,6 +45,8 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
+import math  # noqa: E402
+
 from hydrosnooze.db import Database  # noqa: E402
 from hydrosnooze.withings import health, parse  # noqa: E402
 
@@ -57,6 +65,50 @@ SEED = 20260924
 #: every verdict: Good, Fair and one Low. sleep_score is Withings' own number and
 #: nothing else is worked out from it, so setting it breaks no rule.
 SCORES = (72, 81, 64, 88, 79, None, 55, 84, 91, 77, 86, 69, 83, 87)
+
+#: The night the invented bed is asked for, in the order the app runs it: warmer
+#: to get into, cooler for deep sleep, a little warmer for REM, warm to wake to.
+DRIFT_C, DEEP_C, REM_C, WAKE_C = 29, 25, 26, 28
+#: How long the bed takes to close most of the gap to a new setting, and what a
+#: body adds while it is in it.
+LAG_S = 20 * 60
+BODY_C = 1.0
+
+
+def asked_for(t: float, start: int, end: int) -> int:
+    """What the bed is set to at `t`, for a night in bed from `start` to `end`."""
+    if t < start + 30 * 60:
+        return DRIFT_C
+    if t < start + 4 * 3600:
+        return DEEP_C
+    if t < end - 60 * 60:
+        return REM_C
+    return WAKE_C
+
+
+def invent_bed(db: Database, night: parse.Night, rng: random.Random) -> None:
+    """Thirty-second probe readings for one night, written as the Pi writes them."""
+    in_bed = {m.at for m in night.minutes}
+    lean = rng.uniform(-0.4, 0.4)
+    bed, room = 21.0, rng.uniform(18.5, 20.5)
+    t, i = night.start_at - 3600, 0
+    while t < night.end_at + 600:
+        target = asked_for(t, night.start_at, night.end_at)
+        minute = night.start_at + ((t - night.start_at) // 60) * 60
+        body = BODY_C if minute in in_bed else 0.0
+        settle = target + body + lean
+        bed += (settle - bed) * (1 - math.exp(-30 / LAG_S))
+        reading = round(bed + rng.gauss(0, 0.08), 2)
+        at = datetime.fromtimestamp(t, LONDON).replace(tzinfo=None) + timedelta(
+            microseconds=(i * 7919) % 1_000_000
+        )
+        db.add_power_sample(
+            at, 168.0, flow_c=round(target - 0.4, 2), return_c=reading, room_c=round(room, 2),
+            target_c=target,
+        )
+        t += 30
+        i += 1
+    db.flush_power()
 
 
 def fixtures():
@@ -104,7 +156,9 @@ def main() -> None:
         broken = fx.rules(summary, body)
         if broken:
             sys.exit(f"{summary['date']} breaks: {'; '.join(broken)}")
-        db.save_sleep_night(parse.night(summary, body["series"]))
+        night = parse.night(summary, body["series"])
+        db.save_sleep_night(night)
+        invent_bed(db, night, rng)
 
     reports = {m.isoformat(): health.report(db, m.isoformat()) for m in mornings}
     latest = LAST.isoformat()
@@ -122,6 +176,20 @@ def main() -> None:
             "latest_night": latest,
         },
         "reports": reports,
+        # The Autopilot screen's sleep for the last night, as the service's
+        # autopilot_json would give it.
+        "autopilot_sleep": [
+            {
+                "key": a.key,
+                "label": a.label,
+                "seconds": a.seconds,
+                "usual_seconds": a.usual_seconds,
+                "nights": a.nights,
+                "change_pct": a.change_pct,
+                "better": a.better,
+            }
+            for a in health.against_usual(db, latest)
+        ],
     }
     OUT.write_text(json.dumps(seed, separators=(",", ":")) + "\n")
     db.close()

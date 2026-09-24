@@ -304,3 +304,56 @@ def test_a_service_without_withings_has_no_withings_loop(tmp_path):
     service = Service(Settings(db_path=str(tmp_path / "s.db")), clock=VirtualClock(), echo=False)
     assert service.withings.configured is False
     service.db.close()
+
+
+# --- What an unfinished night looks like ------------------------------------------
+
+
+def observed(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if "Withings observed" in r.getMessage()]
+
+
+async def test_an_unfinished_night_is_written_down_once_and_again_when_it_finishes(rig, caplog):
+    await connect(rig)
+    caplog.set_level("INFO", logger="hydrosnooze.withings.sync")
+    rig.fake.nights[-1]["completed"] = False
+    await rig.sync.sync()
+    first = observed(caplog)
+    assert len(first) == 1 and "not completed yet" in first[0]
+
+    rig.fake.nights[-1]["modified"] += 600
+    rig.wall.at += 30 * 60
+    await rig.sync.sync()
+    assert len(observed(caplog)) == 1, "still unfinished, and said once already"
+
+    rig.fake.nights[-1]["completed"] = True
+    rig.fake.nights[-1]["modified"] += 600
+    rig.wall.at += 30 * 60
+    await rig.sync.sync()
+    assert "completed now" in observed(caplog)[-1]
+
+
+async def test_a_night_that_grows_after_completed_is_written_down(rig, caplog):
+    await connect(rig)
+    caplog.set_level("INFO", logger="hydrosnooze.withings.sync")
+    await rig.sync.sync()
+    rig.fake.nights[-1]["enddate"] += 1200
+    rig.fake.nights[-1]["modified"] += 600
+    rig.wall.at += 30 * 60
+    await rig.sync.sync()
+    assert any("grew after it was marked completed" in m for m in observed(caplog))
+
+
+async def test_a_new_id_for_the_same_night_is_written_down_and_kept_once(rig, caplog):
+    await connect(rig)
+    caplog.set_level("INFO", logger="hydrosnooze.withings.sync")
+    await rig.sync.sync()
+    arrivals = [e for e in rig.events.recent(50) if "Sleep arrived" in e.message]
+
+    rig.fake.nights[-1]["id"] += 1
+    rig.fake.nights[-1]["modified"] += 600
+    rig.wall.at += 30 * 60
+    await rig.sync.sync()
+    assert any("came back under a new id" in m for m in observed(caplog))
+    assert len(rig.db.sleep_nights()) == 4
+    assert [e for e in rig.events.recent(50) if "Sleep arrived" in e.message] == arrivals

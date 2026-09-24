@@ -1440,9 +1440,9 @@ button:disabled {
   color: rgb(255 255 255 / 0.62);
 }
 
-/* --- The invented three ---------------------------------------------------- */
+/* --- The measured three --------------------------------------------------- */
 
-.ap-boosts {
+.ap-sleep {
   margin-top: 20px;
   display: flex;
   flex-direction: column;
@@ -1452,7 +1452,7 @@ button:disabled {
 /* Translucent rather than a solid fill, so they sit *in* the gradient instead of
    punching three holes through it. The reference does the same thing and it is
    most of why that screen reads as one object. */
-.ap-boost {
+.ap-sleep__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1464,7 +1464,7 @@ button:disabled {
   backdrop-filter: blur(8px);
 }
 
-.ap-boost__label {
+.ap-sleep__label {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -1473,7 +1473,7 @@ button:disabled {
   color: var(--text);
 }
 
-.ap-boost__value {
+.ap-sleep__value {
   font-size: 16px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -2965,3 +2965,95 @@ a.pill {
   color: var(--text);
   font-weight: 600;
 }
+
+/* --- The bed, beside the sleeper -------------------------------------------- */
+
+.hr-card__sub {
+  margin: -6px 0 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.bedchart {
+  position: relative;
+}
+
+.bedchart__svg {
+  display: block;
+  width: 100%;
+  height: 150px;
+}
+
+.bedchart__ribbon {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 2px;
+}
+
+.bedchart__scale span {
+  position: absolute;
+  right: 2px;
+  transform: translateY(-110%);
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-legend--lines {
+  margin: 4px 0 0;
+}
+
+.hr-legend__line {
+  width: 14px;
+  height: 0;
+  border-top: 2px solid rgb(255 255 255 / 0.9);
+}
+
+.hr-legend__line--asked {
+  border-top: 2px dashed rgb(120 160 255 / 0.85);
+}
+
+.bedstages__title {
+  margin: 16px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.bedstages {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 16px;
+}
+
+.bedstages__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.bedstages__name {
+  font-size: 14px;
+  color: var(--text-label);
+}
+
+.bedstages__value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The change against usual in the Autopilot hero. The arrow says which way the
+   number went; green or amber says whether that was the good way. */
+.ap-sleep__change {
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+.ap-sleep__change--better { color: #7dffa0; }
+.ap-sleep__change--worse { color: #ffc978; }

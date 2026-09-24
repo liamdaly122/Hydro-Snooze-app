@@ -144,10 +144,11 @@ def autopilot_json(night) -> dict[str, object]:
     """Last night, as the Autopilot screen draws it.
 
     Flat and already rounded, so the app renders what it is given rather than
-    doing arithmetic on the way to a pixel. The one thing worth pointing at is
-    `boosts`, which carries `for_fun: true`: those three figures are the only
-    numbers this project has ever shown that nothing measured, and the flag is
-    there so the screen cannot forget to say so.
+    doing arithmetic on the way to a pixel.
+
+    `sleep` is the mat's deep sleep, REM and time to fall asleep for the same
+    night, each against my usual. It replaced three invented "boosts", which were
+    the only numbers this project ever showed that nothing measured.
     """
     from ..autopilot import LABELS
 
@@ -185,9 +186,17 @@ def autopilot_json(night) -> dict[str, object]:
             }
             for b in night.bands
         ],
-        "boosts": [
-            {"key": b.key, "label": b.label, "percent": b.percent, "for_fun": True}
-            for b in night.boosts
+        "sleep": [
+            {
+                "key": s.key,
+                "label": s.label,
+                "seconds": s.seconds,
+                "usual_seconds": s.usual_seconds,
+                "nights": s.nights,
+                "change_pct": s.change_pct,
+                "better": s.better,
+            }
+            for s in night.sleep
         ],
         "stages": {
             "landed": night.stages_landed,

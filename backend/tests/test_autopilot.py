@@ -21,7 +21,7 @@ import pytest
 
 from hydrosnooze import autopilot
 from hydrosnooze.autopilot import BY_HAND, PHASE_KIND, READY_KIND, RESPONSE_KIND
-from hydrosnooze.db import PreconditionRow, Sample
+from hydrosnooze.db import Sample
 from hydrosnooze.events import Event
 from hydrosnooze.models import Schedule, SleepStage, Stage
 
@@ -188,10 +188,10 @@ def test_a_night_with_no_probe_readings_still_counts_what_it_did(plan):
     night = build(plan, [ev(at, PHASE_KIND), ev(at, "temperature")])
     assert night.adjustments == 1
     assert not night.measured, "and says there is no chart rather than drawing an empty one"
-    assert night.boosts == []
+    assert night.sleep == []
 
 
-# --- On target, and the invented three -------------------------------------------
+# --- On target, and the sleep the mat measured -----------------------------------
 
 
 def test_on_target_is_the_share_of_the_night_within_half_a_degree(plan):
@@ -199,38 +199,49 @@ def test_on_target_is_the_share_of_the_night_within_half_a_degree(plan):
     assert build(plan, [], samples(plan, offset=1.4)).on_target == 0
 
 
-def test_the_boosts_are_invented_but_they_are_not_random(plan):
-    """Same night, same figures. A random number looks broken the first time two
-    reloads disagree, and this screen is reloaded every morning."""
-    rows = samples(plan, offset=0.3)
-    once = build(plan, [], rows).boosts
-    twice = build(plan, [], rows).boosts
-    assert once == twice
-    assert [b.key for b in once] == ["deep", "rem"]
-    assert all(0 < b.percent <= autopilot.BOOST_CEILING for b in once)
+def test_nothing_is_invented_any_more(plan):
+    """The three boosts were worked out from the water and labelled as fun. The
+    mat measures sleep now, so they are gone rather than kept beside it."""
+    night = build(plan, [], samples(plan, offset=0.1))
+    assert not hasattr(night, "boosts")
+    assert not hasattr(autopilot, "BOOST_CEILING")
+    assert night.sleep == [], "no mat, no sleep, and nothing made up in its place"
 
 
-def test_a_badly_tracked_night_earns_less(plan):
-    """Which is the whole reason they are derived from the water rather than
-    generated. They move with the night."""
-    good = {b.key: b.percent for b in build(plan, [], samples(plan, offset=0.1)).boosts}
-    poor = {b.key: b.percent for b in build(plan, [], samples(plan, offset=1.8)).boosts}
-    assert good["deep"] > poor["deep"]
-    assert good["rem"] > poor["rem"]
+def test_the_sleep_on_the_card_is_the_mats_for_the_same_morning(tmp_path):
+    """Wired through the service: the Autopilot night for a morning carries the
+    mat's night for that morning, and nothing when the mat has none."""
+    import json
+    from pathlib import Path
 
+    from hydrosnooze.clock import VirtualClock
+    from hydrosnooze.config import Settings
+    from hydrosnooze.service import Service
+    from hydrosnooze.withings import parse
 
-def test_a_night_the_bed_never_tracked_earns_nothing_rather_than_a_floor(plan):
-    assert build(plan, [], samples(plan, offset=4.0)).boosts == []
-
-
-def test_getting_ready_earns_one_only_when_it_actually_arrived(plan):
-    rows = samples(plan, offset=0.3)
-    arrived = PreconditionRow(
-        at=plan.bedtime_at, mode="turbo", target_c=19, seconds=1200, reached=True
+    fixtures = Path(__file__).parent / "fixtures" / "withings"
+    summary = next(
+        n for n in json.loads((fixtures / "getsummary.json").read_bytes())["body"]["series"]
+        if n["date"] == "2026-10-23"
     )
-    gave_up = arrived._replace(reached=False)
-    assert any(b.key == "ready" for b in build(plan, [], rows, ready=arrived).boosts)
-    assert not any(b.key == "ready" for b in build(plan, [], rows, ready=gave_up).boosts)
+    series = json.loads((fixtures / "get-2026-10-23.json").read_bytes())["body"]["series"]
+
+    service = Service(Settings(db_path=str(tmp_path / "s.db")), clock=VirtualClock(), echo=False)
+    service.db.save_sleep_night(parse.night(summary, series))
+    schedule = Schedule(
+        wake_time=time(7, 30),
+        days_of_week=[0, 1, 2, 3, 4, 5, 6],
+        stages=[SleepStage(Stage.DEEP, 240, 19), SleepStage(Stage.REM, 210, 22)],
+    )
+
+    night = service.night_report(schedule.plan_for(date(2026, 10, 23)))
+    assert [s.key for s in night.sleep] == ["deep", "rem", "asleep"]
+    assert night.sleep[0].seconds == summary["data"]["deepsleepduration"]
+    assert night.sleep[2].seconds == summary["data"]["sleep_latency"]
+    assert all(s.usual_seconds is None for s in night.sleep), "one night has no usual"
+
+    assert service.night_report(schedule.plan_for(date(2026, 10, 30))).sleep == []
+    service.db.close()
 
 
 # --- The rest of the night --------------------------------------------------------
@@ -413,6 +424,7 @@ def test_last_nights_verdict_does_not_leak_into_tonight(plan):
     belong to. A stage missed yesterday must not read as missed again today."""
     from dataclasses import replace as _replace
     from datetime import timedelta as _td
+
     from hydrosnooze.scheduler import FiredMarks, Job
 
     marks = FiredMarks()
