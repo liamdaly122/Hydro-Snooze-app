@@ -524,8 +524,11 @@ API rather than read. Read that before writing any of it.
 - [x] Commit fixtures. **Invented, because the repository is public.** `./scripts/withings-fixtures.py`
       writes four made-up nights with the same keys, types and rules as the real seven into
       `backend/tests/fixtures/withings/`, and `--check` holds any real capture to the same rules
-- [ ] The backend, offline and against those fixtures: settings, token store, schema, parser, loop
-- [ ] The OAuth routes and a card on the Autopilot screen
+- [x] The backend, offline and against those fixtures: settings, token store, schema, parser, loop.
+      **83 tests**, including one that holds the command lock and fetches anyway
+- [x] The OAuth routes, and `/api/health-report` for the screen to draw
+- [ ] The Health Report: its own tab in the bottom bar, between Home and History, modelled on the
+      Eight Sleep report
 - [ ] Deploy, connect, and prove it survives a token refresh, a reboot and an hour with no internet
 - [ ] Join the two tables and look at one night
 - [ ] Retire the invented numbers on the Autopilot screen, because something measures sleep now

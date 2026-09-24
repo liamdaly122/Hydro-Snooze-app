@@ -120,6 +120,7 @@ backend/hydrosnooze/
   config.py            every setting, and which adapters to use
   main.py              the web service and the background loops
   api/                 routes, schemas, and the dev-only time machine
+  withings/            the Sleep Analyzer: client, parser, the loop, the Health Report
   adapters/
     fake_unit.py       a simulated HS1001 with all the documented quirks
     fake_transmitter.py  prints every press instead of sending it

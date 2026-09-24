@@ -411,10 +411,62 @@ Observed, separately: an empty result came back as `status=0` with an empty
 
 ### The clock
 
-The loop is gated on `_clock_ok`. `expires_at` and `lastupdate` are both unix
-timestamps, so a Pi back from a power cut with the wrong time refreshes a token
-that has not expired and asks for every night since 1970. It has to wait for NTP
-before it does anything.
+`expires_at` and `lastupdate` are both unix timestamps, so a Pi back from a power
+cut with the wrong time refreshes a token that has not expired and asks for nights
+that have not happened. It has to wait for NTP before it does anything.
+
+**Not on `_clock_ok`, though, which was the plan.** That one gives up after ten
+minutes and runs on whatever clock it has, which is right for the bed, because no
+night at all is worse than a night at the wrong hour. Nothing here is worth that.
+The loop asks `clocksync.synchronised()` itself and waits for as long as it takes.
+A Pi with no NTP most likely has no internet either, so the wait costs nothing.
+
+---
+
+## What is built
+
+Everything lives in `backend/hydrosnooze/withings/`, with its routes in
+`backend/hydrosnooze/api/withings.py`:
+
+| | |
+|---|---|
+| `client.py` | Talking to Withings and nothing else. Pages on `more`, takes the server's offset |
+| `parse.py` | Nights, stages and minutes, with every trap above stepped round |
+| `sync.py` | The loop, every half hour |
+| `health.py` | The Health Report, built on request from what is stored |
+
+| Route | |
+|---|---|
+| `GET /api/withings` | Where the connection is up to |
+| `GET /api/withings/connect` | Sends the browser to sign in |
+| `GET /api/withings/callback` | Where Withings sends it back. Trades the code in at once |
+| `POST /api/withings/sync` | Fetch now, at most every ten minutes |
+| `DELETE /api/withings` | Disconnect. The nights stay |
+| `GET /api/health-report?date=` | One night as the Health Report draws it, and its week |
+
+**The rule that outranks the rest holds in code, with a test for each half.** The
+loop is its own task and never takes the command lock: a test holds the lock and
+fetches anyway. Nothing it says can reach the phone at 3am: a test checks its
+warning against the notifier. Every failure ends as a line of text on the Health
+Report and nothing else.
+
+Four decisions that are not obvious from the code alone:
+
+- **Tokens are written with a full sync to disk**, and before the new access
+  token is used. The rest of the database runs `synchronous=NORMAL`, which can
+  lose a commit in a power cut. Losing this one would mean signing in by hand
+- **It keeps real time, not the service clock.** The simulator runs that at up to
+  120 times real speed, and "every half hour" would become every fifteen seconds
+  against Withings
+- **A night is replaced whole every time it changes**, matched on its start as
+  well as its id, so a night whose id changed as it grew cannot be counted twice
+- **A refused refresh says reconnect once and keeps trying every pass.** An old
+  refresh token stays good for eight hours after a rotation whose answer never
+  arrived, so a refusal can pass by itself
+
+To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
+restart, open the app at `http://hydrosnooze.local:8000` and press Connect. The
+first pass fetches the last month.
 
 ---
 
