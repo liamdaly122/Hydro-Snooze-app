@@ -358,6 +358,13 @@ def shape(value: object, depth: int = 0) -> str:
     if isinstance(value, (int, float)):
         return "a number"
     if isinstance(value, str):
+        # night_events arrives as JSON packed inside a string. Describing that
+        # as "a string" hid the most important answer the first real run had.
+        if value.startswith(("{", "[")):
+            try:
+                return f"JSON inside a string, {shape(json.loads(value), depth)}"
+            except ValueError:
+                pass
         return "a string"
     if isinstance(value, list):
         if not value:
@@ -405,9 +412,13 @@ def report_night(night: dict, entries: list[dict]) -> list[str]:
         ),
     ]
     if isinstance(night.get("created"), int):
+        # Usually before, not after. A night is created a minute or two after
+        # the first time out of bed and then stretched each time I get back in,
+        # so a 4am trip to the bathroom creates it hours before the morning.
         after = night["created"] - night["enddate"]
         lines.append(
-            f"  appeared {span(after)} after getting up; last modified "
+            f"  created {span(abs(after))} {'after' if after >= 0 else 'before'} the last time "
+            "out of bed; last modified "
             f"{clock(night['modified'], tz) if isinstance(night.get('modified'), int) else '?'}"
         )
 
