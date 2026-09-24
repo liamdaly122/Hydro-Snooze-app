@@ -124,6 +124,31 @@ export function HealthReport({
     void load(date)
   }, [load, date])
 
+  // Until the first night arrives, keep asking. Connecting happens on Withings'
+  // own site, on a phone usually in a browser sheet over this app, and nothing
+  // tells this screen when that is done. Without this it went on offering
+  // Connect to somebody who had just connected.
+  useEffect(() => {
+    if (!nothingYet) return
+    const timer = setInterval(() => {
+      void client.getWithings().then(setStatus).catch(() => undefined)
+      void load(date)
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [nothingYet, client, load, date])
+
+  // And again whenever the app comes back to the front. A phone keeps an app
+  // open for days, and the morning's night arrives while it sits there.
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState !== 'visible') return
+      void client.getWithings().then(setStatus).catch(() => undefined)
+      void load(date)
+    }
+    document.addEventListener('visibilitychange', back)
+    return () => document.removeEventListener('visibilitychange', back)
+  }, [client, load, date])
+
   useEffect(() => {
     let live = true
     void client
