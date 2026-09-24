@@ -514,7 +514,9 @@ API rather than read. Read that before writing any of it.
 - [x] Read `llms.md` and download `openapi.yaml`, which is the one that wins
 - [x] Prove the token exchange against the live API, unsigned, using the demo account
 - [x] Write it all down in `docs/withings.md`
-- [ ] Sleep a night on the mat, then save the raw `getsummary` and `get` responses
+- [ ] Sleep a night on the mat, then save the raw `getsummary` and `get` responses.
+      `./scripts/withings-capture.py` on the Mac does it: one sign-in, the responses byte for byte
+      into `backend/data/withings/`, which git never sees, and a printout of what they settled
 - [ ] Answer what only a real payload can settle, starting with whether `night_events` is populated
 - [ ] Commit both responses as fixtures, with the device hash stripped from every entry
 - [ ] The backend, offline and against those fixtures: settings, token store, schema, parser, loop
