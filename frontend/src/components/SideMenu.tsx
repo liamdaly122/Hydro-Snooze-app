@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { DeviceBar } from './DeviceBar'
 import { Bolt, ChevronRight, Clock, Close, Snowflake, Sparkle, Suitcase } from './Icons'
-import { formatDay, formatDays, formatWatts, parseDay } from '../domain'
+import { formatDay, formatDays, formatWatts, hasOtherTimes, parseDay } from '../domain'
 import type { ApiClient } from '../api/client'
 import {
   MODE_LABEL,
+  type AuthState,
   type AutopilotNight,
   type DeviceHealth,
   type DeviceState,
@@ -28,6 +29,9 @@ interface Props {
   schedule: Schedule | null
   tonight: TonightState | null
   holiday: Holiday | null
+  auth: AuthState
+  onSignOut: () => Promise<void>
+  onSignOutEverywhere: () => Promise<void>
 }
 
 /**
@@ -54,6 +58,9 @@ export function SideMenu({
   schedule,
   tonight,
   holiday,
+  auth,
+  onSignOut,
+  onSignOutEverywhere,
 }: Props) {
   const first = useRef<HTMLButtonElement>(null)
   const [night, setNight] = useState<AutopilotNight | null>(null)
@@ -124,6 +131,10 @@ export function SideMenu({
         ) : (
           <p className="drawer__waiting">Waiting for the service to answer.</p>
         )}
+
+        {auth.required && (
+          <SignedIn via={auth.via} onSignOut={onSignOut} onSignOutEverywhere={onSignOutEverywhere} />
+        )}
       </nav>
     </div>
   )
@@ -163,7 +174,7 @@ function Items({
       <Item
         icon={<Clock size={18} />}
         label="Alarm"
-        sub={alarmLine(running, schedule)}
+        sub={alarmLine(running, schedule, tonight)}
         onClick={() => onOpen('alarm')}
       />
       <Item
@@ -194,6 +205,61 @@ function Items({
         onClick={() => onOpen('holiday')}
       />
     </>
+  )
+}
+
+/**
+ * Which way this phone is in, and the two ways out.
+ *
+ * At the bottom and quiet, because nobody signs out of their own bed. It is
+ * here for the day a phone goes missing: Sign out every device, from any other
+ * one, and the missing phone needs the password again.
+ */
+function SignedIn({
+  via,
+  onSignOut,
+  onSignOutEverywhere,
+}: {
+  via: AuthState['via']
+  onSignOut: () => Promise<void>
+  onSignOutEverywhere: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function run(work: () => Promise<void>) {
+    setBusy(true)
+    setError(null)
+    void work()
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="drawer__foot">
+      <p className="drawer__foot-line">
+        Signed in {via === 'tailscale' ? 'through Tailscale' : 'on the home network'}
+      </p>
+      <div className="drawer__foot-actions">
+        <button type="button" className="pill" disabled={busy} onClick={() => run(onSignOut)}>
+          Sign out
+        </button>
+        <button
+          type="button"
+          className="pill"
+          disabled={busy}
+          onClick={() => {
+            const sure = window.confirm(
+              'Sign out every device, this one included? Each will need the password again.',
+            )
+            if (sure) run(onSignOutEverywhere)
+          }}
+        >
+          Every device
+        </button>
+      </div>
+      {error && <p className="footnote footnote--error">{error}</p>}
+    </div>
   )
 }
 
@@ -229,14 +295,22 @@ function weekday(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { weekday: 'long' })
 }
 
-/** "06:30, Mon-Fri", or tonight's time first when tonight is different. */
-function alarmLine(running: Schedule, usual: Schedule): string {
+/**
+ * "06:30, Mon-Fri", with the weekend's own time after it when there is one, or
+ * tonight's time first when tonight is different from what this night usually
+ * is. A Saturday's 08:30 is Saturday's usual, not a change.
+ */
+function alarmLine(running: Schedule, usual: Schedule, tonight: TonightState | null): string {
   if (!usual.enabled) return 'Not running automatically'
   if (usual.days_of_week.length === 0) return 'No days selected'
-  const days = usual.days_of_week.length === 7 ? 'every day' : formatDays(usual.days_of_week)
-  if (running.wake_time !== usual.wake_time) {
-    return `${running.wake_time} tonight, usually ${usual.wake_time}`
+  const thisNight = tonight?.usual_wake_time ?? usual.wake_time
+  if (running.wake_time !== thisNight) {
+    return `${running.wake_time} tonight, usually ${thisNight}`
   }
+  if (hasOtherTimes(usual)) {
+    return `${usual.wake_time}, ${formatDays(usual.other_days)} ${usual.other_wake_time}`
+  }
+  const days = usual.days_of_week.length === 7 ? 'every day' : formatDays(usual.days_of_week)
   return `${usual.wake_time}, ${days}`
 }
 

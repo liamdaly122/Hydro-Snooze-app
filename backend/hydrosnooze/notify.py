@@ -70,11 +70,15 @@ class Notifier:
         server: str = "https://ntfy.sh",
         *,
         timeout: float = 5.0,
+        click: str = "",
     ) -> None:
         self.clock = clock
         self.topic = topic.strip()
         self.server = server.rstrip("/")
         self.timeout = timeout
+        #: Where tapping a notification goes: the app's address through
+        #: Tailscale, when there is one. Empty, and tapping opens ntfy itself.
+        self.click = click.strip()
         self._sent: dict[str, datetime] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -144,15 +148,18 @@ class Notifier:
             # phone to be picked up rather than pushing past a silent mode that
             # was set on purpose.
             urgent = tag == "warning"
+            headers = {
+                "Title": title,
+                "Priority": "high" if urgent else "default",
+                "Tags": tag,
+            }
+            if self.click:
+                headers["Click"] = self.click
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 await client.post(
                     f"{self.server}/{self.topic}",
                     content=message.encode(),
-                    headers={
-                        "Title": title,
-                        "Priority": "high" if urgent else "default",
-                        "Tags": tag,
-                    },
+                    headers=headers,
                 )
         except Exception as exc:  # noqa: BLE001
             # Swallowed on purpose. Failing to send a notification is not worth

@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App'
+import { Gate } from './Gate'
 import { HttpApiClient } from './api/http'
 import { MockApiClient } from './api/mock'
 import './styles/global.css'
@@ -20,7 +20,7 @@ const client = useSeedData ? new MockApiClient() : new HttpApiClient()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App client={client} />
+    <Gate client={client} />
   </StrictMode>,
 )
 

@@ -84,6 +84,21 @@ class NightRun:
     test_part: str | None = None
     test_offset_c: int | None = None
     rebuilt: bool = False
+    #: What the unit used across the night, from the plug: the same figure the
+    #: morning report gives, from the same readings (report.kwh). None where the
+    #: plug said nothing, never nought.
+    kwh: float | None = None
+
+    @property
+    def bed_c(self) -> float | None:
+        """The bed across the whole night: each part's average, by how long it ran."""
+        weighed = [
+            (p.bed_c, (p.ends_at - p.starts_at).total_seconds())
+            for p in self.parts
+            if p.bed_c is not None
+        ]
+        total = sum(w for _, w in weighed)
+        return round(sum(c * w for c, w in weighed) / total, 1) if total else None
 
     def part(self, name: str) -> PartRun | None:
         return next((p for p in self.parts if p.part == name), None)

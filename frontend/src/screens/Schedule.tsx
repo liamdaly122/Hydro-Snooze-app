@@ -1,7 +1,15 @@
 import { Card } from '../components/Card'
 import { Toggle } from '../components/Toggle'
 import { Flame, Snowflake } from '../components/Icons'
-import { DAY_INITIALS, formatDays, formatDuration, formatTime, formatWhen, nextPlan } from '../domain'
+import {
+  DAY_INITIALS,
+  formatDays,
+  formatDuration,
+  formatTime,
+  formatWhen,
+  homeNow,
+  nextPlan,
+} from '../domain'
 import {
   MIN_STAGE_MINUTES,
   STAGE_LABEL,
@@ -52,7 +60,7 @@ export function Schedule({
   onDismissError,
   holiday,
 }: Props) {
-  const plan = nextPlan(draft, new Date(), holiday)
+  const plan = nextPlan(draft, homeNow(), holiday)
   const pre = draft.preconditioning
   const bedMinutes = toMinutes(draft.bed_time)
 
@@ -79,6 +87,22 @@ export function Schedule({
       days_of_week: draft.days_of_week.includes(day)
         ? draft.days_of_week.filter((d) => d !== day)
         : [...draft.days_of_week, day].sort((a, b) => a - b),
+    })
+  }
+
+  /**
+   * A day in or out of the other times. The first day chosen starts from the
+   * usual times rather than from nothing, so the night is exactly the usual one
+   * until one of the two times below is moved.
+   */
+  function toggleOtherDay(day: number) {
+    const days = draft.other_days.includes(day)
+      ? draft.other_days.filter((d) => d !== day)
+      : [...draft.other_days, day].sort((a, b) => a - b)
+    onChange({
+      other_days: days,
+      ...(draft.other_bed_time === null ? { other_bed_time: draft.bed_time } : {}),
+      ...(draft.other_wake_time === null ? { other_wake_time: draft.wake_time } : {}),
     })
   }
 
@@ -205,6 +229,75 @@ export function Schedule({
           Keyed to the morning you wake up. Waking at {draft.wake_time} on Tuesday means going to
           bed on Monday.
         </p>
+      </Card>
+
+      {/*
+        The weekend lie-in. Only the two times: the parts of the night and their
+        temperatures are shared, and how they fit a longer night is Autopilot's
+        to decide rather than a second schedule to keep in step with the first.
+      */}
+      <Card label="Different times on some days">
+        <div className="days" role="group" aria-label="Mornings with different times">
+          {DAY_INITIALS.map((initial, day) => (
+            <button
+              key={day}
+              type="button"
+              className="day"
+              aria-pressed={draft.other_days.includes(day)}
+              aria-label={`${formatDays([day])} has different times`}
+              onClick={() => toggleOtherDay(day)}
+            >
+              {initial}
+            </button>
+          ))}
+        </div>
+
+        {draft.other_days.length > 0 && (
+          <>
+            <div className="timerow">
+              <label className="timerow__label" htmlFor="other-bed-time">
+                Lights out
+              </label>
+              <input
+                id="other-bed-time"
+                className="timerow__input"
+                type="time"
+                value={draft.other_bed_time ?? draft.bed_time}
+                onChange={(e) => e.target.value && onChange({ other_bed_time: e.target.value })}
+              />
+            </div>
+            <div className="timerow">
+              <label className="timerow__label" htmlFor="other-wake-time">
+                Wake
+              </label>
+              <input
+                id="other-wake-time"
+                className="timerow__input"
+                type="time"
+                value={draft.other_wake_time ?? draft.wake_time}
+                onChange={(e) => e.target.value && onChange({ other_wake_time: e.target.value })}
+              />
+            </div>
+          </>
+        )}
+
+        <p className="footnote">
+          {draft.other_days.length === 0
+            ? 'Pick the mornings that wake at a different time, a weekend lie-in say. Keyed to the morning, like the days above.'
+            : `${draft.other_night_minutes !== null ? formatDuration(draft.other_night_minutes) : ''} in bed on ${formatDays(draft.other_days)} mornings. With Autopilot on, a longer night keeps Drift, Deep and Wake as long as usual and gives the extra time to REM, because deep sleep comes early whatever time you wake. With it off, every part stretches evenly.`}
+        </p>
+        {draft.other_days.some((d) => !draft.days_of_week.includes(d)) && (
+          <p className="footnote">
+            {formatDays(draft.other_days.filter((d) => !draft.days_of_week.includes(d)))} is not
+            one of the days above, so it does not run at all until it is.
+          </p>
+        )}
+        {draft.other_days.length > 0 && (draft.other_wake_time ?? '') > '09:00' && (
+          <p className="footnote footnote--error">
+            After 09:00. If the plug's own daily schedule switches it off at 09:00, as SETUP.md
+            sets it up, move that too or the end of the night is cut short.
+          </p>
+        )}
       </Card>
 
       {/*

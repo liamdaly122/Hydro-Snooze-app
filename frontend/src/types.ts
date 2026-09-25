@@ -121,6 +121,16 @@ export interface Schedule {
   /** Decided by the service from the first stage, not a setting. */
   preconditioning: Preconditioning
   updated_at: string | null
+  /**
+   * A second pair of times for some mornings: the weekend lie-in. Keyed to the
+   * wake morning like days_of_week. Both times null means there are none.
+   * The parts and temperatures are shared; only the times differ.
+   */
+  other_days: number[]
+  other_bed_time: string | null
+  other_wake_time: string | null
+  /** Lights out to alarm on those mornings, or null with no other times. */
+  other_night_minutes: number | null
 }
 
 export type Health = 'ok' | 'degraded' | 'down' | 'simulated' | 'unknown'
@@ -189,6 +199,29 @@ export interface ServiceInfo {
    * started with and reloads itself when the service reports a different one.
    */
   build: string
+  /**
+   * How far the bed's clock is from UTC, in minutes, and what its zone is
+   * called. The service sends every time without a zone, in the bed's own local
+   * time, and the phone reads them as its own. Abroad those differ, and this is
+   * what lets the app count down in the bed's time rather than the phone's.
+   * Missing from builds before Tailscale, and from the seed data.
+   */
+  utc_offset_minutes?: number
+  timezone?: string
+  via?: Via
+}
+
+/** Which way the phone reached the service. See backend/hydrosnooze/access.py. */
+export type Via = 'home' | 'tailscale'
+
+/** Whether to show the sign-in, asked before anything else. */
+export interface AuthState {
+  /** A password is set. Without one the app answers at home and nowhere else. */
+  required: boolean
+  signed_in: boolean
+  via: Via
+  /** Why signing in would not help from here: no password set, through Tailscale. */
+  refused: string | null
 }
 
 /**
@@ -325,6 +358,8 @@ export interface AutopilotTest {
   needs: number
   verdict: ScorePart['verdict']
   leader_c: number | null
+  /** Tags on the night that left it out of the scoreboard. Absent from older builds. */
+  left_out?: string[]
 }
 
 export interface AutopilotNight {
@@ -410,6 +445,13 @@ export interface TonightState {
   speed_changed: boolean
   nudge_c: number
   nudge_until: string | null
+  /**
+   * This night's own times before tonight changed anything: the weekend's, on a
+   * weekend. What "usually" means under a changed alarm. Absent from builds
+   * before there were other times, where the schedule's own are the answer.
+   */
+  usual_bed_time?: string
+  usual_wake_time?: string
   /**
    * Tonight's change, when it is Autopilot's evening suggestion as it was taken.
    * Home names it as Autopilot's and leaves out Save as my usual for it. Absent
@@ -608,14 +650,26 @@ export interface ScoreSetting {
   /** The two halves of a Deep or REM score, so a trade between them shows. */
   deep_s: number | null
   rem_s: number | null
+  /**
+   * How the bed felt on these nights, when the morning said: over the whole
+   * night, so it goes with the setting rather than being caused by it. Absent
+   * from builds before the morning note.
+   */
+  felt?: { answered: number; too_warm: number; too_cold: number }
 }
 
 export interface ScorePart {
-  part: 'deep' | 'rem' | 'drift'
+  part: 'deep' | 'rem' | 'drift' | 'wake'
   label: string
   /** What the part is scored on: deep sleep, REM, or time to fall asleep. */
   measure: string
   more_is_better: boolean
+  /**
+   * What mean_s, gap_s and the rest are counted in. Seconds for what the mat
+   * measures; a rating, one to five, for Wake, which is scored on how waking up
+   * felt. Absent from older builds, which only had seconds.
+   */
+  unit?: 'seconds' | 'rating'
   settings: ScoreSetting[]
   /**
    * empty: nothing yet. one_setting: only one temperature tried. not_sure: the
@@ -639,6 +693,35 @@ export interface Scoreboard {
   tests: number
   setting_needs: number
   parts: ScorePart[]
+  /**
+   * Nights tagged Alcohol, Ill, or Someone else in the bed, left out of every
+   * part, and how many of each. Absent from older builds.
+   */
+  left_out?: { nights: number; by_tag: Record<string, number> }
+}
+
+/** How a night felt, from the morning rather than the mat. See notes.py. */
+export interface NightNote {
+  wake_on: string
+  /** How waking up felt, 1 (Rough) to 5 (Great). */
+  rating: number | null
+  felt: 'too_cold' | 'right' | 'too_warm' | null
+  /** Tag keys, from choices.tags. */
+  tags: string[]
+  /** The labels of the tags on it that leave the night out of the scoreboard. */
+  left_out: string[]
+  choices: {
+    ratings: { value: number; label: string }[]
+    felt: { value: 'too_cold' | 'right' | 'too_warm'; label: string }[]
+    tags: { key: string; label: string; leaves_out: boolean }[]
+  }
+}
+
+/** Only what is sent changes. A null rating or felt clears it. */
+export interface NightNotePatch {
+  rating?: number | null
+  felt?: NightNote['felt']
+  tags?: string[]
 }
 
 /**
@@ -712,3 +795,54 @@ export interface WithingsStatus {
   last_error: string | null
   latest_night: string | null
 }
+
+/** The stretches Trends offers. See backend/hydrosnooze/trends.py. */
+export type TrendRange = 30 | 90 | 365
+
+/** One night, as Trends draws it. Null wherever nothing measured it: a gap, never a nought. */
+export interface TrendNight {
+  wake_on: string
+  score: number | null
+  asleep_s: number | null
+  deep_s: number | null
+  rem_s: number | null
+  deep_rem_s: number | null
+  latency_s: number | null
+  /** The bed across the night, each part by how long it ran. */
+  bed_c: number | null
+  room_c: number | null
+  kwh: number | null
+  /** Pence, when a rate is set. */
+  cost_p: number | null
+  rating: number | null
+  /** Tag labels. */
+  tags: string[]
+  /** Tagged with something that leaves it out of the scoreboard. It stays in here. */
+  left_out: boolean
+  test: 'deep' | 'rem' | null
+}
+
+export interface TrendSummary {
+  nights: number
+  score: number | null
+  deep_rem_s: number | null
+  latency_s: number | null
+  asleep_s: number | null
+  bed_c: number | null
+  room_c: number | null
+  kwh_per_night: number | null
+  kwh_total: number | null
+  cost_p_total: number | null
+}
+
+export interface Trends {
+  days: TrendRange
+  first: string
+  last: string
+  /** Pence per kWh, or null until it is set. */
+  tariff_p: number | null
+  nights: TrendNight[]
+  /** This stretch, and the same number of mornings before it. */
+  summary: { now: TrendSummary; before: TrendSummary }
+}
+

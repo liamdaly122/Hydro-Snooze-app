@@ -31,6 +31,7 @@ from .models import (
     StageStep,
     Tonight,
     Underway,
+    laid_out_like,
 )
 
 log = logging.getLogger(__name__)
@@ -312,6 +313,9 @@ class Scheduler:
     #: What tonight's getting ready was, once it has started. Set by the service
     #: when pre-conditioning begins, and read back after a restart.
     underway: Underway | None = None
+    #: Whether Autopilot is on, asked each time rather than held. It decides how
+    #: a night longer or shorter than usual is laid out; see models.laid_out_like.
+    autopilot_on: Callable[[], bool] | None = None
 
     def plan_in_progress(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The night we are currently inside, or the next one.
@@ -406,11 +410,20 @@ class Scheduler:
         that is nothing. This answers "how long is it and when does it end",
         which a skipped night still has: the unit may be on, and the time it has
         to be off by is the one that was asked for, not the one on the routine.
+
+        Three layers, in order. The morning's own times, when it is one of the
+        days with other times. Then tonight's exceptions over those, so sleeping
+        in on a Saturday is an hour past Saturday's alarm, not Monday's. Then,
+        with Autopilot on, a night longer or shorter than the usual one is laid
+        out the way Autopilot has it: see models.laid_out_like.
         """
+        night = schedule.for_morning(wake_on)
         tonight = self.tonight
-        if tonight is None or not tonight.applies_on(wake_on):
-            return schedule
-        return tonight.over(schedule)
+        if tonight is not None and tonight.applies_on(wake_on):
+            night = tonight.over(night)
+        if self.autopilot_on is not None and self.autopilot_on():
+            night = laid_out_like(night, schedule)
+        return night
 
     def running(self, schedule: Schedule, wake_on: date) -> Schedule | None:
         """The schedule as this particular night is being run.
@@ -426,11 +439,9 @@ class Scheduler:
         if self.away(wake_on):
             return None
         tonight = self.tonight
-        if tonight is None or not tonight.applies_on(wake_on):
-            return schedule
-        if tonight.skip:
+        if tonight is not None and tonight.applies_on(wake_on) and tonight.skip:
             return None
-        return tonight.over(schedule)
+        return self.shape(schedule, wake_on)
 
     def away(self, wake_on: date) -> bool:
         """Whether this night is one of the nights away on holiday."""

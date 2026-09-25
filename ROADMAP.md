@@ -418,3 +418,28 @@ Swap the blaster's USB supply. An IR LED pulls a sharp current spike, and a marg
 sagging under it while the chip keeps running gives exactly this symptom, including being
 cured by a power cycle. It is the one candidate cause none of the above touches.
 
+---
+
+## A second set of times, and who decides how a longer night is laid out
+
+One wake time for every morning meant a weekend lie-in was a Sleep in pressed every
+Friday and Saturday. Now some mornings can have their own bedtime and wake time
+(`other_days`, `other_bed_time`, `other_wake_time` on the schedule). Only the times: the
+parts of the night and their temperatures are the same every night, so there is still one
+schedule to keep, not two to keep in step.
+
+A longer night raises a question the schedule never had to answer: where does the extra
+time go? Stretching every part evenly puts most of an extra hour into Deep, which is the
+wrong way round. Deep sleep comes early in the night whenever the alarm is set; the extra
+hours at the end of a lie-in are mostly REM.
+
+Rather than a new rule to set, that is Autopilot's call. Sleep timing already measures
+where deep sleep ends in minutes after lights out, and moves the end of Deep to match, and
+that answer does not change with the alarm. So with Autopilot on, a night longer or shorter
+than the usual one keeps Drift, Deep and Wake exactly as long as on the usual night and
+REM takes the difference (`models.laid_out_like`). That covers Sleep in and Bed early as
+well as the weekend. With Autopilot off the night stretches evenly, exactly as set, which
+is what "off" has always meant. Sleep timing now measures each night from its own lights
+out, so the weekend nights feed it too, and Full Autopilot can take the same decision over
+without anything underneath changing.
+

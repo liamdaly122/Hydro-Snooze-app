@@ -30,6 +30,7 @@ from .adapters.probes import (
     STALE_AFTER,
     Probes,
 )
+from .access import Access
 from .clock import Clock, RealClock, SimClock, VirtualClock
 from .config import Settings
 from .db import Database, Decided
@@ -50,6 +51,7 @@ from .models import (
     Schedule,
     NUDGE_LIMIT_C,
     NUDGE_MINUTES,
+    PRECONDITION_MAX_MINUTES,
     QUIET_KIND,
     TRIM_KIND,
     Stage,
@@ -336,7 +338,11 @@ class Service:
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
         self.commands.on_progress = self._note_progress
-        self.scheduler = Scheduler(learned_lead=self._learned_lead, bed_now=self._bed_now)
+        self.scheduler = Scheduler(
+            learned_lead=self._learned_lead,
+            bed_now=self._bed_now,
+            autopilot_on=self._autopilot_on,
+        )
         # Read back what already ran tonight before anything can ask. A restart is
         # a routine event now: systemd brings the service back after a crash and
         # the watchdog brings it back after a stall, so losing this in memory
@@ -361,7 +367,12 @@ class Service:
         self._button_power = False
         self._button_until: datetime | None = None
         self._button_task: asyncio.Task[None] | None = None
-        self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
+        self.notifier = Notifier(
+            self.clock, settings.ntfy_topic, settings.ntfy_server, click=settings.public_url
+        )
+        # Who may drive the bed from a phone. See access.py: nothing the bed
+        # does at night goes through it.
+        self.access = Access(settings, self.db, self.events, self.notifier)
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
         # The sleeper rather than the machine. Its own loop, its own lock, and
         # nothing the bed does waits for it. See withings/sync.py.
@@ -1997,6 +2008,10 @@ class Service:
             [m.at for m in marks if m.kind == autopilot.BY_HAND],
             rebuilt=rebuilt,
         )
+        # What it used, the same figure the morning report gives. Not nought
+        # when the plug said nothing: that is a night nobody measured.
+        if len(samples) >= 2:
+            run = replace(run, kwh=report.kwh(samples))
         # A test night is one only if the test temperature is what actually ran.
         # Taken and then put back to usual, or changed again by hand, it was not.
         decided = self.db.decision_for(run.wake_on)
@@ -2026,11 +2041,33 @@ class Service:
             if night.wake_on in held:
                 continue
             held.add(night.wake_on)
+            # Through the scheduler, so a Saturday is rebuilt with Saturday's
+            # times and laid out the way it would have run.
+            wake_on = date.fromisoformat(night.wake_on)
             self.record_night(
-                self.schedule.plan_for(date.fromisoformat(night.wake_on)), rebuilt=True
+                self.scheduler.shape(self.schedule, wake_on).plan_for(wake_on), rebuilt=True
             )
             written += 1
+        self._fill_in_kwh(first, last)
         return written
+
+    def _fill_in_kwh(self, first: str, last: str) -> None:
+        """What each earlier night used, on rows written before that was kept.
+
+        From the plug's readings between lights out, less the longest the bed
+        can take getting ready and the hour of margin the morning report uses,
+        and half an hour after the alarm: the morning report's own window, as
+        near as the row can say without the evening's plan.
+        """
+        for run in self.db.night_runs(first, last):
+            if run.kwh is not None:
+                continue
+            ahead = timedelta(minutes=PRECONDITION_MAX_MINUTES) + timedelta(hours=1)
+            samples = self.db.night_history(
+                run.bedtime_at - ahead, run.wake_at + timedelta(minutes=30)
+            )
+            if len(samples) >= 2:
+                self.db.set_night_kwh(run.wake_on, report.kwh(samples))
 
     # --- Holding the bed at the number (hold.py) ---------------------------------
 
@@ -2128,6 +2165,11 @@ class Service:
         )
 
     # --- The switch over all of Autopilot -------------------------------------
+
+    def _autopilot_on(self) -> bool:
+        """Asked of the database each time, because the switch can move at any
+        moment and the scheduler must never be holding yesterday's answer."""
+        return self.db.autopilot_on()
 
     def _learning_active(self) -> bool:
         """Whether what has been learned about the bed is used: Autopilot on, and

@@ -37,6 +37,7 @@ export function Alarm({ client, schedule, tonight, holiday, onTonight, onOpenSch
       <WakeCard
         draft={tonight?.running ?? draft}
         usual={schedule}
+        usualWake={tonight?.usual_wake_time}
         holiday={holiday}
         onDraftChange={save}
         onOpen={onOpenSchedule}

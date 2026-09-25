@@ -2,7 +2,16 @@ import type { ReactNode } from 'react'
 import { Card } from './Card'
 import { Toggle } from './Toggle'
 import { Clock, Flame, Snowflake, Waves } from './Icons'
-import { formatDays, formatDuration, formatTime, formatWhen, nextPlan, tint } from '../domain'
+import {
+  formatDays,
+  formatDuration,
+  formatTime,
+  formatWhen,
+  hasOtherTimes,
+  homeNow,
+  nextPlan,
+  tint,
+} from '../domain'
 import type { Holiday, Schedule } from '../types'
 
 interface Props {
@@ -10,6 +19,11 @@ interface Props {
   draft: Schedule
   /** The routine, so a changed time can say what it usually is. */
   usual?: Schedule
+  /**
+   * What this night's alarm usually is: the weekend's on a weekend. Without it
+   * a Saturday's 08:30 would read as a one-off change to the weekday 06:30.
+   */
+  usualWake?: string
   /** Stepped over, so the next bedtime shown is one that will happen. */
   holiday?: Holiday | null
   onDraftChange: (patch: Partial<Schedule>) => void
@@ -25,8 +39,18 @@ interface Props {
  * stopped being a choice, which leaves the question the card is actually for:
  * when does it wake me, is it on, and when does the unit switch itself on.
  */
-export function WakeCard({ draft, usual, holiday = null, onDraftChange, onOpen, children }: Props) {
-  const plan = nextPlan(draft, new Date(), holiday)
+export function WakeCard({
+  draft,
+  usual,
+  usualWake,
+  holiday = null,
+  onDraftChange,
+  onOpen,
+  children,
+}: Props) {
+  const thisNight = usualWake ?? usual?.wake_time
+  const routine = usual ?? draft
+  const plan = nextPlan(draft, homeNow(), holiday)
   const firstTemp = draft.stages[0]?.temp_c ?? 20
   const warming = draft.preconditioning.mode === 'warming'
 
@@ -39,6 +63,8 @@ export function WakeCard({ draft, usual, holiday = null, onDraftChange, onOpen, 
         {draft.days_of_week.length === 0
           ? 'No days selected'
           : `Every ${formatDays(draft.days_of_week)}`}
+        {hasOtherTimes(routine) &&
+          ` · ${formatDays(routine.other_days)} ${routine.other_bed_time} to ${routine.other_wake_time}`}
       </p>
 
       <div className="wake__row">
@@ -48,9 +74,9 @@ export function WakeCard({ draft, usual, holiday = null, onDraftChange, onOpen, 
             A changed time has to say it is changed, or it reads as the routine
             and the next question is why the alarm moved on its own.
           */}
-          {usual && usual.wake_time !== draft.wake_time && (
+          {thisNight && thisNight !== draft.wake_time && (
             <span className="wake__only">
-              Tonight only &middot; usually {usual.wake_time.slice(0, 5)}
+              Tonight only &middot; usually {thisNight.slice(0, 5)}
             </span>
           )}
         </div>

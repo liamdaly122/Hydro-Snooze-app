@@ -1,5 +1,5 @@
 import { Suitcase } from './Icons'
-import { daysBetween, formatDay, isoDay, parseDay } from '../domain'
+import { daysBetween, formatDay, homeNow, isoDay, parseDay } from '../domain'
 import type { Holiday } from '../types'
 
 /** How far ahead a holiday starts showing on the home screen. */
@@ -17,7 +17,7 @@ const SHOWS_FROM_DAYS = 7
  * Only from a week out. One set in March for August does not need a banner in
  * March: a banner that is always there is a banner nobody reads.
  */
-export function HolidayBanner({ holiday, now = new Date() }: { holiday: Holiday | null; now?: Date }) {
+export function HolidayBanner({ holiday, now = homeNow() }: { holiday: Holiday | null; now?: Date }) {
   if (!holiday) return null
   const today = isoDay(now)
   if (daysBetween(today, holiday.leaves_on) > SHOWS_FROM_DAYS) return null

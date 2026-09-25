@@ -70,6 +70,7 @@ SAFE = frozenset(
         "HS_MAX_TEMPERATURE_C",
         "HS_SIM_SPEED",
         "HS_SIM_AUTO_APPLY_FROM_ANY_PHASE",
+        "HS_TUNNEL",
     }
 )
 
@@ -134,9 +135,27 @@ def run(*command: str, timeout: int = 20) -> str:
     return (done.stdout + done.stderr).strip() or "(no output)"
 
 
+#: The scripts' key, from whichever .env the service is reading. Without it a
+#: password on the app would lock this out too: a request from the Pi itself is
+#: not trusted for that alone, because through Tailscale everything is one.
+_KEY = ""
+
+
+def _api_key() -> str:
+    for path in (Path("/opt/hydrosnooze/.env"), ROOT / "backend" / ".env"):
+        if not path.exists():
+            continue
+        found = re.search(r"^\s*HS_API_KEY\s*=\s*(.*?)\s*$", path.read_text(), re.M)
+        if found:
+            return found.group(1).split("#")[0].strip().strip("\"'")
+    return ""
+
+
 def fetch(url: str, timeout: int = 5) -> object:
+    headers = {"Authorization": f"Bearer {_KEY}"} if _KEY else {}
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read())
     except Exception as exc:  # noqa: BLE001
         return f"(could not reach {url}: {exc})"
@@ -276,6 +295,8 @@ def main() -> int:
     parser.add_argument("--service", default="hydrosnooze")
     args = parser.parse_args()
 
+    global _KEY
+    _KEY = _api_key()
     base = f"http://127.0.0.1:{args.port}"
     now = datetime.now()
     # Run once and read twice: these go in the file and into the verdict at the

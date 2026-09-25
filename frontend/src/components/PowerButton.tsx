@@ -25,6 +25,12 @@ interface Props {
  * The colour still reflects what the plug last said, because that is worth
  * knowing. It just no longer decides what the tap does.
  *
+ * Except from outside the house, where nobody can see the answer. Through
+ * Tailscale the service turns the same tap into the checked command, asking the
+ * plug which way the unit is first, and refuses it while the plug is not
+ * answering. That is decided in the service rather than here, so no version of
+ * this screen can get it wrong. See post_power_press in routes.py.
+ *
  * The scheduled power off at the wake time is a different thing. Nobody is
  * looking at seven in the morning, so that one wakes the display deliberately,
  * sends the single press of power that switches the unit off, and then waits on

@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { ChevronRight } from './Icons'
-import { DAY_INITIALS, MONTH_LONG, formatDay, isoDay, mondayFirstDay, parseDay } from '../domain'
+import {
+  DAY_INITIALS,
+  MONTH_LONG,
+  formatDay,
+  homeNow,
+  isoDay,
+  mondayFirstDay,
+  parseDay,
+} from '../domain'
 
 interface Props {
   /** "YYYY-MM-DD", or null before anything is picked. */
@@ -31,7 +39,7 @@ export function HolidayCalendar({ leaves, back, from, onPick }: Props) {
 
   const earliest = parseDay(from)
   const atEarliest = year === earliest.getFullYear() && month === earliest.getMonth()
-  const today = isoDay(new Date())
+  const today = isoDay(homeNow())
 
   function step(by: number) {
     const next = new Date(year, month + by, 1)

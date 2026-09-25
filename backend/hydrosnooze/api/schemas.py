@@ -6,7 +6,7 @@ being obvious here.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 
 from ..models import (
@@ -18,6 +18,7 @@ from ..models import (
     Preconditioning,
     Profile,
     Schedule,
+    minutes_between,
     modes_for,
 )
 
@@ -95,7 +96,21 @@ def schedule_json(
             "reason": pre.reason,
         },
         "updated_at": _iso(schedule.updated_at),
+        # The weekend's own times, and how long that night is, so the app never
+        # has to work out which side of midnight it starts on either.
+        "other_days": schedule.other_days,
+        "other_bed_time": _hhmm(schedule.other_bed_time),
+        "other_wake_time": _hhmm(schedule.other_wake_time),
+        "other_night_minutes": (
+            minutes_between(schedule.other_bed_time, schedule.other_wake_time)
+            if schedule.other_bed_time and schedule.other_wake_time
+            else None
+        ),
     }
+
+
+def _hhmm(value: time | None) -> str | None:
+    return value.strftime("%H:%M") if value is not None else None
 
 
 def health_json(devices: list[DeviceHealth]) -> list[dict[str, Any]]:
@@ -232,7 +247,12 @@ def autopilot_json(night) -> dict[str, object]:
 
 
 def tonight_json(
-    schedule, tonight, phase: str = "none", *, running: dict[str, Any] | None = None
+    schedule,
+    tonight,
+    phase: str = "none",
+    *,
+    running: dict[str, Any] | None = None,
+    usual_times: tuple[time, time] | None = None,
 ) -> dict[str, object]:
     """What is different about this one night, and what it adds up to.
 
@@ -256,6 +276,11 @@ def tonight_json(
         "nudge_until": (
             tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None
         ),
+        # This night's own times before anything tonight changed them: the
+        # weekend's, on a weekend. What "usually" means under a changed alarm,
+        # so a Saturday's 08:30 is never shown as a one-off change to 06:30.
+        "usual_bed_time": _hhmm((usual_times or (schedule.bed_time, schedule.wake_time))[0]),
+        "usual_wake_time": _hhmm((usual_times or (schedule.bed_time, schedule.wake_time))[1]),
     }
 
 

@@ -39,7 +39,7 @@ from ..config import Settings
 from ..db import Database, StoredNight
 from ..events import EventLog
 from . import parse
-from .client import REDIRECT_HOSTS, WithingsClient, WithingsError, redirect_uri
+from .client import CALLBACK_PATH, REDIRECT_HOSTS, WithingsClient, WithingsError, redirect_uri
 
 log = logging.getLogger(__name__)
 
@@ -114,29 +114,47 @@ class WithingsSync:
 
     # --- Connecting -------------------------------------------------------------
 
-    def begin_connect(self, host: str) -> str:
+    def begin_connect(
+        self, host: str, *, public_url: str | None = None, outside: bool = False
+    ) -> str:
         """Where to send the browser to sign in, for a browser that reached us at `host`.
 
         The way back has to be one of the addresses registered with Withings,
         and it has to be the one this browser can reach. So it comes from the
         address the browser used, and anything else is refused here, in words,
         rather than by Withings with a page that says nothing useful.
+
+        Through Tailscale the browser is on the public address, https and all,
+        and that is the way back instead: `public_url`, which the service reads
+        from HS_PUBLIC_URL. The host header is not trusted to say it, because
+        what `tailscale serve` passes on as the host is Tailscale's business.
         """
         if not self.configured or self._client is None:
             raise ConnectProblem(
                 "Withings is not set up on this machine. Put HS_WITHINGS_CLIENT_ID and "
                 "HS_WITHINGS_CLIENT_SECRET in its .env and restart it."
             )
+        if outside and not public_url:
+            raise ConnectProblem(
+                "Connecting to Withings through Tailscale needs the app's Tailscale address "
+                "in HS_PUBLIC_URL, and registered with Withings. See docs/tailscale.md, or "
+                f"connect at home from http://{REDIRECT_HOSTS[0]} instead."
+            )
+        if public_url:
+            return self._send_to_withings(public_url.rstrip("/") + CALLBACK_PATH)
         if host not in REDIRECT_HOSTS:
             raise ConnectProblem(
                 f"Withings can only send you back to {' or '.join(REDIRECT_HOSTS)}, and this "
                 f"page was opened at {host}. Open the app at http://{REDIRECT_HOSTS[0]} "
                 "and connect from there."
             )
+        return self._send_to_withings(redirect_uri(host))
+
+    def _send_to_withings(self, back: str) -> str:
+        assert self._client is not None
         now = self._now()
         self._signing_in = {s: v for s, v in self._signing_in.items() if v[0] > now}
         state = secrets.token_urlsafe(24)
-        back = redirect_uri(host)
         self._signing_in[state] = (now + SIGN_IN_LASTS_S, back)
         return self._client.authorize_url(back, state)
 

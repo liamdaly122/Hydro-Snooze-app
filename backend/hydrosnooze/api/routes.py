@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -12,12 +12,14 @@ from ..models import (
     MIN_STAGE_MINUTES,
     NUDGE_MINUTES,
     Mode,
+    Power,
     SleepStage,
     Stage,
     minutes_between,
     modes_for,
     range_for,
 )
+from .. import trends
 from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import (
@@ -38,6 +40,11 @@ def _service(request: Request) -> Service:
     return request.app.state.service
 
 
+def _via(request: Request) -> str:
+    """Home or Tailscale, as the sign-in check in main.py found it."""
+    return getattr(request.state, "via", "home")
+
+
 # --- Bodies -------------------------------------------------------------------
 
 
@@ -55,6 +62,10 @@ class SchedulePatch(BaseModel):
     bed_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     stages: list[StagePatch] | None = None
     cooling_speed: Mode | None = None
+    #: The weekend's own times. An empty string clears a time.
+    other_days: list[int] | None = None
+    other_bed_time: str | None = Field(default=None, pattern=r"^(\d{2}:\d{2})?$")
+    other_wake_time: str | None = Field(default=None, pattern=r"^(\d{2}:\d{2})?$")
 
 
 class TemperatureBody(BaseModel):
@@ -92,6 +103,12 @@ class NewProfile(BaseModel):
 @router.get("/info")
 async def get_info(request: Request) -> dict[str, object]:
     service = _service(request)
+    # The Pi's own clock, not the phone's. Every time the service sends is the
+    # bed's local time with no zone on it, which the phone reads as its own, so
+    # a phone in another country needs to know how far apart the two are to
+    # count down to anything. See homeNow in the app's domain.ts.
+    here = datetime.now().astimezone()
+    offset = here.utcoffset()
     return {
         "fake_transmitter": service.settings.transmitter == "fake",
         "fake_power_monitor": service.settings.power_monitor == "fake",
@@ -101,6 +118,9 @@ async def get_info(request: Request) -> dict[str, object]:
         # reloads itself rather than carrying on with the code it loaded days
         # ago against a service that has moved on.
         "build": getattr(request.app.state, "build", "dev"),
+        "utc_offset_minutes": int(offset.total_seconds() // 60) if offset is not None else 0,
+        "timezone": here.tzname() or "",
+        "via": _via(request),
     }
 
 
@@ -184,12 +204,14 @@ class SpeedTonight(BaseModel):
 def _tonight(service: Service) -> dict[str, object]:
     # tonight_state rather than scheduler.tonight: the second is whatever was last
     # read off disk, and a row for a night that is over is spent.
+    wake_on = service._tonight_date()
     return {
         **tonight_json(
             service.tonight_now(),
             service.tonight_state(),
             service.tonight_phase(),
             running=service.tonight_as_shown(),
+            usual_times=service.schedule.times_for(wake_on) if wake_on else None,
         ),
         # Tonight's change, when it is Autopilot's suggestion as taken. Home
         # names it as such and leaves out Save as my usual for it.
@@ -378,6 +400,29 @@ async def post_autopilot_switch(request: Request, body: AutopilotSwitch) -> dict
     return out
 
 
+@router.get("/trends")
+async def get_trends(request: Request, days: int = 90) -> dict[str, object]:
+    """A row per night over the last 30, 90 or 365 mornings, and a summary of
+    them against the same stretch before. See trends.py."""
+    if days not in trends.RANGES:
+        raise HTTPException(422, f"days must be one of {', '.join(map(str, trends.RANGES))}")
+    service = _service(request)
+    return trends.trends(service.db, service.clock.now().date(), days, service.db.tariff_p())
+
+
+class TariffBody(BaseModel):
+    #: Pence per kWh. None clears it. A flat rate: a tariff that changes by the
+    #: hour would need the readings priced one by one, and this does not.
+    pence_per_kwh: float | None = Field(default=None, gt=0, le=200)
+
+
+@router.put("/trends/tariff")
+async def put_tariff(request: Request, body: TariffBody) -> dict[str, object]:
+    service = _service(request)
+    service.db.set_tariff_p(body.pence_per_kwh)
+    return {"tariff_p": service.db.tariff_p()}
+
+
 @router.get("/learning")
 async def get_learning(request: Request) -> dict[str, object]:
     """What the bed has taught the app, and how far off the rest of it is."""
@@ -410,8 +455,13 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
         ]
         _guard_night(service, data["stages"], speed)
 
-    for field in ("wake_time", "bed_time"):
+    for field in ("wake_time", "bed_time", "other_bed_time", "other_wake_time"):
         if field in data:
+            if data[field] == "":
+                if field in ("wake_time", "bed_time"):
+                    raise HTTPException(422, f"{field} must be a real time of day")
+                data[field] = None
+                continue
             hour, minute = (int(p) for p in data[field].split(":"))
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise HTTPException(422, f"{field} must be a real time of day")
@@ -431,6 +481,20 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
 
     if "days_of_week" in data and any(d < 0 or d > 6 for d in data["days_of_week"]):
         raise HTTPException(422, "days_of_week must be 0 (Monday) to 6 (Sunday)")
+    if "other_days" in data:
+        if any(d < 0 or d > 6 for d in data["other_days"]):
+            raise HTTPException(422, "other_days must be 0 (Monday) to 6 (Sunday)")
+        data["other_days"] = sorted(set(data["other_days"]))
+
+    # The other days' night needs room for every stage too, the same as the
+    # usual one does.
+    if would_be.other_bed_time is not None and would_be.other_wake_time is not None:
+        if minutes_between(would_be.other_bed_time, would_be.other_wake_time) < floor:
+            raise HTTPException(
+                422,
+                f"A night of {len(would_be.stages)} stages needs at least {floor} minutes "
+                f"between going to bed and waking up, on the other days too.",
+            )
 
     service.update_schedule(data)
     return service.schedule_as_shown()
@@ -452,6 +516,22 @@ async def post_power_press(request: Request) -> dict[str, object]:
     someone standing in front of the bed who can see the answer for themselves.
     """
     service = _service(request)
+    if _via(request) == "tailscale":
+        # From outside the house nobody can see the answer, and one press on a
+        # unit that is already off switches it on with nobody in the room. So
+        # the tap asks the plug which way the unit is and sends the command
+        # that is checked against it, the same one the schedule uses.
+        if service.state.power is Power.ON:
+            await service.power_off()
+        elif service.state.power is Power.OFF:
+            await service.power_on()
+        else:
+            raise HTTPException(
+                409,
+                "The plug has not said whether the unit is on, so from outside the house "
+                "the app will not press power blind. Try again once the plug answers.",
+            )
+        return state_json(service.state)
     await service.press_power()
     return state_json(service.state)
 

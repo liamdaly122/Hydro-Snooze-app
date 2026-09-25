@@ -645,6 +645,17 @@ And stopped early, which also switches the unit off:
 curl -X DELETE http://hydrosnooze.local:8000/api/rehearsal
 ```
 
+**Once the app has a password** ([docs/tailscale.md](docs/tailscale.md), step 1), a bare
+`curl` is refused with "Sign in to HydroSnooze". Run it on the Pi instead, with the key
+`scripts/password.py` wrote for the scripts:
+
+```sh
+KEY=$(sed -n 's/^HS_API_KEY=//p' /opt/hydrosnooze/.env)
+curl -X POST http://127.0.0.1:8000/api/rehearsal -H "Authorization: Bearer $KEY" \
+  -H 'content-type: application/json' -d '{"seconds": 300}'
+curl -X DELETE http://127.0.0.1:8000/api/rehearsal -H "Authorization: Bearer $KEY"
+```
+
 It is not a demo and it is not a separate code path. It builds a night with short stages and hands it
 to the same scheduler, so what runs is the same `due()`, the same fired marks, the same power checks
 and the same rail-and-count sequences that will run at 2am. Only the durations differ.
