@@ -422,9 +422,14 @@ export interface TonightSuggested {
   test: { part: 'deep' | 'rem'; offset_c: number } | null
 }
 
-/** The switch over all of Autopilot. */
+/** How closely warm parts are held. See backend/hydrosnooze/hold.py. */
+export type HoldName = 'quiet' | 'balanced' | 'close'
+
+/** The switch over all of Autopilot, and how closely it holds the bed. */
 export interface AutopilotSwitch {
   on: boolean
+  hold: HoldName
+  holds: { name: HoldName; label: string; describe: string }[]
 }
 
 /* --- Health Report -------------------------------------------------------------

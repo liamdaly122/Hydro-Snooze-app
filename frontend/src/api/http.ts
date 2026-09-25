@@ -12,6 +12,7 @@ import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   AutopilotNight,
   AutopilotSwitch,
+  HoldName,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -156,6 +157,11 @@ export class HttpApiClient implements ApiClient {
     request<AutopilotSwitch>('/api/autopilot/switch', {
       method: 'POST',
       body: JSON.stringify({ on }),
+    })
+  setHold = (hold: HoldName) =>
+    request<AutopilotSwitch>('/api/autopilot/switch', {
+      method: 'POST',
+      body: JSON.stringify({ hold }),
     })
   getSuggestion = () => request<Suggestion>('/api/suggestion')
   acceptSuggestion = () => request<Suggestion>('/api/suggestion/accept', { method: 'POST' })

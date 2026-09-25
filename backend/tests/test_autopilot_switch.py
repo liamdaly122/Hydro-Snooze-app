@@ -39,8 +39,10 @@ def off(svc):
     return asyncio.run(svc.set_autopilot(False))
 
 
-def test_it_starts_on(service):
-    assert service.autopilot_state() == {"on": True}
+def test_it_starts_on_and_balanced(service):
+    state = service.autopilot_state()
+    assert state["on"] is True and state["hold"] == "balanced"
+    assert [h["name"] for h in state["holds"]] == ["quiet", "balanced", "close"]
 
 
 def test_a_database_from_before_the_switch_is_on(tmp_path):

@@ -16,6 +16,7 @@ import type {
   AutopilotNight,
   AutopilotSwitch,
   AutopilotTest,
+  HoldName,
   AutopilotSleep,
   DeviceEvent,
   DeviceHealth,
@@ -595,10 +596,44 @@ export class MockApiClient implements ApiClient {
    * usual behave as they do on the Pi.
    */
   private autopilotOn = true
+  private holdName: HoldName = 'balanced'
+
+  private switchJson(): AutopilotSwitch {
+    return {
+      on: this.autopilotOn,
+      hold: this.holdName,
+      holds: [
+        {
+          name: 'quiet',
+          label: 'Quiet',
+          describe:
+            'Quietest. The bed goes quiet half a degree short of a warm target and warms again at 2° below, so it can sit up to 2° under.',
+        },
+        {
+          name: 'balanced',
+          label: 'Balanced',
+          describe:
+            'Quiet once the bed reaches the target, warming again at 1° below. Within about a degree, with more warming time.',
+        },
+        {
+          name: 'close',
+          label: 'Close',
+          describe:
+            'Warm parts keep warming unless your body heat pushes the bed a degree over. Closest to the target, and the noisiest.',
+        },
+      ],
+    }
+  }
 
   async getAutopilotSwitch(): Promise<AutopilotSwitch> {
     await sleep(60)
-    return { on: this.autopilotOn }
+    return this.switchJson()
+  }
+
+  async setHold(hold: HoldName): Promise<AutopilotSwitch> {
+    await sleep(100)
+    this.holdName = hold
+    return this.switchJson()
   }
 
   /** Off puts tonight back to usual if it was running the suggestion, as on the Pi. */
@@ -610,7 +645,7 @@ export class MockApiClient implements ApiClient {
       // As the service does after any change to tonight, so Home re-reads it.
       this.emit({ schedule: { ...this.schedule } })
     }
-    return { on }
+    return this.switchJson()
   }
 
   /** Tonight's change, when it is the suggestion as taken. */

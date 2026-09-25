@@ -357,7 +357,9 @@ async def get_autopilot(request: Request) -> dict[str, object]:
 
 
 class AutopilotSwitch(BaseModel):
-    on: bool
+    on: bool | None = None
+    #: How closely warm parts are held: quiet, balanced or close. See hold.py.
+    hold: str | None = None
 
 
 @router.get("/autopilot/switch")
@@ -369,7 +371,16 @@ async def get_autopilot_switch(request: Request) -> dict[str, object]:
 
 @router.post("/autopilot/switch")
 async def post_autopilot_switch(request: Request, body: AutopilotSwitch) -> dict[str, object]:
-    return await _service(request).set_autopilot(body.on)
+    service = _service(request)
+    out = service.autopilot_state()
+    if body.hold is not None:
+        try:
+            out = service.set_hold(body.hold)
+        except CommandFailed as exc:
+            raise HTTPException(422, str(exc)) from exc
+    if body.on is not None:
+        out = await service.set_autopilot(body.on)
+    return out
 
 
 @router.get("/learning")

@@ -12,6 +12,8 @@ import type { ApiClient } from '../api/client'
 import type {
   AutopilotNight,
   AutopilotSleep,
+  AutopilotSwitch,
+  HoldName,
   Learning,
   Mode,
   Schedule,
@@ -121,7 +123,8 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
   const [board, setBoard] = useState<Scoreboard | null>(null)
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
   const [deciding, setDeciding] = useState(false)
-  const [autopilotOn, setAutopilotOn] = useState<boolean | null>(null)
+  const [autopilot, setAutopilot] = useState<AutopilotSwitch | null>(null)
+  const autopilotOn = autopilot === null ? null : autopilot.on
   const [switching, setSwitching] = useState(false)
   const [moving, setMoving] = useState(false)
 
@@ -146,7 +149,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       .catch(() => undefined)
     void client
       .getAutopilotSwitch()
-      .then((a) => live && setAutopilotOn(a.on))
+      .then((a) => live && setAutopilot(a))
       .catch(() => undefined)
     return () => {
       live = false
@@ -201,15 +204,24 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
     setSwitching(true)
     void client
       .setAutopilotSwitch(on)
-      .then((a) => setAutopilotOn(a.on))
+      .then(setAutopilot)
       .then(() => client.getSuggestion())
       .then(setSuggestion)
       .catch(() => undefined)
       .finally(() => setSwitching(false))
   }
 
-  const switchCard = autopilotOn !== null && (
-    <AutopilotSwitchCard on={autopilotOn} onSwitch={flip} busy={switching} />
+  const holdAt = (hold: HoldName) => {
+    setSwitching(true)
+    void client
+      .setHold(hold)
+      .then(setAutopilot)
+      .catch(() => undefined)
+      .finally(() => setSwitching(false))
+  }
+
+  const switchCard = autopilot !== null && (
+    <AutopilotSwitchCard state={autopilot} onSwitch={flip} onHold={holdAt} busy={switching} />
   )
 
   const suggestCard = suggestion && (

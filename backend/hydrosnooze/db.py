@@ -294,7 +294,8 @@ CREATE TABLE IF NOT EXISTS preferences (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     learning_on  INTEGER NOT NULL DEFAULT 1,
     timing_since TEXT,
-    autopilot_on INTEGER NOT NULL DEFAULT 1
+    autopilot_on INTEGER NOT NULL DEFAULT 1,
+    hold         TEXT    NOT NULL DEFAULT 'balanced'
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -554,6 +555,12 @@ class Database:
         if "autopilot_on" not in prefs:
             self._db.execute(
                 "ALTER TABLE preferences ADD COLUMN autopilot_on INTEGER NOT NULL DEFAULT 1"
+            )
+        # How closely warm parts are held (hold.py). Balanced, which is the
+        # default from the day there was a choice, on every database before it.
+        if "hold" not in prefs:
+            self._db.execute(
+                "ALTER TABLE preferences ADD COLUMN hold TEXT NOT NULL DEFAULT 'balanced'"
             )
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
@@ -1232,6 +1239,18 @@ class Database:
             "INSERT INTO preferences (id, autopilot_on) VALUES (1, ?) "
             "ON CONFLICT(id) DO UPDATE SET autopilot_on = excluded.autopilot_on",
             (int(on),),
+        )
+        self._db.commit()
+
+    def hold(self) -> str:
+        row = self._db.execute("SELECT hold FROM preferences WHERE id = 1").fetchone()
+        return "balanced" if row is None else row["hold"]
+
+    def set_hold(self, hold: str) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, hold) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET hold = excluded.hold",
+            (hold,),
         )
         self._db.commit()
 

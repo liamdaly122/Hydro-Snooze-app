@@ -60,7 +60,7 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import autopilot, clocksync, pi, report, suggest, trials, watchdog
+from . import autopilot, clocksync, hold, pi, report, suggest, trials, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
@@ -423,6 +423,13 @@ class Service:
 
         # When a mode was last changed by a correction rather than by a stage.
         self._mode_changed_at: datetime | None = None
+        # The trim (hold.py): degrees added to what is sent, per mode, for the
+        # part running now, and the readings since anything last changed.
+        self._trims: dict[Mode, int] = {}
+        self._trim_part: tuple[datetime, int] | None = None
+        self._trim_mode: Mode | None = None
+        self._trim_readings: list[tuple[datetime, float]] = []
+        self._trim_limit_told: tuple[datetime, int] | None = None
         #: When the running temperature was last re-asserted off the plan. Keeps
         #: a blaster that has gone away from being retried on every sample.
         self._followed_at: datetime | None = None
@@ -1129,6 +1136,7 @@ class Service:
         )
         if trusted:
             await self._correct_mode(step, power, now)
+            await self._trim(step, power, now)
             await self._follow_the_plan(step, power, now)
         # Not written down either while the clock is unconfirmed. A sample filed
         # an hour early lands in the wrong stage of the report, and a gap in the
@@ -1458,12 +1466,15 @@ class Service:
             return
 
         bed = self.probes.bed_c
+        level = self._hold()
         wanted = quieter_mode(
             step.temp_c,
             running,
             bed,
             self.schedule.cooling_speed,
             cap_c=self.settings.max_temperature_c,
+            arrived_c=level.arrived_c,
+            fallen_c=level.fallen_c,
         )
         if wanted is None or wanted is running or bed is None:
             return
@@ -2011,6 +2022,101 @@ class Service:
             written += 1
         return written
 
+    # --- Holding the bed at the number (hold.py) ---------------------------------
+
+    def _hold(self) -> hold.Hold:
+        return hold.HOLDS.get(self.db.hold(), hold.HOLDS[hold.DEFAULT_HOLD])
+
+    def set_hold(self, name: str) -> dict[str, Any]:
+        if name not in hold.HOLDS:
+            raise CommandFailed(
+                f"Hold is one of {', '.join(hold.HOLDS)}, not {name}."
+            )
+        self.db.set_hold(name)
+        level = hold.HOLDS[name]
+        self.events.info(QUIET_KIND, f"Holding warm parts: {level.label}. {level.describe}")
+        return self.autopilot_state()
+
+    def _reset_trim(self) -> None:
+        self._trims = {}
+        self._trim_part = None
+        self._trim_mode = None
+        self._trim_readings = []
+
+    def _trim_for(self, wanted_c: int, mode: Mode) -> int:
+        """The trim in force for this number in this mode, if it is the part's."""
+        if not self.db.autopilot_on() or self._trim_part is None:
+            return 0
+        return self._trims.get(mode, 0) if self._trim_part[1] == wanted_c else 0
+
+    async def _trim(self, step: StageStep | None, power: Power, now: datetime) -> None:
+        """Move what is sent a degree when the bed has sat off the number.
+
+        See hold.py. Every sample: note where the bed is, and once a full window
+        says the bed is off and staying off, send a degree more or less. Never
+        with Autopilot off, never while a nudge is moving the bed on purpose,
+        and never queued behind another command.
+        """
+        mode = self.state.assumed_mode
+        if not self.db.autopilot_on() or step is None or power is not Power.ON or mode is None:
+            self._reset_trim()
+            return
+        part = (step.starts_at, step.temp_c)
+        if part != self._trim_part:
+            self._reset_trim()
+            self._trim_part = part
+        if mode is not self._trim_mode:
+            self._trim_mode = mode
+            self._trim_readings = []
+        tonight = self.tonight_state()
+        if tonight is not None and tonight.nudge_at(now):
+            self._trim_readings = []
+            return
+        bed = self.probes.bed_c
+        if bed is None:
+            return
+        self._trim_readings.append((now, bed))
+        keep = hold.TRIM_WINDOW + timedelta(minutes=5)
+        self._trim_readings = [(at, c) for at, c in self._trim_readings if now - at <= keep]
+
+        way = hold.trim_needed(self._trim_readings, step.temp_c, now)
+        if way == 0 or self._lock.locked():
+            return
+        # The arithmetic only, never _corrected: that one writes a line into the
+        # night's log, and a line about a temperature with no command behind it
+        # reads to the Autopilot screen as somebody pressing a button.
+        now_trim = self._trims.get(mode, 0)
+        before = self._correction(step.temp_c, mode, now_trim).send_c
+        after = self._correction(step.temp_c, mode, now_trim + way).send_c
+        self._trims[mode] = now_trim + way
+        if after == before:
+            # Already as far as it may go: the limit, the mode's range or the
+            # safety cap. Said once a part, and the trim is left where it was.
+            self._trims[mode] -= way
+            self._trim_readings = []
+            if self._trim_limit_told != part:
+                self._trim_limit_told = part
+                self.events.info(
+                    QUIET_KIND,
+                    f"The bed is at {bed:.1f}C against a {step.temp_c}C part, and {before}C is "
+                    "already as far as the setting may go. Holding there.",
+                )
+            return
+
+        self._trim_readings = []
+        async with self._lock:
+            try:
+                await self._apply(mode, step.temp_c)
+            except CommandFailed as exc:
+                self._trims[mode] -= way
+                self._fail(QUIET_KIND, exc)
+                return
+        self.events.info(
+            QUIET_KIND,
+            f"The bed has sat at {bed:.1f}C against a {step.temp_c}C part for half an hour, "
+            f"so the unit is being sent {after}C now, a degree {'more' if way > 0 else 'less'}.",
+        )
+
     # --- The switch over all of Autopilot -------------------------------------
 
     def _learning_active(self) -> bool:
@@ -2020,7 +2126,14 @@ class Service:
         return self.db.autopilot_on() and self.db.learning_on()
 
     def autopilot_state(self) -> dict[str, Any]:
-        return {"on": self.db.autopilot_on()}
+        return {
+            "on": self.db.autopilot_on(),
+            "hold": self._hold().name,
+            "holds": [
+                {"name": h.name, "label": h.label, "describe": h.describe}
+                for h in hold.HOLDS.values()
+            ],
+        }
 
     async def set_autopilot(self, on: bool) -> dict[str, Any]:
         """Everything Autopilot does, on or off.
@@ -2291,6 +2404,9 @@ class Service:
             )
 
     async def _run_stage(self, plan: NightPlan, step: StageStep) -> bool:
+        # A new part starts from the learned correction alone. What the last
+        # part needed says nothing about this one.
+        self._reset_trim()
         # PHASE_KIND rather than "stage", which still carries the warnings and the
         # retries. Autopilot counts adjustments by kind, and the alternative was
         # matching words in a message, which is the sort of thing that quietly
@@ -3063,22 +3179,27 @@ class Service:
 
     # --- The bed, not the dial -------------------------------------------------
 
-    def _correction(self, wanted_c: int, mode: Mode) -> Correction:
+    def _correction(self, wanted_c: int, mode: Mode, trim_c: int = 0) -> Correction:
         """The arithmetic on its own: what to send, and the drift behind it.
 
         Split out of `_corrected` so the Learning card can show what the
         correction is doing without a screen being read writing a line into the
         night's log. Nothing here has a side effect.
+
+        `trim_c` is the night-time trim on top (hold.py). Learned and trimmed
+        together stay within CORRECTION_LIMIT_C of what was asked for, and the
+        mode's range and the safety cap bound the result either way.
         """
         # The switch gates both learned things, and it is checked here rather
         # than somewhere clever, because this is the one that changes what the bed
         # does. Off means send exactly what was asked for.
         off = self.db.learned_offset_c(mode.value, wanted_c) if self._learning_active() else None
-        if off is None or abs(off) < 0.5:
+        learned = 0 if off is None or abs(off) < 0.5 else round(-off)
+        if learned == 0 and trim_c == 0:
             return Correction(wanted_c, off, capped=False)
 
         # Away from the bed's drift: it lands 2.1 low, so send 2 high.
-        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, round(-off)))
+        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, learned + trim_c))
         send = self.settings.within(wanted_c + shift, mode)
         return Correction(send, off, capped=send != wanted_c + shift)
 
@@ -3100,10 +3221,13 @@ class Service:
         No correction at all until the bed has been measured enough times to have
         earned one. No correction is better than a confident wrong one.
         """
-        correction = self._correction(wanted_c, mode)
+        correction = self._correction(wanted_c, mode, self._trim_for(wanted_c, mode))
         send, off = correction.send_c, correction.drift_c
-        if send == wanted_c or off is None:
+        if send == wanted_c:
             return wanted_c
+        if off is None:
+            # The trim alone. It says what it is doing when it moves.
+            return send
 
         # Said once a night rather than at every boundary. It is worth knowing
         # that the number being sent is not the number on the screen, and not

@@ -559,6 +559,10 @@ API rather than read. Read that before writing any of it.
       back to usual if it was running a suggestion. Home names a taken suggestion as Autopilot's
       and does not offer to save a test temperature as the usual
 - [x] The morning result: Last night's test on the Autopilot screen, set beside the usual
+- [x] Hold the bed at the number: a Hold setting for warm parts (Quiet, Balanced, Close; Balanced by
+      default) and a night-time trim that moves the setting a degree after half an hour off it.
+      **Built and tested against a simulated bed.** The first real night at Balanced is the next
+      thing to look at: the on-target figure on the Autopilot screen says how it went
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

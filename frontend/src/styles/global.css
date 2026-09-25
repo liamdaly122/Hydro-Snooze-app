@@ -3629,3 +3629,32 @@ a.pill {
 .test-result__gap--less {
   color: #ffc978;
 }
+
+.ap-hold {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+
+.ap-hold__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ap-hold__title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.ap-hold__describe {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.ap-hold--off .ap-hold__title {
+  color: var(--text-dim);
+}
