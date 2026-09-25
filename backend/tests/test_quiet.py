@@ -161,6 +161,19 @@ async def test_a_stage_that_opens_warming_on_a_warm_bed_goes_quiet_at_once(servi
 
 
 @pytest.mark.asyncio
+async def test_it_goes_quiet_at_tonights_speed_not_the_usual_one(service):
+    """Turbo picked for tonight is what the cooling stages run at, and the
+    quiet half of a warm stage is a cooling stage too."""
+    service.set_speed_tonight(Mode.TURBO)
+    step = step_at(service, 27, Mode.WARMING)
+    bed(service, 27.1)
+
+    await service._correct_mode(step, Power.ON, service.clock.now())
+
+    assert service.state.assumed_mode is Mode.TURBO
+
+
+@pytest.mark.asyncio
 async def test_it_will_not_swap_again_for_half_an_hour(service):
     step = step_at(service, 27, Mode.WARMING)
     bed(service, 27.1)

@@ -67,6 +67,12 @@ function nightLabel(startsAt: string, wakeAt: string): string {
   return new Date(wakeAt) >= midnight ? `Last night · ${span}` : span
 }
 
+/** Which sensor said the bed was ready, in the morning message's own words. */
+const HOW_READY: Record<string, string> = {
+  probes: 'measured on the hoses',
+  plug: 'measured off the plug',
+}
+
 /** "Perfect", or how far off it typically sat. Never a bare number with no verdict. */
 function howItHeld(off: number | null): string {
   if (off === null) return 'No probe readings for this night'
@@ -461,7 +467,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
                   night.ready.start_c !== null && night.ready.end_c !== null
                     ? `, ${night.ready.start_c.toFixed(1)} to ${night.ready.end_c.toFixed(1)}°`
                     : ''
-                }, measured on the hoses.`
+                }, ${HOW_READY[night.ready.decided_by ?? ''] ?? 'measured'}.`
               : `Getting ready ran ${night.ready.minutes}m without settling at ${night.ready.target_c}°.`}
           </p>
         )}

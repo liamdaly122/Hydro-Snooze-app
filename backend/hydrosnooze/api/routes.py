@@ -288,15 +288,10 @@ async def post_tonight_keep(request: Request) -> dict[str, object]:
     included: sleeping in once is never a new alarm.
     """
     service = _service(request)
-    for stage in service.tonight_now().stages:
-        service._adopt_into_running_stage(stage.stage, stage.temp_c)
     # The speed too. It is set on the same tab of the same screen, and a save
     # that kept the temperatures and quietly left the speed behind would read as
     # having kept everything.
-    tonight = service.tonight_state()
-    if tonight is not None and tonight.cooling_speed is not None:
-        service.update_schedule({"cooling_speed": tonight.cooling_speed})
-        service.set_speed_tonight(tonight.cooling_speed)
+    service.keep_tonight()
     return schedule_json(service.schedule)
 
 

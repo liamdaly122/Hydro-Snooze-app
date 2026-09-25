@@ -50,6 +50,13 @@ export function TonightBanner({
     if (tonight.running.bed_time !== usual.bed_time) {
       parts.push(`bed ${formatHHMM(tonight.running.bed_time)}`)
     }
+    // Set from the Cooling speed screen and just as much tonight only. Left
+    // out, a Turbo evening read as "Tonight only · changed", and changed how
+    // was a trip through the menu to find out.
+    if (tonight.running.cooling_speed !== usual.cooling_speed) {
+      const speed = tonight.running.cooling_speed
+      parts.push(`${speed.charAt(0).toUpperCase()}${speed.slice(1)} speed`)
+    }
   }
 
   return (

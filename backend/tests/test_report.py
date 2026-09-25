@@ -22,9 +22,9 @@ from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.db import PreconditionRow, Sample
 from hydrosnooze.events import Event
-from hydrosnooze.models import QUIET_KIND, Schedule, SleepStage, Stage
+from hydrosnooze.models import QUIET_KIND, TRIM_KIND, Schedule, SleepStage, Stage
 from hydrosnooze.scheduler import REPORT_AFTER, Job
-from hydrosnooze.service import Service
+from hydrosnooze.service import HOLD_KIND, Service
 
 WAKE_ON = datetime(2026, 9, 11).date()
 
@@ -121,6 +121,20 @@ def test_an_ordinary_mode_change_is_not_a_swap_to_keep_it_quiet(plan):
         Event(2, plan.bedtime_at, "info", "mode", "Set mode to quiet via warm then cool"),
     ]
     made = report.build(plan, night(plan), ordinary, all_stages(plan))
+    assert "Swapped mode" not in made.body
+
+
+def test_a_trim_a_hold_level_or_a_failed_swap_is_not_a_swap(plan):
+    """The same bug again, one feature later. The trim and the Hold level were
+    logged under QUIET_KIND, and so was a correction that failed, so a night
+    with no mode swaps at all reported three."""
+    at = plan.bedtime_at + timedelta(hours=3)
+    other = [
+        Event(1, at, "info", TRIM_KIND, "The bed has sat at 30.6C ... a degree more."),
+        Event(2, at, "info", HOLD_KIND, "Holding warm parts: Close."),
+        Event(3, at, "error", QUIET_KIND, "Could not send temp_down"),
+    ]
+    made = report.build(plan, night(plan), other, all_stages(plan))
     assert "Swapped mode" not in made.body
 
 

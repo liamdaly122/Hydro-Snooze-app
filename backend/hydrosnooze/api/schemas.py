@@ -220,6 +220,10 @@ def autopilot_json(night) -> dict[str, object]:
                 "target_c": night.ready.target_c,
                 "start_c": night.ready.start_c,
                 "end_c": night.ready.end_c,
+                # Which sensor called it, so the screen can say. The morning
+                # message always has; the screen said "on the hoses" for runs
+                # the plug timed with no probes reporting at all.
+                "decided_by": night.ready.decided_by,
             }
         ),
         "energy_kwh": night.energy_kwh,
@@ -285,6 +289,14 @@ def learning_json(learning: dict[str, Any]) -> dict[str, Any]:
     from ..db import MIN_LEARNABLE_GAP_C
 
     on = bool(learning["on"])
+    # Why nothing is being corrected, when nothing is. Autopilot first: it is
+    # the switch over this one, and saying learning is off when it is on would
+    # send somebody to the wrong toggle.
+    why_not = (
+        "Autopilot is off"
+        if not learning.get("autopilot_on", True)
+        else None if on else "learning is switched off"
+    )
     gap = f"{MIN_LEARNABLE_GAP_C:g}"
     modes: list[dict[str, Any]] = []
 
@@ -312,7 +324,7 @@ def learning_json(learning: dict[str, Any]) -> dict[str, Any]:
                 "Where your bed settles",
                 runs=int(row["settle_runs"]),
                 needed=needed,
-                detail=_settles(row, target_c, on),
+                detail=_settles(row, target_c, why_not),
             ),
         ]
         modes.append(
@@ -341,16 +353,19 @@ def _skill(key: str, title: str, *, runs: int, needed: int, detail: str) -> dict
     }
 
 
-def _settles(row: dict[str, Any], target_c: int, on: bool) -> str:
-    """The one line that can describe something the unit is actually being sent."""
+def _settles(row: dict[str, Any], target_c: int, why_not: str | None) -> str:
+    """The one line that can describe something the unit is actually being sent.
+
+    `why_not` is why nothing is being corrected, or None when it is.
+    """
     drift = row["settle_c"]
     if drift is None:
         return "Until then the number you ask for is the number that gets sent."
 
     way = "below" if drift < 0 else "above"
     lands = f"Lands {abs(drift):.1f}° {way} the setting"
-    if not on:
-        return f"{lands}. Not being corrected, because learning is switched off."
+    if why_not is not None:
+        return f"{lands}. Not being corrected, because {why_not}."
 
     sends = int(row["sends_c"])
     if sends == target_c:

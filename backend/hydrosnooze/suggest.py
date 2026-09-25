@@ -105,7 +105,7 @@ def choose(
     best: dict[str, int] = {}
     why: list[str] = []
     for part in PARTS:
-        pick, reason = _best(parts.get(part), usual[part], allowed[part])
+        pick, reason = _best(parts.get(part), usual[part], allowed[part], LABEL[part])
         best[part] = pick
         if reason:
             why.append(reason)
@@ -149,14 +149,23 @@ def choose(
     )
 
 
-def _best(part: dict[str, Any] | None, usual_c: int, allowed) -> tuple[int, str | None]:
+def _best(
+    part: dict[str, Any] | None, usual_c: int, allowed, label: str
+) -> tuple[int, str | None]:
     """The best so far for one part, and why, when it is not the usual."""
     if not allowed(usual_c):
         # The usual itself moved outside the limits since they were set. Stay
         # as near it as they allow rather than suggest what nobody chose.
         near = min((c for c in range(usual_c - 10, usual_c + 11) if allowed(c)),
                    key=lambda c: abs(c - usual_c), default=usual_c)
-        return near, None
+        # Said, because it is a change. With no reason given, the card offered
+        # a different temperature under "tonight runs your usual".
+        if near == usual_c:
+            return near, None
+        return near, (
+            f"{label} at {near}°, as near your usual {usual_c}° as the limits allow. "
+            "Pick How far it may go again to centre them on your usual."
+        )
     if part is None or part["verdict"] != "clear" or part["leader_c"] is None:
         return usual_c, None
     leader = part["leader_c"]

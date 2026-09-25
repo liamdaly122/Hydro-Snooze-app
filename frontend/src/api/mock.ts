@@ -1154,7 +1154,14 @@ function seedNight(): AutopilotNight {
       high_c: 25.7,
       typical_off_c: Math.round((off.reduce((a, b) => a + b, 0) / off.length) * 10) / 10,
     },
-    ready: { minutes: 29, reached: true, target_c: 19, start_c: 21.1, end_c: 19.2 },
+    ready: {
+      minutes: 29,
+      reached: true,
+      target_c: 19,
+      start_c: 21.1,
+      end_c: 19.2,
+      decided_by: 'probes',
+    },
     energy_kwh: 1.21,
     notes: [],
   }
