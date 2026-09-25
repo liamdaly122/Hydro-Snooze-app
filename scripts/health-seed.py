@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
-"""A fortnight of invented sleep for the seed site, through the real report.
+"""Four weeks of invented sleep for the seed site, through the real report.
 
     backend/.venv/bin/python scripts/health-seed.py
 
 The seed site, what Vercel serves and what VITE_SEED_DATA=true builds, has no
 service behind it, so the Health Report there needs nights from somewhere. Hand
 writing them would give a screen that looks right against data that could never
-happen. So this invents fourteen nights with the same machinery as the test
+happen. So this invents twenty-eight nights with the same machinery as the test
 fixtures, keeps them in a throwaway database, and asks the real Health Report
 builder for every morning. What the mock serves is then exactly what the service
 would: the shape, the verdicts, Routine and the vitals learning and then not.
 
 **Invented.** Nobody slept these. The repository is public.
 
-One morning in the fortnight has no night, the way a mat that missed one looks,
+One morning in the four weeks has no night, the way a mat that missed one looks,
 so the empty ring is on the seed site too. Writes
 frontend/src/api/seed-health.json.
 
 The bed's temperature is invented alongside, the way the probes would have
 recorded it: a reading every thirty seconds in local time, easing towards what
 each stage asks for, a degree warmer with somebody in it. And the Autopilot
-screen's sleep for the last night is worked out by the real against_usual, so
-the mock serves what the service would for that too.
+screen's sleep for the last night is worked out by the real against_usual, and
+its Sleep timing card by the real timing.timing against the seed site's own
+starting schedule, so the mock serves what the service would for those too.
+Four weeks rather than two because the timing card only suggests anything after
+fourteen nights on the mornings the schedule runs, and the seed site's schedule
+runs on weekdays.
 
     backend/.venv/bin/python scripts/health-seed.py --db /tmp/sleep.db
 
@@ -48,14 +52,15 @@ sys.path.insert(0, str(ROOT / "backend"))
 import math  # noqa: E402
 
 from hydrosnooze.db import Database  # noqa: E402
-from hydrosnooze.withings import health, parse  # noqa: E402
+from hydrosnooze.models import Schedule  # noqa: E402
+from hydrosnooze.withings import health, parse, timing  # noqa: E402
 
 OUT = ROOT / "frontend" / "src" / "api" / "seed-health.json"
 LONDON = ZoneInfo("Europe/London")
 
 #: The last morning, and how many before it.
 LAST = date(2026, 9, 24)
-NIGHTS = 14
+NIGHTS = 28
 #: The morning the mat "missed".
 MISSED = date(2026, 9, 16)
 
@@ -64,7 +69,10 @@ SEED = 20260924
 #: The scores, oldest first, chosen rather than drawn so the seed site shows
 #: every verdict: Good, Fair and one Low. sleep_score is Withings' own number and
 #: nothing else is worked out from it, so setting it breaks no rule.
-SCORES = (72, 81, 64, 88, 79, None, 55, 84, 91, 77, 86, 69, 83, 87)
+SCORES = (
+    80, 74, 85, 68, 90, 77, 82, 71, 86, 79, 63, 84, 88, 76,
+    72, 81, 64, 88, 79, None, 55, 84, 91, 77, 86, 69, 83, 87,
+)
 
 #: The night the invented bed is asked for, in the order the app runs it: warmer
 #: to get into, cooler for deep sleep, a little warmer for REM, warm to wake to.
@@ -111,6 +119,34 @@ def invent_bed(db: Database, night: parse.Night, rng: random.Random) -> None:
     db.flush_power()
 
 
+def shaped_like_a_night(rng: random.Random, minutes: int) -> list[int]:
+    """A night a minute at a time, shaped the way real nights are.
+
+    Used in place of the fixtures' own shape, which keeps deep sleep going in
+    every cycle to the morning. That is fine for testing a parser and wrong for
+    the Sleep timing card, which is about exactly where deep sleep falls. Real
+    nights run in cycles of about ninety minutes, with most of the deep sleep in
+    the first two and the REM growing towards the morning. The test fixtures are
+    left as they are.
+    """
+    awake, light, deep_, rem_ = parse.AWAKE, parse.LIGHT, parse.DEEP, parse.REM
+    out = [awake] * rng.randint(10, 35)
+    cycle = 0
+    while len(out) < minutes:
+        deep = (
+            (rng.randint(30, 50), rng.randint(20, 35), rng.randint(5, 15))[cycle]
+            if cycle < 3
+            else rng.randint(0, 6)
+        )
+        rem = max(3, min(10 + 8 * cycle, 40) + rng.randint(-5, 5))
+        rest = max(10, rng.randint(80, 105) - deep - rem)
+        out += [light] * (rest // 2) + [deep_] * deep + [light] * (rest - rest // 2) + [rem_] * rem
+        if rng.random() < 0.5:
+            out += [awake] * rng.randint(1, 6)
+        cycle += 1
+    return out[:minutes]
+
+
 def fixtures():
     """scripts/withings-fixtures.py, which has a hyphen in its name."""
     spec = importlib.util.spec_from_file_location(
@@ -130,6 +166,7 @@ def main() -> None:
         sys.exit(f"{args.db} already exists. This only ever writes a new one.")
 
     fx = fixtures()
+    fx.stages = shaped_like_a_night
     rng = random.Random(SEED)
     db = Database(Path(args.db) if args.db else Path(tempfile.mkdtemp()) / "seed.db")
     mornings = [LAST - timedelta(days=i) for i in range(NIGHTS - 1, -1, -1)]
@@ -190,6 +227,9 @@ def main() -> None:
             }
             for a in health.against_usual(db, latest)
         ],
+        # The Sleep timing card, against the schedule the seed site starts with
+        # (frontend/src/api/mock.ts): weekdays, 22:30 to 06:30, the default parts.
+        "timing": timing.timing(db, Schedule(days_of_week=[0, 1, 2, 3, 4]), LAST),
     }
     OUT.write_text(json.dumps(seed, separators=(",", ":")) + "\n")
     db.close()

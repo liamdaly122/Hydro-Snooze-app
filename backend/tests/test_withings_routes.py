@@ -135,6 +135,13 @@ def test_fetching_now_then_the_health_report(client):
     assert client.get("/api/health-report", params={"date": "2026-13-45"}).status_code == 422
 
 
+def test_sleep_timing_answers_before_there_is_any_sleep(client, service):
+    built = client.get("/api/sleep-timing").json()
+    assert built["nights"] == 0 and built["profile"] is None
+    assert built["lights_out"] == service.schedule.bed_time.strftime("%H:%M")
+    assert [p["part"] for p in built["parts"]] == ["drift", "deep", "rem", "wake"]
+
+
 def test_disconnecting_keeps_the_sleep(client):
     connect(client)
     client.post("/api/withings/sync")

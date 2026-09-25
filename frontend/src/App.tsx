@@ -187,7 +187,7 @@ export function App({ client }: { client: ApiClient }) {
         ) : view === 'holiday' ? (
           <Holiday client={client} schedule={schedule} holiday={holiday} onChanged={setHoliday} />
         ) : view === 'autopilot' ? (
-          <Autopilot client={client} />
+          <Autopilot client={client} schedule={schedule} />
         ) : view === 'alarm' ? (
           <Alarm
             client={client}

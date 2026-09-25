@@ -25,6 +25,7 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  SleepTiming,
   WithingsStatus,
 } from '../types'
 
@@ -109,6 +110,12 @@ export interface ApiClient {
    * is no sleep at all yet, which getWithings then explains.
    */
   getHealthReport(date?: string): Promise<HealthReport>
+  /**
+   * The recent nights against the schedule's parts: when I fall asleep, when my
+   * deep sleep is mostly done, and where the boundaries could move to. Always
+   * answers, with "N more nights" before there is enough to say.
+   */
+  getSleepTiming(): Promise<SleepTiming>
   /** Where the Withings connection is up to. */
   getWithings(): Promise<WithingsStatus>
   /** Fetch now. `asked` is false when it was too soon after the last time. */

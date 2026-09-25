@@ -30,12 +30,19 @@ import type {
   Schedule,
   ServiceInfo,
   SleepStage,
+  SleepTiming,
   Stage,
   TonightPhase,
   TonightState,
   WithingsStatus,
 } from '../types'
-import { MAX_TEMPERATURE_C, MIN_STAGE_MINUTES, MODE_RANGE, WARMING_FLOOR_C } from '../types'
+import {
+  MAX_TEMPERATURE_C,
+  MIN_STAGE_MINUTES,
+  MODE_RANGE,
+  STAGE_LABEL,
+  WARMING_FLOOR_C,
+} from '../types'
 import { daysBetween, isoDay } from '../domain'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -509,6 +516,65 @@ export class MockApiClient implements ApiClient {
     return { week: emptyWeek(on), earliest: seed.earliest, latest: seed.latest, night: null }
   }
 
+  /**
+   * The seed's Sleep timing, measured by the real timing.py against the seed
+   * site's starting schedule, with the parts and suggestions re-read from the
+   * schedule as it stands now. Mirrors _snap and _fit there, so taking a
+   * suggestion here leaves nothing to suggest, the way it does on the Pi. The
+   * nights stay measured from the starting lights out: moving lights out on the
+   * seed site does not move them.
+   */
+  async getSleepTiming(): Promise<SleepTiming> {
+    const seed = (await this.health()).timing
+    await sleep(120)
+    const step = MIN_STAGE_MINUTES
+    let cursor = 0
+    const parts = this.schedule.stages.map((s) => {
+      const part = {
+        part: s.stage,
+        label: STAGE_LABEL[s.stage],
+        starts_min: cursor,
+        ends_min: cursor + s.duration_minutes,
+        temp_c: s.temp_c,
+      }
+      cursor += s.duration_minutes
+      return part
+    })
+    const ends = Object.fromEntries(parts.map((p) => [p.part, p.ends_min])) as Record<Stage, number>
+    const snap = (target: number, current: number) =>
+      current + step * Math.floor((target - current) / step + 0.5)
+
+    const wanted: Partial<Record<Stage, number>> = {}
+    if (seed.nights >= seed.suggests_at) {
+      for (const b of seed.boundaries) {
+        if (b.steady && b.measured) wanted[b.part] = snap(b.measured.median_min, ends[b.part])
+      }
+    }
+    const deep = Math.min(wanted.deep ?? ends.deep, ends.rem - step)
+    const drift = Math.max(step, Math.min(wanted.drift ?? ends.drift, deep - step))
+    const fitted: Partial<Record<Stage, number>> = {}
+    if (deep - drift >= step) {
+      if (wanted.drift !== undefined || drift !== ends.drift) fitted.drift = drift
+      if (wanted.deep !== undefined) fitted.deep = deep
+    }
+
+    return {
+      ...seed,
+      lights_out: this.schedule.bed_time,
+      wake: this.schedule.wake_time,
+      night_minutes: this.schedule.night_minutes,
+      parts,
+      boundaries: seed.boundaries.map((b) => {
+        const to = fitted[b.part]
+        return {
+          ...b,
+          ends_min: ends[b.part],
+          suggest_min: to !== undefined && to !== ends[b.part] ? to : null,
+        }
+      }),
+    }
+  }
+
   async getWithings(): Promise<WithingsStatus> {
     const seed = await this.health()
     return { ...seed.status, connected: this.withingsConnected }
@@ -777,6 +843,7 @@ interface HealthSeed {
   status: WithingsStatus
   reports: Record<string, HealthReport>
   autopilot_sleep: AutopilotSleep[]
+  timing: SleepTiming
 }
 
 /** Seven empty days, Sunday first, around a morning. */

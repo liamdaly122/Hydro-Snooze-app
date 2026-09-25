@@ -435,6 +435,7 @@ Everything lives in `backend/hydrosnooze/withings/`, with its routes in
 | `parse.py` | Nights, stages and minutes, with every trap above stepped round |
 | `sync.py` | The loop, every half hour |
 | `health.py` | The Health Report, built on request from what is stored |
+| `timing.py` | When I really sleep, against the parts of the night the bed runs |
 
 | Route | |
 |---|---|
@@ -444,6 +445,7 @@ Everything lives in `backend/hydrosnooze/withings/`, with its routes in
 | `POST /api/withings/sync` | Fetch now, at most every ten minutes |
 | `DELETE /api/withings` | Disconnect. The nights stay |
 | `GET /api/health-report?date=` | One night as the Health Report draws it, and its week |
+| `GET /api/sleep-timing` | When I really sleep, against the schedule's parts |
 
 **The rule that outranks the rest holds in code, with a test for each half.** The
 loop is its own task and never takes the command lock: a test holds the lock and
@@ -501,6 +503,51 @@ measured sleep. In their place are deep sleep, REM and time to fall asleep from 
 mat, for the same morning, each against my usual: the median of up to fourteen
 nights before it within the last sixty days. The change appears once there are
 three. With no night on the mat for that morning, the section is not drawn at all.
+
+### Sleep timing
+
+Step one of a cleverer Autopilot, and the only step that changes nothing by
+itself. The Withings API only hands a night over once I am up, so the bed can
+never follow my stages as they happen. What it can do is run a night whose parts
+sit where my sleep usually falls. Deep sleep comes early in the night and REM
+late, fairly reliably, so a plan made from the nights before gets most of the
+way.
+
+`timing.py` lays the recent nights over the schedule's clock. It takes the last
+thirty nights within sixty days, only on mornings the schedule runs, and leaves
+out anything under three hours asleep. Each night is measured in minutes from
+that evening's lights out as the schedule has it, not from when I fell asleep,
+because the bed changes at a time on the wall whatever I am doing. A night I went
+to bed late is a night the Deep part started without me, and that belongs in the
+answer.
+
+From those nights it works out two times and draws one chart:
+
+- **When I fall asleep**, set against where Drift ends
+- **When my deep sleep is mostly done**, meaning four fifths of that night's deep
+  sleep had happened, set against where Deep ends. Not all of it, because a few
+  minutes of deep sleep often turn up late, and stretching Deep to cover them
+  would keep the bed at the Deep temperature through the REM it is meant to be
+  different for
+- **How often I was in deep sleep and in REM** at each ten minutes of the night,
+  with the schedule's parts drawn underneath on the same minutes
+
+The pattern is drawn from three nights. A boundary is only suggested from
+fourteen, and only when the middle half of the nights agree to within an hour.
+Wider than that and one time would be wrong on too many of them, so the card says
+the nights vary too much instead. A suggestion moves in the Schedule screen's
+fifteen-minute steps, so the same buttons walk it back. REM's end and the Wake
+part are never touched: when to start warming for the morning is a question about
+the alarm, not about sleep stages.
+
+The card is on the Autopilot screen. **Use suggested times** moves where Drift and
+Deep end and nothing else: the temperatures stay as they are.
+
+Steps two and three, not built: a suggested night of temperatures each evening,
+then Full Autopilot running it by itself inside limits I set. Both need a
+deliberate small change now and then, one degree in one part, because the only
+way to tell what the bed does from everything else that changes a night is to
+vary it on purpose and compare a lot of nights.
 
 To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
 restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report

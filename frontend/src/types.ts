@@ -493,6 +493,55 @@ export interface HealthBed {
   measured: boolean
 }
 
+/** A part of the schedule's night, in minutes from lights out. */
+export interface TimingPart {
+  part: Stage
+  label: string
+  starts_min: number
+  ends_min: number
+  temp_c: number
+}
+
+/** The middle of the nights, and the middle half of them either side. */
+export interface TimingSpread {
+  median_min: number
+  low_min: number
+  high_min: number
+}
+
+/**
+ * One boundary the mat can speak to. Drift's end against when I fall asleep;
+ * Deep's end against when my deep sleep is mostly done.
+ */
+export interface TimingBoundary {
+  part: 'drift' | 'deep'
+  label: string
+  ends_min: number
+  measured: TimingSpread | null
+  /** Whether the nights agree closely enough to move it. Null with nothing measured. */
+  steady: boolean | null
+  /** Where to move it, or null: too few nights, too unsteady, or already there. */
+  suggest_min: number | null
+}
+
+/**
+ * When I really sleep, against the parts of the night the bed runs. Every time
+ * is minutes from the schedule's lights out.
+ */
+export interface SleepTiming {
+  nights: number
+  shows_at: number
+  suggests_at: number
+  lights_out: string
+  wake: string
+  night_minutes: number
+  bin_min: number
+  parts: TimingPart[]
+  /** How often each state was happening in each bin, 0 to 1. Null before shows_at. */
+  profile: Record<SleepStateName, number[]> | null
+  boundaries: TimingBoundary[]
+}
+
 export interface HealthReport {
   /** Seven days, Sunday first, around the night asked for. */
   week: HealthDay[]

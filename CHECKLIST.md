@@ -540,6 +540,13 @@ API rather than read. Read that before writing any of it.
 - [ ] See what an unfinished night looks like. The Pi writes it down by itself now:
       `journalctl -u hydrosnooze | grep "Withings observed"` on a morning after a trip out of bed
 - [ ] Check the error table in [docs/withings.md](docs/withings.md#errors) against `openapi.yaml`
+- [x] Sleep timing, step one of a cleverer Autopilot: when I fall asleep and when my deep sleep is
+      mostly done, against where Drift and Deep end, with a tap to move them.
+      **Built, and seen at phone size against invented nights.** It needs fourteen real nights on
+      schedule mornings before it suggests anything
+- [ ] Step two: a suggested night of temperatures each evening, tested one degree at a time.
+      Needs two decisions first: what it pushes for, and the limits it can never leave
+- [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

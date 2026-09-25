@@ -2,8 +2,18 @@ import { useEffect, useState } from 'react'
 import { AdjustmentsChart, KIND_COLOUR } from '../components/AdjustmentsChart'
 import { Moon, Sparkle } from '../components/Icons'
 import { LearningCard } from '../components/LearningCard'
+import { SleepTimingCard } from '../components/SleepTimingCard'
 import type { ApiClient } from '../api/client'
-import type { AutopilotNight, AutopilotSleep, Learning, Mode } from '../types'
+import type {
+  AutopilotNight,
+  AutopilotSleep,
+  Learning,
+  Mode,
+  Schedule,
+  SleepStage,
+  SleepTiming,
+  Stage,
+} from '../types'
 
 /**
  * What the bed did last night.
@@ -78,11 +88,30 @@ function Change({ s }: { s: AutopilotSleep }) {
   )
 }
 
-export function Autopilot({ client }: { client: ApiClient }) {
+/**
+ * The schedule's stages with some of their ends moved, each stage taking what
+ * its neighbour gives up, the same way the Schedule screen's buttons do it. The
+ * ends not named stay exactly where they are.
+ */
+function withEnds(stages: SleepStage[], ends: Partial<Record<Stage, number>>): SleepStage[] {
+  let from = 0
+  let running = 0
+  return stages.map((s) => {
+    running += s.duration_minutes
+    const to = ends[s.stage] ?? running
+    const out = { ...s, duration_minutes: to - from }
+    from = to
+    return out
+  })
+}
+
+export function Autopilot({ client, schedule }: { client: ApiClient; schedule: Schedule }) {
   const [night, setNight] = useState<AutopilotNight | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [learning, setLearning] = useState<Learning | null>(null)
   const [busy, setBusy] = useState(false)
+  const [timing, setTiming] = useState<SleepTiming | null>(null)
+  const [moving, setMoving] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -99,6 +128,33 @@ export function Autopilot({ client }: { client: ApiClient }) {
       live = false
     }
   }, [client])
+
+  // Again whenever the schedule changes, from here or anywhere else, because
+  // every boundary it talks about is the schedule's.
+  useEffect(() => {
+    let live = true
+    void client
+      .getSleepTiming()
+      .then((t) => live && setTiming(t))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [client, schedule])
+
+  const takeTimes = (ends: Partial<Record<Stage, number>>) => {
+    setMoving(true)
+    void client
+      .putSchedule({ stages: withEnds(schedule.stages, ends) })
+      .then(() => client.getSleepTiming())
+      .then(setTiming)
+      .catch(() => undefined)
+      .finally(() => setMoving(false))
+  }
+
+  const timingCard = timing && (
+    <SleepTimingCard timing={timing} onUse={takeTimes} busy={moving} />
+  )
 
   const change = (next: Promise<Learning>) => {
     setBusy(true)
@@ -127,6 +183,7 @@ export function Autopilot({ client }: { client: ApiClient }) {
             until then.
           </p>
         </section>
+        {timingCard}
         {learnCard}
       </>
     )
@@ -315,6 +372,7 @@ export function Autopilot({ client }: { client: ApiClient }) {
         rather than what it meant to do.
       </p>
 
+      {timingCard}
       {learnCard}
     </>
   )

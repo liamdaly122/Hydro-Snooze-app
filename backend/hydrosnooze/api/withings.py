@@ -9,6 +9,7 @@ does is reachable from here, and nothing here can reach the bed.
     POST   /api/withings/sync       fetch now, at most every ten minutes
     DELETE /api/withings            disconnect, keeping the nights
     GET    /api/health-report       one night, as the Health Report draws it
+    GET    /api/sleep-timing        when I really sleep, against the schedule's parts
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from ..service import Service
-from ..withings import health
+from ..withings import health, timing
 from ..withings.sync import ConnectProblem
 
 router = APIRouter(prefix="/api")
@@ -105,3 +106,14 @@ async def get_health_report(
     if built is None:
         raise HTTPException(404, "No sleep from Withings yet.")
     return built
+
+
+@router.get("/sleep-timing")
+async def get_sleep_timing(request: Request) -> dict[str, object]:
+    """The recent nights against the schedule as it stands now.
+
+    Always answers, with no nights at all included: "12 more nights" is the
+    thing worth saying on the first morning, not a 404.
+    """
+    service = _service(request)
+    return timing.timing(service.db, service.schedule, service.clock.now().date())

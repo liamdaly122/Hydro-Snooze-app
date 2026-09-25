@@ -3057,3 +3057,100 @@ a.pill {
 
 .ap-sleep__change--better { color: #7dffa0; }
 .ap-sleep__change--worse { color: #ffc978; }
+
+/* --- Sleep timing, on the Autopilot screen ---------------------------------- */
+
+.timing__sub {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.timing {
+  position: relative;
+  margin-top: 18px;
+}
+
+.timing__svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+/* The schedule's parts, on the same minutes as the chart above them. */
+.timing__parts {
+  display: flex;
+  margin-top: 6px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.timing__part {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-right: 1px solid rgb(0 0 0 / 0.6);
+}
+
+.timing__part:last-child {
+  border-right: 0;
+}
+
+.timing__part--drift,
+.timing__part--rem {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.timing__part--deep,
+.timing__part--wake {
+  background: rgb(255 255 255 / 0.05);
+}
+
+.timing__legend-suggest {
+  border-top: 2px dashed #7dffa0;
+}
+
+.timing__facts {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.timing__fact {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 12px;
+  row-gap: 2px;
+}
+
+.timing__fact-name {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.timing__fact-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.timing__fact-range {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.timing__use {
+  width: 100%;
+  margin: 12px 0 8px;
+}
