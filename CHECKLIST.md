@@ -558,6 +558,7 @@ API rather than read. Read that before writing any of it.
 - [x] One switch over all of Autopilot. Off runs exactly the temperatures set, and puts tonight
       back to usual if it was running a suggestion. Home names a taken suggestion as Autopilot's
       and does not offer to save a test temperature as the usual
+- [x] The morning result: Last night's test on the Autopilot screen, set beside the usual
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from hydrosnooze.db import Database
+from hydrosnooze.db import Database, Decided
 from hydrosnooze.trials import NightRun, PartRun
 from hydrosnooze.withings import parse, scoreboard
 
@@ -209,3 +209,68 @@ def test_the_room_is_carried_beside_each_setting(db):
         night(db, i + 20, {"deep": 16, "room": 22.0})
     settings = part(scoreboard.scoreboard(db, TODAY), "deep")["settings"]
     assert [(s["set_c"], s["room_c"]) for s in settings] == [(16, 22.0), (17, 19.0)]
+
+
+# --- Last night's test, for the Autopilot screen ------------------------------------
+
+
+LAST = TODAY - timedelta(days=1)
+
+
+def usual_nights(db, count=10):
+    for i, d in enumerate(SWING[:count]):
+        night(db, i + 2, {"deep": 17}, {"deep_m": 90 + d, "rem_m": 100})
+
+
+def a_test(db, *, deep=16, offset=-1, by_hand=False, mat_kw=None, on_mat=True):
+    r = replace(run(LAST, deep=deep), test_part="deep", test_offset_c=offset)
+    if by_hand:
+        r = deep_changed(r, by_hand=True)
+    db.save_night_run(r, NOON)
+    if on_mat:
+        db.save_sleep_night(mat(LAST, **(mat_kw or {"deep_m": 95, "rem_m": 105})))
+
+
+def test_a_night_that_was_not_a_test_has_no_result(db):
+    night(db, 1)
+    assert scoreboard.test_result(db, LAST.isoformat(), TODAY) is None
+
+
+def test_a_test_is_set_beside_the_usual(db):
+    usual_nights(db)
+    a_test(db)
+    got = scoreboard.test_result(db, LAST.isoformat(), TODAY)
+    assert (got["part"], got["set_c"], got["usual_c"], got["offset_c"]) == ("deep", 16, 17, -1)
+    assert got["counted"] is True
+    assert got["together_s"] == (95 + 105) * 60
+    assert (got["deep_s"], got["rem_s"]) == (95 * 60, 105 * 60)
+    assert got["usual_mean_s"] == (90 + 100) * 60 and got["usual_nights"] == 10
+    assert got["test_nights"] == 1 and got["needs"] == scoreboard.SETTING_NEEDS
+
+
+def test_a_test_changed_by_hand_is_said_not_to_count(db):
+    usual_nights(db)
+    a_test(db, by_hand=True)
+    got = scoreboard.test_result(db, LAST.isoformat(), TODAY)
+    assert got["counted"] is False and got["test_nights"] == 0
+
+
+def test_before_the_morning_record_it_comes_from_the_evening(db):
+    usual_nights(db)
+    db.save_decision(Decided(LAST.isoformat(), "accepted", {"deep": 16, "rem": 20}, "deep", -1), NOON)
+    db.save_sleep_night(mat(LAST))
+    got = scoreboard.test_result(db, LAST.isoformat(), TODAY)
+    assert got["set_c"] == 16 and got["counted"] is None
+
+
+def test_before_the_mat_has_the_night_there_is_nothing_to_compare(db):
+    usual_nights(db)
+    a_test(db, on_mat=False)
+    got = scoreboard.test_result(db, LAST.isoformat(), TODAY)
+    assert got["together_s"] is None and got["usual_mean_s"] == (90 + 100) * 60
+
+
+def test_taken_then_put_back_is_not_a_test(db):
+    db.save_decision(Decided(LAST.isoformat(), "accepted", {"deep": 16, "rem": 20}, "deep", -1), NOON)
+    night(db, 1)  # the morning's record, with no test on it: the bed ran 17
+    assert scoreboard.test_result(db, LAST.isoformat(), TODAY) is None

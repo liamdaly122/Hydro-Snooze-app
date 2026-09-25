@@ -2271,6 +2271,12 @@ class Service:
         )
         return self.suggestion()
 
+    def test_result(self, plan: NightPlan) -> dict[str, Any] | None:
+        """Last night's test and how it compared, for the Autopilot screen."""
+        return scoreboard.test_result(
+            self.db, plan.wake_at.date().isoformat(), self.clock.now().date()
+        )
+
     def _record_missing_quietly(self) -> None:
         try:
             written = self.record_missing()

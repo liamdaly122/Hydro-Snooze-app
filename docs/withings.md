@@ -649,6 +649,14 @@ the usual every later suggestion is set against. Changed again by hand, tonight
 is somebody's own change like any other, with Save back, and the night no longer
 counts as a test.
 
+The morning after a test night, the Autopilot screen has a **Last night's test**
+card under the hero: what was tried, deep sleep and REM that night against the
+average at the usual temperature for that part, and how many nights the test
+temperature has towards the five it needs before it is compared at all. The
+verdict, when there is one, is the scoreboard's. Before the morning record is
+written it reads what was decided the evening before (`scoreboard.test_result`,
+served as `test` on `/api/autopilot`).
+
 ### The Autopilot switch
 
 At the top of the Autopilot screen, over everything Autopilot does: learned

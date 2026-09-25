@@ -6,6 +6,7 @@ import { LearningCard } from '../components/LearningCard'
 import { ScoreboardCard } from '../components/ScoreboardCard'
 import { SuggestionFold } from '../components/Suggestion'
 import { AutopilotSwitchCard } from '../components/AutopilotSwitchCard'
+import { TestResultCard } from '../components/TestResultCard'
 import { SleepTimingCard } from '../components/SleepTimingCard'
 import type { ApiClient } from '../api/client'
 import type {
@@ -312,6 +313,9 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
           </div>
         )}
       </section>
+
+      {/* The morning after a test night: what was tried and how it compared. */}
+      {night.test && <TestResultCard test={night.test} />}
 
       {/* --- What it actually did ------------------------------------------- */}
       <section className="card">

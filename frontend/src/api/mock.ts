@@ -15,6 +15,7 @@ import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   AutopilotNight,
   AutopilotSwitch,
+  AutopilotTest,
   AutopilotSleep,
   DeviceEvent,
   DeviceHealth,
@@ -493,7 +494,8 @@ export class MockApiClient implements ApiClient {
 
   async getAutopilot(): Promise<AutopilotNight> {
     await sleep(120)
-    return { ...seedNight(), sleep: (await this.health()).autopilot_sleep }
+    const seed = await this.health()
+    return { ...seedNight(), sleep: seed.autopilot_sleep, test: seed.autopilot_test }
   }
 
   /**
@@ -998,6 +1000,7 @@ interface HealthSeed {
   autopilot_sleep: AutopilotSleep[]
   timing: SleepTiming
   scoreboard: Scoreboard
+  autopilot_test: AutopilotTest | null
 }
 
 /** Seven empty days, Sunday first, around a morning. */

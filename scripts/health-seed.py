@@ -95,16 +95,21 @@ LAG_S = 20 * 60
 BODY_C = 1.0
 
 
-def plan_for(morning: date, rng: random.Random) -> tuple[NightPlan, str | None, int | None]:
+def plan_for(
+    morning: date, rng: random.Random, *, force_test: bool = False
+) -> tuple[NightPlan, str | None, int | None]:
     """The night the bed runs, and which part was a test, if one was.
 
     About a third of nights move Deep a degree and a fifth move REM, one part at
-    a time, the way the evening suggestions will.
+    a time, the way the evening suggestions will. The last night is always a
+    Deep test, so the Autopilot screen's Last night's test card has one to show.
     """
     temps = {"drift": DRIFT_C, "deep": DEEP_C, "rem": REM_C, "wake": WAKE_C}
     test, offset = None, None
     roll = rng.random()
-    if roll < 0.35:
+    if force_test:
+        test, offset = "deep", -1
+    elif roll < 0.35:
         test, offset = "deep", rng.choice((-1, 1))
     elif roll < 0.55:
         test, offset = "rem", rng.choice((-1, 1))
@@ -231,7 +236,7 @@ def main() -> None:
             sys.exit(f"{summary['date']} breaks: {'; '.join(broken)}")
         night = parse.night(summary, body["series"])
         db.save_sleep_night(night)
-        plan, test, offset = plan_for(morning, rng)
+        plan, test, offset = plan_for(morning, rng, force_test=morning == LAST)
         invent_bed(db, night, rng, plan)
         start, end = report.window(plan)
         run = trials.build_run(plan, db.night_history(start, end), [])
@@ -275,6 +280,8 @@ def main() -> None:
         "timing": timing.timing(db, Schedule(days_of_week=[0, 1, 2, 3, 4]), LAST),
         # The Scoreboard, over what each night ran and what the mat measured.
         "scoreboard": scoreboard.scoreboard(db, LAST),
+        # And the last night's test, as the Autopilot screen shows it.
+        "autopilot_test": scoreboard.test_result(db, latest, LAST),
     }
     OUT.write_text(json.dumps(seed, separators=(",", ":")) + "\n")
     db.close()

@@ -352,7 +352,8 @@ async def get_autopilot(request: Request) -> dict[str, object]:
     plan = service.scheduler.last_finished(service.schedule, service.clock.now())
     if plan is None:
         raise HTTPException(404, "No finished night to report on yet.")
-    return autopilot_json(service.night_report(plan))
+    # And whether it was a test, with how it compared: see scoreboard.test_result.
+    return {**autopilot_json(service.night_report(plan)), "test": service.test_result(plan)}
 
 
 class AutopilotSwitch(BaseModel):

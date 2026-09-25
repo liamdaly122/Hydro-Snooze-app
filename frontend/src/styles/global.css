@@ -3566,3 +3566,66 @@ a.pill {
   line-height: 1.4;
   color: var(--text-mid);
 }
+
+/* --- Last night's test --------------------------------------------------------- */
+
+.test-result__what {
+  margin: 14px 0 0;
+  font-size: 15px;
+  color: var(--text-mid);
+}
+
+.test-result__what b {
+  color: var(--text);
+}
+
+.test-result__compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.test-result__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.05);
+}
+
+.test-result__value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.test-result__figure--usual .test-result__value {
+  color: var(--text-mid);
+}
+
+.test-result__label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.test-result__split {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.test-result__gap {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.test-result__gap--more {
+  color: #7dffa0;
+}
+
+.test-result__gap--less {
+  color: #ffc978;
+}

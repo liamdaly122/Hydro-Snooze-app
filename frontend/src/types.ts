@@ -307,7 +307,29 @@ export interface Learning {
   modes: LearningMode[]
 }
 
+/** Last night's test, if it was one, and how it compared. See scoreboard.test_result. */
+export interface AutopilotTest {
+  part: 'deep' | 'rem'
+  label: string
+  set_c: number
+  usual_c: number
+  offset_c: number
+  /** Null until the morning's record is written; false when it does not count. */
+  counted: boolean | null
+  deep_s: number | null
+  rem_s: number | null
+  together_s: number | null
+  usual_mean_s: number | null
+  usual_nights: number
+  test_nights: number
+  needs: number
+  verdict: ScorePart['verdict']
+  leader_c: number | null
+}
+
 export interface AutopilotNight {
+  /** Whether last night was a test, and how it compared. Absent from older builds. */
+  test?: AutopilotTest | null
   wake_at: string
   starts_at: string
   adjustments: number

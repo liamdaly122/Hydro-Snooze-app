@@ -182,3 +182,66 @@ def _setting(
 def _median(values) -> int | None:
     held = [v for v in values if v is not None]
     return round(statistics.median(held)) if held else None
+
+
+def test_result(db: Database, wake_on: str, today: date) -> dict[str, Any] | None:
+    """The night ending on `wake_on`, if it was a test: what was tried, what the
+    mat measured, and where that leaves the scoreboard. None when it was not one.
+
+    From the morning's record once it is written. Before that, from what was
+    decided in the evening, because the Autopilot screen is opened over
+    breakfast and the record goes down with the morning report twenty minutes
+    after the alarm.
+
+    Set beside the usual's average, never judged on its own. One night says
+    almost nothing, and the card says so; the verdict is the scoreboard's.
+    """
+    run = next(iter(db.night_runs(wake_on, wake_on)), None)
+    decided = db.decision_for(wake_on)
+    if run is not None and run.test_part is not None and run.test_offset_c is not None:
+        name, offset = run.test_part, run.test_offset_c
+        part = run.part(name)
+        set_c = part.set_c if part else None
+        counted: bool | None = bool(part and part.counts)
+    elif (
+        run is None
+        and decided is not None
+        and decided.decision == "accepted"
+        and decided.test_part is not None
+        and decided.test_offset_c is not None
+    ):
+        name, offset = decided.test_part, decided.test_offset_c
+        set_c = decided.temps.get(name)
+        counted = None
+    else:
+        return None
+    if set_c is None:
+        return None
+
+    night = db.sleep_night_on(wake_on)
+    deep = _int(night.data.get("deepsleepduration")) if night else None
+    rem = _int(night.data.get("remsleepduration")) if night else None
+    board = scoreboard(db, today)
+    scored = next(p for p in board["parts"] if p["part"] == name)
+    settings = {s["set_c"]: s for s in scored["settings"]}
+    usual_c = set_c - offset
+    at_usual, at_test = settings.get(usual_c), settings.get(set_c)
+    return {
+        "part": name,
+        "label": scored["label"],
+        "set_c": set_c,
+        "usual_c": usual_c,
+        "offset_c": offset,
+        # None until the morning's record is written; False when the part was
+        # changed by hand or its setting was not held, so it does not count.
+        "counted": counted,
+        "deep_s": deep,
+        "rem_s": rem,
+        "together_s": None if deep is None or rem is None else deep + rem,
+        "usual_mean_s": at_usual["mean_s"] if at_usual else None,
+        "usual_nights": at_usual["nights"] if at_usual else 0,
+        "test_nights": at_test["nights"] if at_test else 0,
+        "needs": SETTING_NEEDS,
+        "verdict": scored["verdict"],
+        "leader_c": scored["leader_c"],
+    }
