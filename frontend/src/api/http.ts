@@ -24,6 +24,7 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  Scoreboard,
   SleepTiming,
   WithingsStatus,
 } from '../types'
@@ -147,6 +148,7 @@ export class HttpApiClient implements ApiClient {
   getSleepTiming = () => request<SleepTiming>('/api/sleep-timing')
   forgetSleepTiming = () =>
     request<SleepTiming>('/api/sleep-timing/forget', { method: 'POST' })
+  getScoreboard = () => request<Scoreboard>('/api/scoreboard')
   getWithings = () => request<WithingsStatus>('/api/withings')
   syncWithings = () =>
     request<WithingsStatus & { asked: boolean }>('/api/withings/sync', { method: 'POST' })

@@ -30,6 +30,7 @@ from .models import (
 )
 # Renamed on the way in. `Stage` here already means Drift, Deep, REM and Wake:
 # what the bed is asked for. This is what the sleeper was measured doing.
+from .trials import NightRun, PartRun
 from .withings.parse import Minute, Night
 from .withings.parse import Stage as SleepStateRun
 
@@ -366,6 +367,22 @@ CREATE TABLE IF NOT EXISTS sleep_minutes (
     snoring     INTEGER
 );
 CREATE INDEX IF NOT EXISTS sleep_minutes_night ON sleep_minutes (night_id);
+
+-- What each night ran, one row per morning, for the scoreboard. See trials.py.
+-- Only the bed's side of the night: the mat's is read from sleep_nights when the
+-- scoreboard is built, because Withings goes on changing a night for most of
+-- the day after. `parts` is JSON, one object per part of the night.
+CREATE TABLE IF NOT EXISTS night_runs (
+    wake_on       TEXT    PRIMARY KEY,
+    bedtime_at    TEXT    NOT NULL,
+    wake_at       TEXT    NOT NULL,
+    parts         TEXT    NOT NULL,
+    room_c        REAL,
+    test_part     TEXT,
+    test_offset_c INTEGER,
+    rebuilt       INTEGER NOT NULL DEFAULT 0,
+    written_at    TEXT    NOT NULL
+);
 """
 
 #: Every column the schedule table has now, in the order SCHEMA declares them.
@@ -1429,6 +1446,62 @@ class Database:
         ).fetchall()
         return {r["night_id"]: (r["hrv"], r["rr"]) for r in rows}
 
+    # --- What each night ran ------------------------------------------------
+
+    def save_night_run(self, run: NightRun, written_at: datetime) -> None:
+        """Keep what a night ran, without ever making the record worse.
+
+        A night worked out afterwards never replaces one written on the morning
+        itself, which knew exactly where each part started and ended. And a test
+        already marked on the night is kept when the rest of the row is written
+        again: the evening knew it was a test, the morning does not.
+        """
+        parts = json.dumps([
+            {
+                "part": p.part,
+                "starts_at": p.starts_at.isoformat(),
+                "ends_at": p.ends_at.isoformat(),
+                "set_c": p.set_c,
+                "held": p.held,
+                "bed_c": p.bed_c,
+                "by_hand": p.by_hand,
+            }
+            for p in run.parts
+        ])
+        self._db.execute(
+            "INSERT INTO night_runs (wake_on, bedtime_at, wake_at, parts, room_c, test_part, "
+            "test_offset_c, rebuilt, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(wake_on) DO UPDATE SET "
+            "bedtime_at = excluded.bedtime_at, wake_at = excluded.wake_at, "
+            "parts = excluded.parts, room_c = excluded.room_c, "
+            "test_part = COALESCE(excluded.test_part, night_runs.test_part), "
+            "test_offset_c = COALESCE(excluded.test_offset_c, night_runs.test_offset_c), "
+            "rebuilt = excluded.rebuilt, written_at = excluded.written_at "
+            "WHERE excluded.rebuilt = 0 OR night_runs.rebuilt = 1",
+            (
+                run.wake_on,
+                run.bedtime_at.isoformat(),
+                run.wake_at.isoformat(),
+                parts,
+                run.room_c,
+                run.test_part,
+                run.test_offset_c,
+                int(run.rebuilt),
+                written_at.isoformat(),
+            ),
+        )
+        self._db.commit()
+
+    def night_runs(
+        self, first_wake_on: str | None = None, last_wake_on: str | None = None
+    ) -> list[NightRun]:
+        """What each night ran, oldest first, optionally between two mornings."""
+        rows = self._db.execute(
+            "SELECT * FROM night_runs WHERE wake_on >= ? AND wake_on <= ? ORDER BY wake_on",
+            (first_wake_on or "", last_wake_on or "9999"),
+        ).fetchall()
+        return [_night_run(r) for r in rows]
+
     def sleep_minutes(self, night_id: int) -> list[Minute]:
         rows = self._db.execute(
             "SELECT * FROM sleep_minutes WHERE night_id = ? ORDER BY at", (night_id,)
@@ -1440,6 +1513,30 @@ class Database:
             )
             for r in rows
         ]
+
+
+def _night_run(row: sqlite3.Row) -> NightRun:
+    return NightRun(
+        wake_on=row["wake_on"],
+        bedtime_at=datetime.fromisoformat(row["bedtime_at"]),
+        wake_at=datetime.fromisoformat(row["wake_at"]),
+        parts=tuple(
+            PartRun(
+                part=p["part"],
+                starts_at=datetime.fromisoformat(p["starts_at"]),
+                ends_at=datetime.fromisoformat(p["ends_at"]),
+                set_c=p["set_c"],
+                held=p["held"],
+                bed_c=p["bed_c"],
+                by_hand=bool(p["by_hand"]),
+            )
+            for p in json.loads(row["parts"])
+        ),
+        room_c=row["room_c"],
+        test_part=row["test_part"],
+        test_offset_c=row["test_offset_c"],
+        rebuilt=bool(row["rebuilt"]),
+    )
 
 
 def _stored_night(row: sqlite3.Row) -> StoredNight:

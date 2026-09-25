@@ -60,7 +60,7 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import autopilot, clocksync, pi, report, watchdog
+from . import autopilot, clocksync, pi, report, trials, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
@@ -210,6 +210,10 @@ HISTORY = timedelta(days=365 * 5)
 #: is trimmed by row count. Generous against the twenty-odd a real night writes,
 #: so the limit that actually bites is the age one above.
 EVENTS_KEPT = 40 * 365 * 5
+
+#: How far back the scoreboard looks, and so how far back a morning with a night
+#: on the mat and nothing written down for it gets filled in. See record_missing.
+RECORD_DAYS = 120
 
 #: How long without a completed tick before the scheduler counts as stuck.
 #: Generous against a one second loop, and far shorter than a stage boundary.
@@ -748,6 +752,10 @@ class Service:
         if self.withings.configured:
             self._tasks.append(asyncio.create_task(self.withings.run(), name="withings"))
 
+        # Anything the scoreboard is missing, which on the first start after it
+        # arrived is every night since the mat went in.
+        self._record_missing_quietly()
+
         if self.notifier.enabled:
             self.events.info("service", "Notifications on. Problems will reach the phone.")
         if self.heartbeat.enabled:
@@ -1145,6 +1153,9 @@ class Service:
                 self.db.prune_power(now - HISTORY)
                 self.db.prune_events(keep=EVENTS_KEPT)
                 self._check_the_pi()
+                # A morning report that never ran, a service down over the
+                # wake time: the night still gets written down, within the hour.
+                self._record_missing_quietly()
 
     def _check_the_pi(self) -> None:
         """Ask the machine underneath whether it is coping.
@@ -1930,7 +1941,75 @@ class Service:
 
         self.events.add(summary.level, "report", summary.body)
         self.notifier.push(summary.title, summary.body, tag="sleeping_accommodation")
+
+        # And what the night ran, for the scoreboard. After the message and
+        # never in its way: a record that could not be written is a line in the
+        # log, and the hourly pass fills it in from the same readings later.
+        try:
+            self.record_night(plan)
+        except Exception:  # noqa: BLE001
+            log.exception("could not write down what the night ran")
         return True
+
+    # --- What each night ran, for the scoreboard --------------------------------
+
+    def record_night(self, plan: NightPlan, *, rebuilt: bool = False) -> trials.NightRun | None:
+        """Write down what a night ran: each part's setting, read from what was
+        recorded across it. See trials.py.
+
+        Who changed what by hand comes from the Autopilot screen's own reading of
+        the night, so the scoreboard and the screen agree about which nights
+        somebody touched. None for a rehearsal, which is nobody's night.
+        """
+        if plan.rehearsal:
+            return None
+        start, end = report.window(plan)
+        samples = self.db.night_history(start, end)
+        marks = autopilot.build(plan, samples, self.db.events_between(start, end), set()).marks
+        run = trials.build_run(
+            plan,
+            samples,
+            [m.at for m in marks if m.kind == autopilot.BY_HAND],
+            rebuilt=rebuilt,
+        )
+        self.db.save_night_run(run, self.clock.now())
+        return run
+
+    def record_missing(self) -> int:
+        """Fill in every morning with a night on the mat and nothing written down.
+
+        Worked out from today's schedule for where each part starts and ends,
+        and marked rebuilt for it; the settings themselves are still the ones
+        recorded on the night. Never today, whose morning report writes the
+        exact one, and never over a row the morning wrote. Returns how many.
+        """
+        today = self.clock.now().date()
+        first = (today - timedelta(days=RECORD_DAYS)).isoformat()
+        last = (today - timedelta(days=1)).isoformat()
+        held = {r.wake_on for r in self.db.night_runs(first, last)}
+        written = 0
+        for night in self.db.sleep_nights(first, last):
+            if night.wake_on in held:
+                continue
+            held.add(night.wake_on)
+            self.record_night(
+                self.schedule.plan_for(date.fromisoformat(night.wake_on)), rebuilt=True
+            )
+            written += 1
+        return written
+
+    def _record_missing_quietly(self) -> None:
+        try:
+            written = self.record_missing()
+        except Exception:  # noqa: BLE001
+            log.exception("could not write down what earlier nights ran")
+            return
+        if written:
+            log.info(
+                "wrote down what %d earlier %s ran, for the scoreboard",
+                written,
+                "night" if written == 1 else "nights",
+            )
 
     async def _run_stage(self, plan: NightPlan, step: StageStep) -> bool:
         # PHASE_KIND rather than "stage", which still carries the warnings and the

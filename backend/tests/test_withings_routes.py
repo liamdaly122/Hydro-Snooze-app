@@ -165,3 +165,9 @@ def test_connecting_and_fetching_never_press_a_button(client, service):
     client.delete("/api/withings")
     assert service.transmitter.sent == []
     assert not service._lock.locked()
+
+
+def test_the_scoreboard_answers_before_anything_is_recorded(client):
+    built = client.get("/api/scoreboard").json()
+    assert built["recorded"] == 0 and built["nights"] == 0
+    assert [p["verdict"] for p in built["parts"]] == ["empty", "empty", "empty"]

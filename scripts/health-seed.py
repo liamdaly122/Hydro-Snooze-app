@@ -23,6 +23,13 @@ each stage asks for, a degree warmer with somebody in it. And the Autopilot
 screen's sleep for the last night is worked out by the real against_usual, and
 its Sleep timing card by the real timing.timing against the seed site's own
 starting schedule, so the mock serves what the service would for those too.
+
+Each night also runs a plan: the seed site's schedule times, with Deep or REM a
+degree off on about half the nights, marked as test nights. The bed follows that
+plan, what each night ran is written down by the real trials.build_run, and the
+Scoreboard is the real scoreboard.scoreboard over them. The mat's nights have
+nothing to do with the settings, so the Scoreboard says what it would say about
+nights like that: not sure yet.
 Four weeks rather than two because the timing card only suggests anything after
 fourteen nights on the mornings the schedule runs, and the seed site's schedule
 runs on weekdays.
@@ -42,7 +49,8 @@ import json
 import random
 import sys
 import tempfile
-from datetime import date, datetime, timedelta
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -52,8 +60,9 @@ sys.path.insert(0, str(ROOT / "backend"))
 import math  # noqa: E402
 
 from hydrosnooze.db import Database  # noqa: E402
-from hydrosnooze.models import Schedule  # noqa: E402
-from hydrosnooze.withings import health, parse, timing  # noqa: E402
+from hydrosnooze import report, trials  # noqa: E402
+from hydrosnooze.models import Mode, NightPlan, Schedule, SleepStage, Stage, plan_for_wake  # noqa: E402
+from hydrosnooze.withings import health, parse, scoreboard, timing  # noqa: E402
 
 OUT = ROOT / "frontend" / "src" / "api" / "seed-health.json"
 LONDON = ZoneInfo("Europe/London")
@@ -77,31 +86,58 @@ SCORES = (
 #: The night the invented bed is asked for, in the order the app runs it: warmer
 #: to get into, cooler for deep sleep, a little warmer for REM, warm to wake to.
 DRIFT_C, DEEP_C, REM_C, WAKE_C = 29, 25, 26, 28
+#: The seed site's schedule (frontend/src/api/mock.ts): its parts, and its wake.
+PARTS_MIN = (35, 222, 195, 28)
+WAKE_AT = time(6, 30)
 #: How long the bed takes to close most of the gap to a new setting, and what a
 #: body adds while it is in it.
 LAG_S = 20 * 60
 BODY_C = 1.0
 
 
-def asked_for(t: float, start: int, end: int) -> int:
-    """What the bed is set to at `t`, for a night in bed from `start` to `end`."""
-    if t < start + 30 * 60:
-        return DRIFT_C
-    if t < start + 4 * 3600:
-        return DEEP_C
-    if t < end - 60 * 60:
-        return REM_C
-    return WAKE_C
+def plan_for(morning: date, rng: random.Random) -> tuple[NightPlan, str | None, int | None]:
+    """The night the bed runs, and which part was a test, if one was.
+
+    About a third of nights move Deep a degree and a fifth move REM, one part at
+    a time, the way the evening suggestions will.
+    """
+    temps = {"drift": DRIFT_C, "deep": DEEP_C, "rem": REM_C, "wake": WAKE_C}
+    test, offset = None, None
+    roll = rng.random()
+    if roll < 0.35:
+        test, offset = "deep", rng.choice((-1, 1))
+    elif roll < 0.55:
+        test, offset = "rem", rng.choice((-1, 1))
+    if test:
+        temps[test] += offset
+    stages = [
+        SleepStage(stage, minutes, temps[stage.value])
+        for stage, minutes in zip((Stage.DRIFT, Stage.DEEP, Stage.REM, Stage.WAKE), PARTS_MIN)
+    ]
+    return plan_for_wake(morning, WAKE_AT, stages, Mode.QUIET), test, offset
 
 
-def invent_bed(db: Database, night: parse.Night, rng: random.Random) -> None:
+def asked_for(t: float, plan: NightPlan) -> int:
+    """What the bed is set to at `t`: the part of the plan it falls in, the first
+    part before lights out, the last after the wake time."""
+    at = datetime.fromtimestamp(t, LONDON).replace(tzinfo=None)
+    for step in plan.steps:
+        if step.starts_at <= at < step.ends_at:
+            return step.temp_c
+    return plan.steps[0].temp_c if at < plan.bedtime_at else plan.steps[-1].temp_c
+
+
+def invent_bed(db: Database, night: parse.Night, rng: random.Random, plan: NightPlan) -> None:
     """Thirty-second probe readings for one night, written as the Pi writes them."""
     in_bed = {m.at for m in night.minutes}
     lean = rng.uniform(-0.4, 0.4)
     bed, room = 21.0, rng.uniform(18.5, 20.5)
-    t, i = night.start_at - 3600, 0
+    first = int(
+        (plan.bedtime_at - timedelta(hours=1)).replace(tzinfo=LONDON).timestamp()
+    )
+    t, i = min(night.start_at - 3600, first), 0
     while t < night.end_at + 600:
-        target = asked_for(t, night.start_at, night.end_at)
+        target = asked_for(t, plan)
         minute = night.start_at + ((t - night.start_at) // 60) * 60
         body = BODY_C if minute in in_bed else 0.0
         settle = target + body + lean
@@ -195,7 +231,14 @@ def main() -> None:
             sys.exit(f"{summary['date']} breaks: {'; '.join(broken)}")
         night = parse.night(summary, body["series"])
         db.save_sleep_night(night)
-        invent_bed(db, night, rng)
+        plan, test, offset = plan_for(morning, rng)
+        invent_bed(db, night, rng, plan)
+        start, end = report.window(plan)
+        run = trials.build_run(plan, db.night_history(start, end), [])
+        db.save_night_run(
+            replace(run, test_part=test, test_offset_c=offset),
+            datetime.combine(morning, time(7, 0)),
+        )
 
     reports = {m.isoformat(): health.report(db, m.isoformat()) for m in mornings}
     latest = LAST.isoformat()
@@ -230,6 +273,8 @@ def main() -> None:
         # The Sleep timing card, against the schedule the seed site starts with
         # (frontend/src/api/mock.ts): weekdays, 22:30 to 06:30, the default parts.
         "timing": timing.timing(db, Schedule(days_of_week=[0, 1, 2, 3, 4]), LAST),
+        # The Scoreboard, over what each night ran and what the mat measured.
+        "scoreboard": scoreboard.scoreboard(db, LAST),
     }
     OUT.write_text(json.dumps(seed, separators=(",", ":")) + "\n")
     db.close()

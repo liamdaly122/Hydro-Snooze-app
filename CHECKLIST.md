@@ -547,7 +547,12 @@ API rather than read. Read that before writing any of it.
 - [x] Tidy the Autopilot screen. The footnotes went behind an "i" on each card, which opens them
       in a sheet, and Sleep timing and Learning fold down to one line each. Sleep timing counts
       its nights with a bar and has its own Start again
-- [ ] Step two: a suggested night of temperatures each evening, tested one degree at a time.
+- [x] Step two, the record: what each part of each night was set to, read from what the bed was
+      asked for, written every morning by itself and filled in back to when the mat went in
+- [x] Step two, the scoreboard: each setting each part has run at and the sleep on those nights,
+      saying not sure yet until a gap is bigger than the swing between ordinary nights
+- [ ] Step two, the evening suggestion: tonight's temperatures from the scoreboard, a degree
+      either side in one part about one night in three, marked as a test.
       Needs two decisions first: what it pushes for, and the limits it can never leave
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 

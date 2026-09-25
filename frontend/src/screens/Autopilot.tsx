@@ -3,6 +3,7 @@ import { AdjustmentsChart, KIND_COLOUR } from '../components/AdjustmentsChart'
 import { Moon, Sparkle } from '../components/Icons'
 import { InfoButton } from '../components/InfoButton'
 import { LearningCard } from '../components/LearningCard'
+import { ScoreboardCard } from '../components/ScoreboardCard'
 import { SleepTimingCard } from '../components/SleepTimingCard'
 import type { ApiClient } from '../api/client'
 import type {
@@ -11,6 +12,7 @@ import type {
   Learning,
   Mode,
   Schedule,
+  Scoreboard,
   SleepStage,
   SleepTiming,
   Stage,
@@ -112,6 +114,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
   const [learning, setLearning] = useState<Learning | null>(null)
   const [busy, setBusy] = useState(false)
   const [timing, setTiming] = useState<SleepTiming | null>(null)
+  const [board, setBoard] = useState<Scoreboard | null>(null)
   const [moving, setMoving] = useState(false)
 
   useEffect(() => {
@@ -125,6 +128,10 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
     // nights to go" is the most useful thing this screen can say, and that is
     // the morning getAutopilot has nothing for.
     void client.getLearning().then((l) => live && setLearning(l))
+    void client
+      .getScoreboard()
+      .then((b) => live && setBoard(b))
+      .catch(() => undefined)
     return () => {
       live = false
     }
@@ -161,6 +168,8 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       .catch(() => undefined)
       .finally(() => setMoving(false))
   }
+
+  const boardCard = board && <ScoreboardCard board={board} />
 
   const timingCard = timing && (
     <SleepTimingCard
@@ -199,6 +208,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
           </p>
         </section>
         {timingCard}
+        {boardCard}
         {learnCard}
       </>
     )
@@ -410,6 +420,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       )}
 
       {timingCard}
+      {boardCard}
       {learnCard}
     </>
   )

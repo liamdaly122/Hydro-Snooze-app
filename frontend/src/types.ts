@@ -544,6 +544,54 @@ export interface SleepTiming {
   boundaries: TimingBoundary[]
 }
 
+/** One temperature a part has run at, and the sleep on those nights. */
+export interface ScoreSetting {
+  set_c: number
+  nights: number
+  tests: number
+  mean_s: number
+  sd_s: number
+  low_s: number
+  high_s: number
+  /** What else was going on: the bedroom, and what the bed actually averaged. */
+  room_c: number | null
+  bed_c: number | null
+  /** What a setting must not make worse, whatever it is scored on. */
+  awake_s: number | null
+  asleep_after_s: number | null
+}
+
+export interface ScorePart {
+  part: 'deep' | 'rem' | 'drift'
+  label: string
+  /** What the part is scored on: deep sleep, REM, or time to fall asleep. */
+  measure: string
+  more_is_better: boolean
+  settings: ScoreSetting[]
+  /**
+   * empty: nothing yet. one_setting: only one temperature tried. not_sure: the
+   * gap is inside the night-to-night swing, or too few nights to compare.
+   * clear: the leader is ahead by more than the swing explains.
+   */
+  verdict: 'empty' | 'one_setting' | 'not_sure' | 'clear'
+  leader_c: number | null
+  runner_c: number | null
+  gap_s: number | null
+  swing_s: number | null
+}
+
+/** Each part's settings and the sleep on them, from night_runs and the mat. */
+export interface Scoreboard {
+  window_days: number
+  /** Nights written down, mat or not. */
+  recorded: number
+  /** Nights written down that the mat has too. */
+  nights: number
+  tests: number
+  setting_needs: number
+  parts: ScorePart[]
+}
+
 export interface HealthReport {
   /** Seven days, Sunday first, around the night asked for. */
   week: HealthDay[]

@@ -11,6 +11,7 @@ does is reachable from here, and nothing here can reach the bed.
     GET    /api/health-report       one night, as the Health Report draws it
     GET    /api/sleep-timing        when I really sleep, against the schedule's parts
     POST   /api/sleep-timing/forget start counting nights again
+    GET    /api/scoreboard          each setting each part has run at, and the sleep on it
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from ..service import Service
-from ..withings import health, timing
+from ..withings import health, scoreboard, timing
 from ..withings.sync import ConnectProblem
 
 router = APIRouter(prefix="/api")
@@ -138,3 +139,11 @@ async def forget_sleep_timing(request: Request) -> dict[str, object]:
         f"{'night' if set_aside == 1 else 'nights'} set aside. The nights themselves are kept.",
     )
     return timing.timing(service.db, service.schedule, today)
+
+
+@router.get("/scoreboard")
+async def get_scoreboard(request: Request) -> dict[str, object]:
+    """Each temperature each part of the night has run at, and what the mat
+    measured on those nights. Always answers, with nothing recorded included."""
+    service = _service(request)
+    return scoreboard.scoreboard(service.db, service.clock.now().date())

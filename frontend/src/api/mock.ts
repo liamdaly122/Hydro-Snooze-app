@@ -29,6 +29,7 @@ import type {
   Profile,
   Schedule,
   ServiceInfo,
+  Scoreboard,
   SleepStage,
   SleepTiming,
   Stage,
@@ -581,6 +582,13 @@ export class MockApiClient implements ApiClient {
 
   private timingSince: string | null = null
 
+  /** From the seed's nights and what each ran, through the real scoreboard.py. */
+  async getScoreboard(): Promise<Scoreboard> {
+    const seed = await this.health()
+    await sleep(120)
+    return seed.scoreboard
+  }
+
   async forgetSleepTiming(): Promise<SleepTiming> {
     this.timingSince = isoDay(new Date())
     return this.getSleepTiming()
@@ -855,6 +863,7 @@ interface HealthSeed {
   reports: Record<string, HealthReport>
   autopilot_sleep: AutopilotSleep[]
   timing: SleepTiming
+  scoreboard: Scoreboard
 }
 
 /** Seven empty days, Sunday first, around a morning. */

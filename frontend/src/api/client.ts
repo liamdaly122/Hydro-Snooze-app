@@ -25,6 +25,7 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  Scoreboard,
   SleepTiming,
   WithingsStatus,
 } from '../types'
@@ -118,6 +119,8 @@ export interface ApiClient {
   getSleepTiming(): Promise<SleepTiming>
   /** Start counting again, for a routine that has changed. The nights are kept. */
   forgetSleepTiming(): Promise<SleepTiming>
+  /** Each temperature each part has run at, and the sleep on those nights. */
+  getScoreboard(): Promise<Scoreboard>
   /** Where the Withings connection is up to. */
   getWithings(): Promise<WithingsStatus>
   /** Fetch now. `asked` is false when it was too soon after the last time. */

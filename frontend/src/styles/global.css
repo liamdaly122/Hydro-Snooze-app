@@ -3324,3 +3324,108 @@ a.pill {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* --- The scoreboard ----------------------------------------------------------- */
+
+.score-part + .score-part {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.score-part__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.score-part__measure {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.score-row {
+  display: grid;
+  /* A fixed width for the value, so every bar in a part ends in the same place
+     and the lengths can be compared by eye. */
+  grid-template-columns: 40px 1fr 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.score-row__temp {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.score-row__middle {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.score-row__track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  overflow: hidden;
+}
+
+.score-row__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgb(140 182 255 / 0.75);
+}
+
+.score-row__note {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.score-row__value {
+  text-align: right;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Too few nights to be compared yet: there, but not to be read into. */
+.score-row--few .score-row__temp,
+.score-row--few .score-row__value {
+  color: var(--text-dim);
+}
+
+.score-row--few .score-row__fill {
+  background: rgb(255 255 255 / 0.25);
+}
+
+.score-row--leads .score-row__fill {
+  background: #7dffa0;
+}
+
+.score-part__verdict {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.score-foot {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
