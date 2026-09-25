@@ -242,7 +242,7 @@ export function HealthReport({
         screen that asks something of you, it takes three taps, and in the
         morning nobody scrolls past a hypnogram to find it.
       */}
-      {shownDate && <NightNoteCard client={client} wakeOn={shownDate} />}
+      {shownDate && <NightNoteCard key={shownDate} client={client} wakeOn={shownDate} />}
 
       {night ? (
         <Night night={night} />

@@ -29,6 +29,8 @@ class NotePatch(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=5)
     felt: str | None = None
     tags: list[str] | None = None
+    #: The Submit button: answered, and folded down to one line.
+    submitted: bool | None = None
 
 
 def _service(request: Request) -> Service:
@@ -79,6 +81,7 @@ async def put_note(request: Request, wake_on: str, patch: NotePatch) -> dict[str
         rating=patch.rating if "rating" in sent else was.rating,
         felt=felt,
         tags=tags,
+        submitted=bool(patch.submitted) if patch.submitted is not None else was.submitted,
     )
     service.db.save_night_note(note, service.clock.now())
     return note_json(note, wake_on)

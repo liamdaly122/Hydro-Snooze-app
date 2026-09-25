@@ -100,6 +100,7 @@ function mockNote(wakeOn: string): NightNote {
     felt: null,
     tags: [],
     left_out: [],
+    submitted: false,
     choices: {
       ratings: ['Rough', 'Groggy', 'OK', 'Good', 'Great'].map((label, i) => ({ value: i + 1, label })),
       felt: [
@@ -282,6 +283,7 @@ export class MockApiClient implements ApiClient {
       ...was,
       rating: patch.rating !== undefined ? patch.rating : was.rating,
       felt: patch.felt !== undefined ? patch.felt : was.felt,
+      submitted: patch.submitted ?? was.submitted,
       tags: MOCK_TAGS.map((t) => t.key).filter((k) => tags.includes(k)),
       left_out: MOCK_TAGS.filter((t) => t.leaves_out && tags.includes(t.key)).map((t) => t.label),
     }

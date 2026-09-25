@@ -4055,3 +4055,48 @@ a.pill {
 .trends__axis {
   padding-right: 44px;
 }
+
+/* The Submit button, and the one line the note folds down to once it is used. */
+.note__submit {
+  margin-top: 16px;
+}
+
+.note__submit:not(:disabled) {
+  background: var(--blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+.note-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.note-done__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.note-done__label {
+  color: var(--text-dim);
+}
+
+.note-done__aside {
+  color: var(--text-faint);
+}
+
+.note-done__edit {
+  flex: none;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font-size: 13px;
+}

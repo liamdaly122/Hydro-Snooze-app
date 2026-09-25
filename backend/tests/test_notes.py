@@ -197,3 +197,39 @@ def test_tonight_can_be_tagged_but_not_next_week(client):
     later = (TODAY + timedelta(days=2)).isoformat()
     assert client.put(f"/api/notes/{tomorrow}", json={"tags": ["alcohol"]}).status_code == 200
     assert client.put(f"/api/notes/{later}", json={"tags": ["alcohol"]}).status_code == 422
+
+
+def test_submitting_puts_the_note_away_and_keeps_every_answer(client):
+    """The Submit button. The answers were already saved tap by tap; this only
+    says the card can fold down, on every phone and after a reload."""
+    url = "/api/notes/2026-09-25"
+    client.put(url, json={"rating": 4, "felt": "too_warm", "tags": ["alcohol"]})
+    assert client.get("/api/notes", params={"date": "2026-09-25"}).json()["submitted"] is False
+
+    got = client.put(url, json={"submitted": True}).json()
+    assert got["submitted"] is True
+    assert got["rating"] == 4 and got["felt"] == "too_warm" and got["tags"] == ["alcohol"]
+
+    # Changing an answer afterwards leaves it put away until it is submitted again.
+    got = client.put(url, json={"rating": 5}).json()
+    assert got["submitted"] is True and got["rating"] == 5
+    assert client.get("/api/notes", params={"date": "2026-09-25"}).json()["submitted"] is True
+
+
+def test_a_notes_table_from_before_submit_gains_the_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    raw = sqlite3.connect(path)
+    raw.execute(
+        "CREATE TABLE night_notes (wake_on TEXT PRIMARY KEY, rating INTEGER, felt TEXT, "
+        "tags TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"
+    )
+    raw.execute("INSERT INTO night_notes VALUES ('2026-09-25', 3, NULL, '[]', '2026-09-25T08:00')")
+    raw.commit()
+    raw.close()
+
+    db = Database(path)
+    note = db.night_note("2026-09-25")
+    assert note is not None and note.rating == 3 and note.submitted is False
+    db.close()

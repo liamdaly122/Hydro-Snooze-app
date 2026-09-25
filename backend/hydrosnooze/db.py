@@ -450,7 +450,8 @@ CREATE TABLE IF NOT EXISTS night_notes (
     rating     INTEGER,
     felt       TEXT,
     tags       TEXT NOT NULL DEFAULT '[]',
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    submitted  INTEGER NOT NULL DEFAULT 0
 );
 
 -- Each device signed in (access.py). The token itself is never stored, only a
@@ -612,6 +613,14 @@ class Database:
         # What electricity costs, for Trends. NULL until it is set.
         if "tariff_p" not in prefs:
             self._db.execute("ALTER TABLE preferences ADD COLUMN tariff_p REAL")
+
+        # Whether a night's note was submitted and put away. Not on any row
+        # written before there was a Submit button, which is what nought says.
+        notes = {r["name"] for r in self._db.execute("PRAGMA table_info(night_notes)")}
+        if "submitted" not in notes:
+            self._db.execute(
+                "ALTER TABLE night_notes ADD COLUMN submitted INTEGER NOT NULL DEFAULT 0"
+            )
 
         # What each night used. NULL on rows from before, filled in from the
         # plug's readings by Service.record_missing.
@@ -1736,11 +1745,19 @@ class Database:
 
     def save_night_note(self, note: NightNote, at: datetime) -> None:
         self._db.execute(
-            "INSERT INTO night_notes (wake_on, rating, felt, tags, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) "
+            "INSERT INTO night_notes (wake_on, rating, felt, tags, updated_at, submitted) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(wake_on) DO UPDATE SET rating = excluded.rating, "
-            "felt = excluded.felt, tags = excluded.tags, updated_at = excluded.updated_at",
-            (note.wake_on, note.rating, note.felt, json.dumps(list(note.tags)), at.isoformat()),
+            "felt = excluded.felt, tags = excluded.tags, updated_at = excluded.updated_at, "
+            "submitted = excluded.submitted",
+            (
+                note.wake_on,
+                note.rating,
+                note.felt,
+                json.dumps(list(note.tags)),
+                at.isoformat(),
+                int(note.submitted),
+            ),
         )
         self._db.commit()
 
@@ -1801,6 +1818,7 @@ def _night_note(row: sqlite3.Row) -> NightNote:
         rating=row["rating"],
         felt=row["felt"],
         tags=tuple(json.loads(row["tags"] or "[]")),
+        submitted=bool(row["submitted"]),
     )
 
 
