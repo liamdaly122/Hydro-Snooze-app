@@ -121,6 +121,16 @@ export interface Schedule {
   /** Decided by the service from the first stage, not a setting. */
   preconditioning: Preconditioning
   updated_at: string | null
+  /**
+   * A second pair of times for some mornings: the weekend lie-in. Keyed to the
+   * wake morning like days_of_week. Both times null means there are none.
+   * The parts and temperatures are shared; only the times differ.
+   */
+  other_days: number[]
+  other_bed_time: string | null
+  other_wake_time: string | null
+  /** Lights out to alarm on those mornings, or null with no other times. */
+  other_night_minutes: number | null
 }
 
 export type Health = 'ok' | 'degraded' | 'down' | 'simulated' | 'unknown'
@@ -431,6 +441,13 @@ export interface TonightState {
   speed_changed: boolean
   nudge_c: number
   nudge_until: string | null
+  /**
+   * This night's own times before tonight changed anything: the weekend's, on a
+   * weekend. What "usually" means under a changed alarm. Absent from builds
+   * before there were other times, where the schedule's own are the answer.
+   */
+  usual_bed_time?: string
+  usual_wake_time?: string
   /**
    * Tonight's change, when it is Autopilot's evening suggestion as it was taken.
    * Home names it as Autopilot's and leaves out Save as my usual for it. Absent

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { DeviceBar } from './DeviceBar'
 import { Bolt, ChevronRight, Clock, Close, Snowflake, Sparkle, Suitcase } from './Icons'
-import { formatDay, formatDays, formatWatts, parseDay } from '../domain'
+import { formatDay, formatDays, formatWatts, hasOtherTimes, parseDay } from '../domain'
 import type { ApiClient } from '../api/client'
 import {
   MODE_LABEL,
@@ -174,7 +174,7 @@ function Items({
       <Item
         icon={<Clock size={18} />}
         label="Alarm"
-        sub={alarmLine(running, schedule)}
+        sub={alarmLine(running, schedule, tonight)}
         onClick={() => onOpen('alarm')}
       />
       <Item
@@ -295,14 +295,22 @@ function weekday(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { weekday: 'long' })
 }
 
-/** "06:30, Mon-Fri", or tonight's time first when tonight is different. */
-function alarmLine(running: Schedule, usual: Schedule): string {
+/**
+ * "06:30, Mon-Fri", with the weekend's own time after it when there is one, or
+ * tonight's time first when tonight is different from what this night usually
+ * is. A Saturday's 08:30 is Saturday's usual, not a change.
+ */
+function alarmLine(running: Schedule, usual: Schedule, tonight: TonightState | null): string {
   if (!usual.enabled) return 'Not running automatically'
   if (usual.days_of_week.length === 0) return 'No days selected'
-  const days = usual.days_of_week.length === 7 ? 'every day' : formatDays(usual.days_of_week)
-  if (running.wake_time !== usual.wake_time) {
-    return `${running.wake_time} tonight, usually ${usual.wake_time}`
+  const thisNight = tonight?.usual_wake_time ?? usual.wake_time
+  if (running.wake_time !== thisNight) {
+    return `${running.wake_time} tonight, usually ${thisNight}`
   }
+  if (hasOtherTimes(usual)) {
+    return `${usual.wake_time}, ${formatDays(usual.other_days)} ${usual.other_wake_time}`
+  }
+  const days = usual.days_of_week.length === 7 ? 'every day' : formatDays(usual.days_of_week)
   return `${usual.wake_time}, ${days}`
 }
 

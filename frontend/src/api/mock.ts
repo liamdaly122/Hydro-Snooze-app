@@ -94,6 +94,10 @@ export class MockApiClient implements ApiClient {
     cooling_speed: 'quiet',
     preconditioning: { mode: 'turbo', lead_minutes: 20, reason: 'Cooling the bed from about 20C down to 18C.' },
     updated_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    other_days: [],
+    other_bed_time: null,
+    other_wake_time: null,
+    other_night_minutes: null,
   }
 
   private events: DeviceEvent[] = []
@@ -184,6 +188,10 @@ export class MockApiClient implements ApiClient {
     // Mirrors Schedule.__post_init__: the stages always fill the night exactly,
     // whichever of the three things the patch changed.
     next.night_minutes = minutesBetween(next.bed_time, next.wake_time)
+    next.other_night_minutes =
+      next.other_bed_time && next.other_wake_time
+        ? minutesBetween(next.other_bed_time, next.other_wake_time)
+        : null
     next.stages = withModes(fitStages(next.stages, next.night_minutes), next.cooling_speed)
     next.preconditioning = preconditioningFor(next.stages[0]?.temp_c ?? 20)
     this.schedule = next

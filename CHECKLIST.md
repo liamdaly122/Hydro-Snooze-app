@@ -581,6 +581,12 @@ API rather than read. Read that before writing any of it.
       default) and a night-time trim that moves the setting a degree after half an hour off it.
       **Built and tested against a simulated bed.** The first real night at Balanced is the next
       thing to look at: the on-target figure on the Autopilot screen says how it went
+- [x] Different times on some days: a weekend lie-in, keyed to the morning like the days.
+      Only the times; the parts and temperatures are shared. With Autopilot on, a longer
+      night keeps Drift, Deep and Wake where Sleep timing has them and gives REM the extra
+      time, and Sleep timing measures every night from its own lights out, weekends included
+- [ ] If a weekend wake time goes past 09:00, move the Shelly's daily off to match. The
+      Schedule screen says so when it does
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

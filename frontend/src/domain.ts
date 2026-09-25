@@ -77,6 +77,29 @@ function parseHhMm(value: string): [number, number] {
 }
 
 /**
+ * The wake time and the length of the night ending on this morning: the other
+ * times on the mornings that have them. Mirrors Schedule.times_for.
+ */
+export function timesFor(schedule: Schedule, wakeOn: Date): { wake: string; nightMinutes: number } {
+  const other =
+    (schedule.other_days ?? []).includes(mondayFirstDay(wakeOn)) &&
+    schedule.other_wake_time !== null &&
+    schedule.other_night_minutes !== null
+  return other
+    ? { wake: schedule.other_wake_time!, nightMinutes: schedule.other_night_minutes! }
+    : { wake: schedule.wake_time, nightMinutes: schedule.night_minutes }
+}
+
+/** Whether the schedule has a second set of times, with days to use them on. */
+export function hasOtherTimes(schedule: Schedule): boolean {
+  return (
+    (schedule.other_days ?? []).length > 0 &&
+    schedule.other_bed_time !== null &&
+    schedule.other_wake_time !== null
+  )
+}
+
+/**
  * Work backwards from the morning you want to wake up.
  *
  * The stages run in order and finish at the wake time, so bedtime falls out of
@@ -84,14 +107,17 @@ function parseHhMm(value: string): [number, number] {
  * own scheduler, and dropping it is what allows heating and cooling in one night.
  */
 export function planForWake(wakeOn: Date, schedule: Schedule): NightPlan {
-  const [h, m] = parseHhMm(schedule.wake_time)
+  const own = timesFor(schedule, wakeOn)
+  const [h, m] = parseHhMm(own.wake)
   const wakeAt = new Date(wakeOn)
   wakeAt.setHours(h, m, 0, 0)
 
   // Anchored on the night, not on the stages. They add up to the same thing once
   // the service has answered, but a draft mid-edit can be a few minutes out and
-  // bedtime should not flicker while it is.
-  const bedtimeAt = new Date(wakeAt.getTime() - schedule.night_minutes * MINUTE)
+  // bedtime should not flicker while it is. On a morning with other times the
+  // stages below are the usual night's lengths: nothing on screen reads them
+  // for one of those nights, and how they fit it is the service's to decide.
+  const bedtimeAt = new Date(wakeAt.getTime() - own.nightMinutes * MINUTE)
 
   const steps: StageStep[] = []
   let cursor = bedtimeAt

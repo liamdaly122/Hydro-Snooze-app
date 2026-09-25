@@ -44,10 +44,11 @@ export function TonightBanner({
         )
       }
     }
-    if (tonight.running.wake_time !== usual.wake_time) {
+    // Against this night's own times, which on a weekend are the weekend's.
+    if (tonight.running.wake_time !== (tonight.usual_wake_time ?? usual.wake_time)) {
       parts.push(`alarm ${formatHHMM(tonight.running.wake_time)}`)
     }
-    if (tonight.running.bed_time !== usual.bed_time) {
+    if (tonight.running.bed_time !== (tonight.usual_bed_time ?? usual.bed_time)) {
       parts.push(`bed ${formatHHMM(tonight.running.bed_time)}`)
     }
   }

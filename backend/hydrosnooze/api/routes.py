@@ -61,6 +61,10 @@ class SchedulePatch(BaseModel):
     bed_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     stages: list[StagePatch] | None = None
     cooling_speed: Mode | None = None
+    #: The weekend's own times. An empty string clears a time.
+    other_days: list[int] | None = None
+    other_bed_time: str | None = Field(default=None, pattern=r"^(\d{2}:\d{2})?$")
+    other_wake_time: str | None = Field(default=None, pattern=r"^(\d{2}:\d{2})?$")
 
 
 class TemperatureBody(BaseModel):
@@ -199,12 +203,14 @@ class SpeedTonight(BaseModel):
 def _tonight(service: Service) -> dict[str, object]:
     # tonight_state rather than scheduler.tonight: the second is whatever was last
     # read off disk, and a row for a night that is over is spent.
+    wake_on = service._tonight_date()
     return {
         **tonight_json(
             service.tonight_now(),
             service.tonight_state(),
             service.tonight_phase(),
             running=service.tonight_as_shown(),
+            usual_times=service.schedule.times_for(wake_on) if wake_on else None,
         ),
         # Tonight's change, when it is Autopilot's suggestion as taken. Home
         # names it as such and leaves out Save as my usual for it.
@@ -430,8 +436,13 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
         ]
         _guard_night(service, data["stages"], speed)
 
-    for field in ("wake_time", "bed_time"):
+    for field in ("wake_time", "bed_time", "other_bed_time", "other_wake_time"):
         if field in data:
+            if data[field] == "":
+                if field in ("wake_time", "bed_time"):
+                    raise HTTPException(422, f"{field} must be a real time of day")
+                data[field] = None
+                continue
             hour, minute = (int(p) for p in data[field].split(":"))
             if not (0 <= hour < 24 and 0 <= minute < 60):
                 raise HTTPException(422, f"{field} must be a real time of day")
@@ -451,6 +462,20 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
 
     if "days_of_week" in data and any(d < 0 or d > 6 for d in data["days_of_week"]):
         raise HTTPException(422, "days_of_week must be 0 (Monday) to 6 (Sunday)")
+    if "other_days" in data:
+        if any(d < 0 or d > 6 for d in data["other_days"]):
+            raise HTTPException(422, "other_days must be 0 (Monday) to 6 (Sunday)")
+        data["other_days"] = sorted(set(data["other_days"]))
+
+    # The other days' night needs room for every stage too, the same as the
+    # usual one does.
+    if would_be.other_bed_time is not None and would_be.other_wake_time is not None:
+        if minutes_between(would_be.other_bed_time, would_be.other_wake_time) < floor:
+            raise HTTPException(
+                422,
+                f"A night of {len(would_be.stages)} stages needs at least {floor} minutes "
+                f"between going to bed and waking up, on the other days too.",
+            )
 
     service.update_schedule(data)
     return service.schedule_as_shown()

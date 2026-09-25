@@ -160,7 +160,10 @@ CREATE TABLE IF NOT EXISTS schedule (
     bed_time             TEXT    NOT NULL,
     stages               TEXT    NOT NULL,
     cooling_speed        TEXT    NOT NULL,
-    updated_at           TEXT
+    updated_at           TEXT,
+    other_days           TEXT    NOT NULL DEFAULT '[]',
+    other_bed_time       TEXT    NOT NULL DEFAULT '',
+    other_wake_time      TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -463,6 +466,9 @@ SCHEDULE_COLUMNS = (
     "stages",
     "cooling_speed",
     "updated_at",
+    "other_days",
+    "other_bed_time",
+    "other_wake_time",
 )
 
 #: How long the unit's own three phases lasted, in minutes. Fixed in the hardware,
@@ -598,6 +604,11 @@ class Database:
             ("bed_time", "TEXT NOT NULL DEFAULT ''"),
             ("stages", "TEXT NOT NULL DEFAULT '[]'"),
             ("cooling_speed", "TEXT NOT NULL DEFAULT 'quiet'"),
+            # The weekend's own times. None, which is what every night before
+            # there were two sets of times ran on.
+            ("other_days", "TEXT NOT NULL DEFAULT '[]'"),
+            ("other_bed_time", "TEXT NOT NULL DEFAULT ''"),
+            ("other_wake_time", "TEXT NOT NULL DEFAULT ''"),
         ]
         for name, definition in added:
             if name not in columns:
@@ -819,14 +830,18 @@ class Database:
         self._db.execute(
             """
             INSERT INTO schedule (id, name, enabled, days_of_week, wake_time,
-                                  bed_time, stages, cooling_speed, updated_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  bed_time, stages, cooling_speed, updated_at,
+                                  other_days, other_bed_time, other_wake_time)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, enabled=excluded.enabled,
                 days_of_week=excluded.days_of_week, wake_time=excluded.wake_time,
                 bed_time=excluded.bed_time,
                 stages=excluded.stages, cooling_speed=excluded.cooling_speed,
-                updated_at=excluded.updated_at
+                updated_at=excluded.updated_at,
+                other_days=excluded.other_days,
+                other_bed_time=excluded.other_bed_time,
+                other_wake_time=excluded.other_wake_time
             """,
             (
                 schedule.name,
@@ -842,6 +857,9 @@ class Database:
                 ),
                 schedule.cooling_speed.value,
                 _iso(schedule.updated_at),
+                json.dumps(schedule.other_days),
+                schedule.other_bed_time.strftime("%H:%M") if schedule.other_bed_time else "",
+                schedule.other_wake_time.strftime("%H:%M") if schedule.other_wake_time else "",
             ),
         )
         self._db.commit()
@@ -1767,6 +1785,9 @@ def _schedule_from(row: sqlite3.Row) -> Schedule:
         stages=stages,
         cooling_speed=_cooling_speed_from(row),
         updated_at=_parse(row["updated_at"]),
+        other_days=json.loads(row["other_days"]) if row["other_days"] else [],
+        other_bed_time=_time_from(row["other_bed_time"]) if row["other_bed_time"] else None,
+        other_wake_time=_time_from(row["other_wake_time"]) if row["other_wake_time"] else None,
     )
 
 

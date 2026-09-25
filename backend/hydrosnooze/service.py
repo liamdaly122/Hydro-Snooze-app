@@ -329,7 +329,11 @@ class Service:
         self.transmitter, self.power, self.unit = build_adapters(settings, self.clock, echo=echo)
         self.commands = Commands(self.transmitter, self.power, self.clock, settings, self.events)
         self.commands.on_progress = self._note_progress
-        self.scheduler = Scheduler(learned_lead=self._learned_lead, bed_now=self._bed_now)
+        self.scheduler = Scheduler(
+            learned_lead=self._learned_lead,
+            bed_now=self._bed_now,
+            autopilot_on=self._autopilot_on,
+        )
         # Read back what already ran tonight before anything can ask. A restart is
         # a routine event now: systemd brings the service back after a crash and
         # the watchdog brings it back after a stall, so losing this in memory
@@ -2022,8 +2026,11 @@ class Service:
             if night.wake_on in held:
                 continue
             held.add(night.wake_on)
+            # Through the scheduler, so a Saturday is rebuilt with Saturday's
+            # times and laid out the way it would have run.
+            wake_on = date.fromisoformat(night.wake_on)
             self.record_night(
-                self.schedule.plan_for(date.fromisoformat(night.wake_on)), rebuilt=True
+                self.scheduler.shape(self.schedule, wake_on).plan_for(wake_on), rebuilt=True
             )
             written += 1
         return written
@@ -2124,6 +2131,11 @@ class Service:
         )
 
     # --- The switch over all of Autopilot -------------------------------------
+
+    def _autopilot_on(self) -> bool:
+        """Asked of the database each time, because the switch can move at any
+        moment and the scheduler must never be holding yesterday's answer."""
+        return self.db.autopilot_on()
 
     def _learning_active(self) -> bool:
         """Whether what has been learned about the bed is used: Autopilot on, and

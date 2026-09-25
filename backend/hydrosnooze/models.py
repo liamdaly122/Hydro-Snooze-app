@@ -509,7 +509,12 @@ def minutes_between(bed_time: time, wake_time: time) -> int:
     return (wake - bed) % MINUTES_IN_A_DAY or MINUTES_IN_A_DAY
 
 
-def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]:
+def fit_stages(
+    stages: list[SleepStage],
+    total_minutes: int,
+    *,
+    holding: frozenset[Stage] = HOLDS_ITS_LENGTH,
+) -> list[SleepStage]:
     """Scale the stages to fill the night exactly, keeping their shape.
 
     Bedtime and the wake time are what get set now, so the night has a length
@@ -519,6 +524,10 @@ def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]
 
     The parts add up to the whole to the minute, by largest remainder rather than
     rounding each in isolation, and nothing is allowed to fall below the floor.
+
+    `holding` is which parts keep their length rather than taking a share: Drift
+    alone, normally. Autopilot's layout for a night of a different length holds
+    more of them; see `laid_out_like`.
     """
     if not stages:
         return []
@@ -526,7 +535,7 @@ def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]
     # Drift holds its length rather than taking a share. Falling asleep takes
     # about as long as it takes; the night being an hour shorter does not make it
     # quicker. So it comes off the top and the rest divide what is left.
-    held_out = [s for s in stages if s.stage in HOLDS_ITS_LENGTH]
+    held_out = [s for s in stages if s.stage in holding]
     held = sum(s.duration_minutes for s in held_out)
     sharing = len(stages) - len(held_out)
     # Unless there is not enough night to do that. A night too short for a held
@@ -543,6 +552,48 @@ def fit_stages(stages: list[SleepStage], total_minutes: int) -> list[SleepStage]
     for i, m in zip(where, minutes, strict=True):
         out[i] = replace(stages[i], duration_minutes=m)
     return out
+
+
+#: What Autopilot keeps where it is when a night is longer or shorter than the
+#: usual one. Everything but REM. See `laid_out_like`.
+KEEPS_ITS_PLACE: frozenset[Stage] = frozenset({Stage.DRIFT, Stage.DEEP, Stage.WAKE})
+
+
+def laid_out_like(night: Schedule, usual: Schedule) -> Schedule:
+    """A night of a different length, laid out the way Autopilot would have it.
+
+    A Saturday lie-in, or a night slept in, is longer than the usual night, and
+    the plain answer is to stretch every part in proportion: two more hours of
+    night is most of another hour of Deep. That is the wrong way round for sleep.
+    Deep sleep happens in the first few hours after falling asleep whenever the
+    alarm is set, and the extra hours at the end of a long night are mostly REM.
+
+    Sleep timing (withings/timing.py) is the part of Autopilot that measures
+    where deep sleep ends, in minutes after lights out, and moves the end of
+    Deep to match. That answer does not change with the alarm. So a night of a
+    different length keeps Drift, Deep and Wake exactly as long as on the usual
+    night, where Sleep timing has put them, and REM takes the difference. One
+    place decides where the parts of every night fall, and Full Autopilot can
+    take that over without anything here changing.
+
+    Only with Autopilot on; off, the night stretches evenly, exactly as set. And
+    a night too short for REM to keep a floor under it falls back to the even
+    stretch rather than squeezing REM to nothing.
+    """
+    if night.night_minutes == usual.night_minutes or not night.stages:
+        return night
+    lengths = {s.stage: s.duration_minutes for s in usual.stages}
+    stages = [
+        replace(s, duration_minutes=lengths.get(s.stage, s.duration_minutes))
+        for s in night.stages
+    ]
+    held = sum(s.duration_minutes for s in stages if s.stage in KEEPS_ITS_PLACE)
+    sharing = sum(1 for s in stages if s.stage not in KEEPS_ITS_PLACE)
+    if not sharing or night.night_minutes - held < MIN_STAGE_MINUTES * sharing:
+        return night
+    return replace(
+        night, stages=fit_stages(stages, night.night_minutes, holding=KEEPS_ITS_PLACE)
+    )
 
 
 def divide(weights: list[int], total: int, floor: int) -> list[int]:
@@ -1081,6 +1132,15 @@ class Schedule:
     cooling_speed: Mode = Mode.QUIET
     updated_at: datetime | None = None
     id: int = 1
+    #: A second pair of times for some mornings: the weekend lie-in. Keyed to
+    #: the wake morning like days_of_week, so Saturday here is Friday night.
+    #: Empty, or either time None, means every night keeps the times above.
+    #:
+    #: Only the times. The parts of the night and their temperatures are the
+    #: same every night; how they fit a longer night is `for_morning`'s job.
+    other_days: list[int] = field(default_factory=list)
+    other_bed_time: time | None = None
+    other_wake_time: time | None = None
 
     def __post_init__(self) -> None:
         # Two invariants, both enforced here so there is no way to hold a
@@ -1115,6 +1175,34 @@ class Schedule:
 
     def stage(self, stage: Stage) -> SleepStage | None:
         return next((s for s in self.stages if s.stage is stage), None)
+
+    @property
+    def has_other_times(self) -> bool:
+        return bool(
+            self.other_days
+            and self.other_bed_time is not None
+            and self.other_wake_time is not None
+        )
+
+    def times_for(self, wake_on: date) -> tuple[time, time]:
+        """Bedtime and the wake time for the night ending on this morning."""
+        if self.has_other_times and wake_on.weekday() in self.other_days:
+            assert self.other_bed_time is not None and self.other_wake_time is not None
+            return self.other_bed_time, self.other_wake_time
+        return self.bed_time, self.wake_time
+
+    def for_morning(self, wake_on: date) -> Schedule:
+        """The schedule as it stands for one morning: its own times, if it has
+        other ones, with the parts stretched evenly to fit.
+
+        A lens, like Tonight: everything downstream keeps taking a Schedule. How
+        the parts fit a longer night when Autopilot is on is `laid_out_like`,
+        applied by the scheduler, which knows whether it is.
+        """
+        bed, wake = self.times_for(wake_on)
+        if (bed, wake) == (self.bed_time, self.wake_time):
+            return self
+        return replace(self, bed_time=bed, wake_time=wake)
 
     def preconditioning(
         self, bed_c: float | None = None, learned: LearnedLead | None = None
@@ -1154,7 +1242,7 @@ class Schedule:
             wake_on = (now + timedelta(days=offset)).date()
             if wake_on.weekday() not in self.days_of_week:
                 continue
-            plan = self.plan_for(wake_on)
+            plan = self.for_morning(wake_on).plan_for(wake_on)
             if plan.starts_at > now:
                 return plan
         return None
