@@ -4,7 +4,8 @@ import { InfoButton } from './InfoButton'
 
 /**
  * Each temperature each part of the night has run at, and the sleep on those
- * nights: deep sleep for Deep, REM for REM, time to fall asleep for Drift.
+ * nights: deep sleep and REM together for Deep and for REM, which is what
+ * Autopilot pushes for, and time to fall asleep for Drift.
  *
  * Folded, one line: how many nights are recorded and whether anything is ahead
  * yet. Open, a row per temperature with its average and how many nights it has.
@@ -58,11 +59,14 @@ function Row({
   widest,
   leads,
   needs,
+  split,
 }: {
   s: ScoreSetting
   widest: number
   leads: boolean
   needs: number
+  /** Show deep sleep and REM separately under the total. */
+  split: boolean
 }) {
   const few = s.nights < needs
   return (
@@ -79,6 +83,11 @@ function Row({
           {s.nights} night{s.nights === 1 ? '' : 's'}
           {s.room_c !== null ? ` · room ${s.room_c.toFixed(1)}°` : ''}
         </span>
+        {split && s.deep_s !== null && s.rem_s !== null && (
+          <span className="score-row__note">
+            deep {minutes(s.deep_s)} · REM {minutes(s.rem_s)}
+          </span>
+        )}
       </span>
       <span className="score-row__value">{minutes(s.mean_s)}</span>
     </div>
@@ -100,7 +109,9 @@ export function ScoreboardCard({ board }: { board: Scoreboard }) {
             what the bed was actually asked for, and sets it beside what the mat measured.
           </p>
           <p>
-            Deep is scored on deep sleep, REM on REM, and Drift on how long you took to fall
+            Deep and REM are both scored on deep sleep and REM added together, because that is
+            what Autopilot pushes for: more deep sleep bought with less REM is not a win. The
+            split is shown under each setting. Drift is scored on how long you took to fall
             asleep. Wake is not scored: nothing the mat measures says how waking felt.
           </p>
           <p>
@@ -141,6 +152,7 @@ export function ScoreboardCard({ board }: { board: Scoreboard }) {
                   widest={widest}
                   leads={p.verdict === 'clear' && s.set_c === p.leader_c}
                   needs={board.setting_needs}
+                  split={p.part !== 'drift'}
                 />
               ))}
               <p className="score-part__verdict">{verdict(p, board.setting_needs)}</p>

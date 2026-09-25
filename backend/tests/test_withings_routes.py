@@ -171,3 +171,13 @@ def test_the_scoreboard_answers_before_anything_is_recorded(client):
     built = client.get("/api/scoreboard").json()
     assert built["recorded"] == 0 and built["nights"] == 0
     assert [p["verdict"] for p in built["parts"]] == ["empty", "empty", "empty"]
+
+
+def test_the_suggestion_answers_and_refuses_what_it_cannot_do(client):
+    got = client.get("/api/suggestion").json()
+    assert got["state"] in ("closed", "no_mat") and got["reach"] == 2
+    assert client.post("/api/suggestion/accept").status_code == 409
+    assert client.post("/api/suggestion/decline").status_code == 409
+    assert client.post("/api/suggestion/reach", json={"reach": 5}).status_code == 422
+    widened = client.post("/api/suggestion/reach", json={"reach": 3}).json()
+    assert widened["reach"] == 3

@@ -76,6 +76,17 @@ class Sample(NamedTuple):
     target_c: int | None = None
 
 
+class Decided(NamedTuple):
+    """What was decided about one evening's suggestion."""
+
+    wake_on: str
+    #: accepted or declined.
+    decision: str
+    temps: dict[str, int]
+    test_part: str | None
+    test_offset_c: int | None
+
+
 class PreconditionRow(NamedTuple):
     """One finished pre-conditioning run, as it was stored.
 
@@ -382,6 +393,27 @@ CREATE TABLE IF NOT EXISTS night_runs (
     test_offset_c INTEGER,
     rebuilt       INTEGER NOT NULL DEFAULT 0,
     written_at    TEXT    NOT NULL
+);
+
+-- What was decided about each evening's suggestion (suggest.py), one row per
+-- night. Kept so the morning can mark a test night as one, and so the app does
+-- not offer a suggestion again once it has been answered.
+CREATE TABLE IF NOT EXISTS suggestions (
+    wake_on       TEXT    PRIMARY KEY,
+    decision      TEXT    NOT NULL,
+    deep_c        INTEGER,
+    rem_c         INTEGER,
+    test_part     TEXT,
+    test_offset_c INTEGER,
+    decided_at    TEXT    NOT NULL
+);
+
+-- How far the suggestions may take each part: `reach` degrees either side of
+-- `centre_c`, which is where the part was when the limits were set.
+CREATE TABLE IF NOT EXISTS suggest_limits (
+    part     TEXT    PRIMARY KEY,
+    centre_c INTEGER NOT NULL,
+    reach    INTEGER NOT NULL
 );
 """
 
@@ -1501,6 +1533,50 @@ class Database:
             (first_wake_on or "", last_wake_on or "9999"),
         ).fetchall()
         return [_night_run(r) for r in rows]
+
+    # --- The evening suggestion ----------------------------------------------
+
+    def save_decision(self, decided: Decided, at: datetime) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO suggestions (wake_on, decision, deep_c, rem_c, test_part, "
+            "test_offset_c, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                decided.wake_on,
+                decided.decision,
+                decided.temps.get("deep"),
+                decided.temps.get("rem"),
+                decided.test_part,
+                decided.test_offset_c,
+                at.isoformat(),
+            ),
+        )
+        self._db.commit()
+
+    def decision_for(self, wake_on: str) -> Decided | None:
+        row = self._db.execute(
+            "SELECT * FROM suggestions WHERE wake_on = ?", (wake_on,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Decided(
+            wake_on=row["wake_on"],
+            decision=row["decision"],
+            temps={k: row[f"{k}_c"] for k in ("deep", "rem") if row[f"{k}_c"] is not None},
+            test_part=row["test_part"],
+            test_offset_c=row["test_offset_c"],
+        )
+
+    def suggest_limits(self) -> dict[str, tuple[int, int]]:
+        """Each part's (centre_c, reach), for the parts that have limits set."""
+        rows = self._db.execute("SELECT part, centre_c, reach FROM suggest_limits").fetchall()
+        return {r["part"]: (r["centre_c"], r["reach"]) for r in rows}
+
+    def set_suggest_limit(self, part: str, centre_c: int, reach: int) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO suggest_limits (part, centre_c, reach) VALUES (?, ?, ?)",
+            (part, centre_c, reach),
+        )
+        self._db.commit()
 
     def sleep_minutes(self, night_id: int) -> list[Minute]:
         rows = self._db.execute(

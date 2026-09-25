@@ -4,6 +4,7 @@ import { Moon, Sparkle } from '../components/Icons'
 import { InfoButton } from '../components/InfoButton'
 import { LearningCard } from '../components/LearningCard'
 import { ScoreboardCard } from '../components/ScoreboardCard'
+import { SuggestionFold } from '../components/Suggestion'
 import { SleepTimingCard } from '../components/SleepTimingCard'
 import type { ApiClient } from '../api/client'
 import type {
@@ -13,6 +14,7 @@ import type {
   Mode,
   Schedule,
   Scoreboard,
+  Suggestion,
   SleepStage,
   SleepTiming,
   Stage,
@@ -115,6 +117,8 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
   const [busy, setBusy] = useState(false)
   const [timing, setTiming] = useState<SleepTiming | null>(null)
   const [board, setBoard] = useState<Scoreboard | null>(null)
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
+  const [deciding, setDeciding] = useState(false)
   const [moving, setMoving] = useState(false)
 
   useEffect(() => {
@@ -131,6 +135,10 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
     void client
       .getScoreboard()
       .then((b) => live && setBoard(b))
+      .catch(() => undefined)
+    void client
+      .getSuggestion()
+      .then((s) => live && setSuggestion(s))
       .catch(() => undefined)
     return () => {
       live = false
@@ -171,6 +179,24 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
 
   const boardCard = board && <ScoreboardCard board={board} />
 
+  const decide = (work: Promise<Suggestion>) => {
+    setDeciding(true)
+    void work
+      .then(setSuggestion)
+      .catch(() => undefined)
+      .finally(() => setDeciding(false))
+  }
+
+  const suggestCard = suggestion && (
+    <SuggestionFold
+      suggestion={suggestion}
+      busy={deciding}
+      onAccept={() => decide(client.acceptSuggestion())}
+      onDecline={() => decide(client.declineSuggestion())}
+      onReach={(reach) => decide(client.setSuggestionReach(reach))}
+    />
+  )
+
   const timingCard = timing && (
     <SleepTimingCard
       timing={timing}
@@ -207,6 +233,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
             until then.
           </p>
         </section>
+        {suggestCard}
         {timingCard}
         {boardCard}
         {learnCard}
@@ -419,6 +446,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
         </section>
       )}
 
+      {suggestCard}
       {timingCard}
       {boardCard}
       {learnCard}

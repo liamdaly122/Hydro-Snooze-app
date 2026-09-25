@@ -559,6 +559,9 @@ export interface ScoreSetting {
   /** What a setting must not make worse, whatever it is scored on. */
   awake_s: number | null
   asleep_after_s: number | null
+  /** The two halves of a Deep or REM score, so a trade between them shows. */
+  deep_s: number | null
+  rem_s: number | null
 }
 
 export interface ScorePart {
@@ -590,6 +593,56 @@ export interface Scoreboard {
   tests: number
   setting_needs: number
   parts: ScorePart[]
+}
+
+/**
+ * Where tonight's suggestion is up to. See Service.suggestion.
+ *
+ *   ready     offered, not yet answered
+ *   accepted  taken for tonight
+ *   declined  not tonight
+ *   undone    taken, then put back to usual
+ *   usual     nothing to change: tonight runs the usual
+ *   by_hand   tonight was already changed by hand
+ *   skipped   tonight is not running
+ *   no_mat    the Sleep Analyzer is not connected
+ *   closed    no night ahead yet: suggestions open in the evening
+ */
+export type SuggestionState =
+  | 'ready'
+  | 'accepted'
+  | 'declined'
+  | 'undone'
+  | 'usual'
+  | 'by_hand'
+  | 'skipped'
+  | 'no_mat'
+  | 'closed'
+
+export interface SuggestionPart {
+  part: 'deep' | 'rem'
+  label: string
+  usual_c: number
+  tonight_c: number
+  low_c: number
+  high_c: number
+  /** The part moved on purpose tonight. */
+  test: boolean
+}
+
+/** Tonight's suggested Deep and REM, from the scoreboard. */
+export interface Suggestion {
+  state: SuggestionState
+  wake_on: string | null
+  parts: SuggestionPart[]
+  test: { part: 'deep' | 'rem'; offset_c: number } | null
+  why: string | null
+  /** Degrees either side of the usual it may go, and the most it can be set to. */
+  reach: number
+  reach_max: number
+  /** About one night in this many is a test. */
+  test_every: number
+  limits: { part: 'deep' | 'rem'; label: string; low_c: number; high_c: number }[]
 }
 
 export interface HealthReport {

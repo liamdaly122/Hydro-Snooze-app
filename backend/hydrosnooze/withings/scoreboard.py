@@ -5,10 +5,14 @@ What each night ran comes from night_runs (trials.py). What the mat measured is
 read fresh from sleep_nights, because Withings goes on changing a night for most
 of the next day. The two meet on the morning.
 
-Each part is scored on the one thing it exists for:
+Deep and REM are scored on deep sleep and REM together, because that is what
+Autopilot is told to push for: a colder Deep that buys ten minutes of deep sleep
+by costing fifteen of REM is not a win, and scoring each part on its own stage
+would call it one. The split is kept beside each setting so the trade can be
+seen. Drift is scored on the one thing it exists for:
 
-    Deep    deep sleep, more is better
-    REM     REM, more is better
+    Deep    deep sleep and REM together, more is better
+    REM     deep sleep and REM together, more is better
     Drift   time to fall asleep, less is better
 
 Wake is not scored. What it is for is how waking up feels, and nothing the mat
@@ -23,9 +27,9 @@ the first months is the honest answer almost every time.
 
 **It says what went with what, not what caused what.** Nights at one setting can
 have been warmer ones in the room, or later ones to bed, so each setting carries
-its median room temperature beside its score. The evening suggestions (not built
-yet) are what make the comparison fair, by moving one part a degree at a time
-and keeping everything else where it was.
+its median room temperature beside its score. The evening suggestions
+(suggest.py) are what make the comparison fair, by moving one part a degree at a
+time and keeping everything else where it was.
 
 Nights that do not count, per part: a part whose setting was not held for most
 of it, or that somebody changed by hand (trials.PartRun.counts), and a night the
@@ -63,14 +67,18 @@ class _Scored:
     part: str
     label: str
     measure: str
-    field: str
+    #: Added together for the score.
+    fields: tuple[str, ...]
     more_is_better: bool
 
 
+#: What Autopilot pushes for: deep sleep and REM, together.
+TOGETHER = ("deepsleepduration", "remsleepduration")
+
 PARTS = (
-    _Scored("deep", "Deep", "Deep sleep", "deepsleepduration", True),
-    _Scored("rem", "REM", "REM sleep", "remsleepduration", True),
-    _Scored("drift", "Drift", "Time to fall asleep", "sleep_latency", False),
+    _Scored("deep", "Deep", "Deep and REM sleep", TOGETHER, True),
+    _Scored("rem", "REM", "Deep and REM sleep", TOGETHER, True),
+    _Scored("drift", "Drift", "Time to fall asleep", ("sleep_latency",), False),
 )
 
 
@@ -100,7 +108,8 @@ def _part(scored: _Scored, paired: list[tuple[NightRun, StoredNight]]) -> dict[s
     by_setting: dict[int, list[tuple[NightRun, StoredNight, float | None, int]]] = {}
     for run, night in paired:
         part = run.part(scored.part)
-        value = _int(night.data.get(scored.field))
+        each = [_int(night.data.get(f)) for f in scored.fields]
+        value = None if any(v is None for v in each) else sum(each)
         if part is None or not part.counts or value is None or part.set_c is None:
             continue
         by_setting.setdefault(part.set_c, []).append((run, night, part.bed_c, value))
@@ -164,6 +173,9 @@ def _setting(
         # The things a setting must not make worse, whatever it is scored on.
         "awake_s": _median(_int(n.data.get("wakeupduration")) for _, n, *_ in rows),
         "asleep_after_s": _median(_int(n.data.get("sleep_latency")) for _, n, *_ in rows),
+        # The two halves of the score, so a trade between them can be seen.
+        "deep_s": _median(_int(n.data.get("deepsleepduration")) for _, n, *_ in rows),
+        "rem_s": _median(_int(n.data.get("remsleepduration")) for _, n, *_ in rows),
     }
 
 

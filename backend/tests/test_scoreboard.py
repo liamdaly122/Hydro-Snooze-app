@@ -93,7 +93,8 @@ def test_one_setting_is_scored_but_compared_with_nothing(db):
     assert deep["verdict"] == "one_setting" and deep["leader_c"] is None
     [only] = deep["settings"]
     assert only["set_c"] == 17 and only["nights"] == 10
-    assert only["mean_s"] == 90 * 60
+    assert only["mean_s"] == (90 + 100) * 60, "deep sleep and REM together"
+    assert (only["deep_s"], only["rem_s"]) == (90 * 60, 100 * 60)
     assert only["room_c"] == 19.0 and only["bed_c"] == 17.5
     assert only["awake_s"] == 20 * 60 and only["asleep_after_s"] == 15 * 60
 
@@ -126,6 +127,18 @@ def test_too_few_nights_at_a_setting_is_not_compared(db):
     deep = part(scoreboard.scoreboard(db, TODAY), "deep")
     assert deep["verdict"] == "not_sure" and deep["leader_c"] is None
     assert [s["nights"] for s in deep["settings"]] == [4, 10]
+
+
+def test_deep_sleep_bought_with_rem_is_not_a_win(db):
+    """What Autopilot pushes for is the two together. 16 gives twenty more
+    minutes of deep sleep and twenty fewer of REM, which is no better at all."""
+    for i, d in enumerate(SWING):
+        night(db, i + 1, {"deep": 17}, {"deep_m": 90 + d, "rem_m": 100})
+        night(db, i + 20, {"deep": 16}, {"deep_m": 110 + d, "rem_m": 80})
+    deep = part(scoreboard.scoreboard(db, TODAY), "deep")
+    assert deep["verdict"] == "not_sure" and deep["gap_s"] == 0
+    split = {s["set_c"]: (s["deep_s"], s["rem_s"]) for s in deep["settings"]}
+    assert split == {16: (110 * 60, 80 * 60), 17: (90 * 60, 100 * 60)}
 
 
 def test_falling_asleep_is_better_shorter(db):

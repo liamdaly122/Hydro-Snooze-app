@@ -26,6 +26,7 @@ import type {
   TonightState,
   Scoreboard,
   SleepTiming,
+  Suggestion,
   WithingsStatus,
 } from '../types'
 
@@ -149,6 +150,14 @@ export class HttpApiClient implements ApiClient {
   forgetSleepTiming = () =>
     request<SleepTiming>('/api/sleep-timing/forget', { method: 'POST' })
   getScoreboard = () => request<Scoreboard>('/api/scoreboard')
+  getSuggestion = () => request<Suggestion>('/api/suggestion')
+  acceptSuggestion = () => request<Suggestion>('/api/suggestion/accept', { method: 'POST' })
+  declineSuggestion = () => request<Suggestion>('/api/suggestion/decline', { method: 'POST' })
+  setSuggestionReach = (reach: number) =>
+    request<Suggestion>('/api/suggestion/reach', {
+      method: 'POST',
+      body: JSON.stringify({ reach }),
+    })
   getWithings = () => request<WithingsStatus>('/api/withings')
   syncWithings = () =>
     request<WithingsStatus & { asked: boolean }>('/api/withings/sync', { method: 'POST' })

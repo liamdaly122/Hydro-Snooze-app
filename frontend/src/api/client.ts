@@ -27,6 +27,7 @@ import type {
   TonightState,
   Scoreboard,
   SleepTiming,
+  Suggestion,
   WithingsStatus,
 } from '../types'
 
@@ -121,6 +122,14 @@ export interface ApiClient {
   forgetSleepTiming(): Promise<SleepTiming>
   /** Each temperature each part has run at, and the sleep on those nights. */
   getScoreboard(): Promise<Scoreboard>
+  /** Tonight's suggested Deep and REM, and where it is up to. */
+  getSuggestion(): Promise<Suggestion>
+  /** Use it for tonight. Changes tonight only; the routine is untouched. */
+  acceptSuggestion(): Promise<Suggestion>
+  /** Not tonight. */
+  declineSuggestion(): Promise<Suggestion>
+  /** How many degrees either side of the usual Deep and REM it may go, 1 to 3. */
+  setSuggestionReach(reach: number): Promise<Suggestion>
   /** Where the Withings connection is up to. */
   getWithings(): Promise<WithingsStatus>
   /** Fetch now. `asked` is false when it was too soon after the last time. */

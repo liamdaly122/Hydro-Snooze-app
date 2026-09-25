@@ -551,9 +551,10 @@ API rather than read. Read that before writing any of it.
       asked for, written every morning by itself and filled in back to when the mat went in
 - [x] Step two, the scoreboard: each setting each part has run at and the sleep on those nights,
       saying not sure yet until a gap is bigger than the swing between ordinary nights
-- [ ] Step two, the evening suggestion: tonight's temperatures from the scoreboard, a degree
-      either side in one part about one night in three, marked as a test.
-      Needs two decisions first: what it pushes for, and the limits it can never leave
+- [x] Step two, the evening suggestion: tonight's Deep and REM from the scoreboard, a degree
+      either side in one part about one night in three, marked as a test. **Pushes for deep sleep
+      and REM together; limits two degrees either side, widenable to three.** Seen against invented
+      nights; the first real test night is the next thing to look at
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

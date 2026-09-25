@@ -32,7 +32,7 @@ from .adapters.probes import (
 )
 from .clock import Clock, RealClock, SimClock, VirtualClock
 from .config import Settings
-from .db import Database
+from .db import Database, Decided
 from .events import Event, EventLog
 from .models import (
     COOLING_RANGE,
@@ -60,11 +60,12 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import autopilot, clocksync, pi, report, trials, watchdog
+from . import autopilot, clocksync, pi, report, suggest, trials, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
 from .withings import health as withings_health
+from .withings import scoreboard
 from .withings.sync import WithingsSync
 
 log = logging.getLogger(__name__)
@@ -1972,6 +1973,15 @@ class Service:
             [m.at for m in marks if m.kind == autopilot.BY_HAND],
             rebuilt=rebuilt,
         )
+        # A test night is one only if the test temperature is what actually ran.
+        # Taken and then put back to usual, or changed again by hand, it was not.
+        decided = self.db.decision_for(run.wake_on)
+        if decided and decided.decision == "accepted" and decided.test_part:
+            tested = run.part(decided.test_part)
+            if tested and tested.set_c == decided.temps.get(decided.test_part):
+                run = replace(
+                    run, test_part=decided.test_part, test_offset_c=decided.test_offset_c
+                )
         self.db.save_night_run(run, self.clock.now())
         return run
 
@@ -1997,6 +2007,190 @@ class Service:
             )
             written += 1
         return written
+
+    # --- The evening suggestion (suggest.py) -----------------------------------
+
+    def _mat_ready(self) -> bool:
+        """Whether tonight will be measured. A test the mat cannot see is a night
+        spent on a different temperature for nothing."""
+        return self.withings.configured and self.db.withings_account() is not None
+
+    def _suggest_limits(self) -> dict[str, suggest.Limit]:
+        """Each part's limits, set around the schedule the first time they are
+        needed and left there after, so they never follow the schedule about."""
+        held = self.db.suggest_limits()
+        out = {}
+        for part in suggest.PARTS:
+            if part not in held:
+                usual = self.schedule.stage(Stage(part))
+                if usual is None:
+                    continue
+                held[part] = (usual.temp_c, suggest.REACH_DEFAULT)
+                self.db.set_suggest_limit(part, *held[part])
+            out[part] = suggest.Limit(*held[part])
+        return out
+
+    def suggestion(self) -> dict[str, Any]:
+        """Tonight's suggestion, and where it is up to.
+
+            ready     offered, not yet answered
+            accepted  taken for tonight
+            declined  not tonight
+            undone    taken, then put back to usual
+            usual     nothing to change: tonight runs the usual
+            by_hand   tonight was already changed by hand, so it stays out of it
+            skipped   tonight is not running
+            no_mat    the Sleep Analyzer is not connected, so nothing would be learned
+            closed    no night ahead yet: suggestions open in the evening
+        """
+        limits = self._suggest_limits()
+        usual = {
+            part: self.schedule.stage(Stage(part)).temp_c
+            for part in suggest.PARTS
+            if self.schedule.stage(Stage(part)) is not None
+        }
+        out: dict[str, Any] = {
+            "state": "closed",
+            "wake_on": None,
+            "parts": [],
+            "test": None,
+            "why": None,
+            "reach": max((lim.reach for lim in limits.values()), default=suggest.REACH_DEFAULT),
+            "reach_max": suggest.REACH_MAX,
+            "test_every": suggest.TEST_EVERY,
+            "limits": [
+                {"part": part, "label": suggest.LABEL[part], "low_c": lim.low_c, "high_c": lim.high_c}
+                for part, lim in limits.items()
+            ],
+        }
+        wake_on = self._tonight_date()
+        phase = self.tonight_phase()
+        if wake_on is None or phase in ("none", "after") or set(usual) != set(suggest.PARTS):
+            return out
+        out["wake_on"] = wake_on.isoformat()
+
+        decided = self.db.decision_for(wake_on.isoformat())
+        tonight = self.tonight_state()
+        if decided is not None:
+            running = {s.stage.value: s.temp_c for s in self.tonight_now().stages}
+            took = decided.decision == "accepted"
+            state = decided.decision
+            if took and any(running.get(k) != v for k, v in decided.temps.items()):
+                state = "undone"
+            out.update(
+                state=state,
+                parts=self._suggestion_parts(usual, decided.temps, limits, decided.test_part),
+                test=None if not decided.test_part
+                else {"part": decided.test_part, "offset_c": decided.test_offset_c},
+            )
+            return out
+        if phase != "evening":
+            return out
+        if not self._mat_ready():
+            out["state"] = "no_mat"
+            return out
+        if tonight is not None and tonight.skip:
+            out["state"] = "skipped"
+            return out
+        if tonight is not None and tonight.stages is not None:
+            out["state"] = "by_hand"
+            return out
+
+        low, high = COOLING_RANGE[0], min(WARMING_RANGE[1], self.settings.max_temperature_c)
+        choice = suggest.choose(
+            scoreboard.scoreboard(self.db, self.clock.now().date()),
+            usual,
+            limits,
+            wake_on.isoformat(),
+            lowest=low,
+            highest=high,
+        )
+        out.update(
+            state="ready" if choice.changes_anything else "usual",
+            parts=self._suggestion_parts(usual, choice.tonight, limits, choice.test_part),
+            test=None if choice.test_part is None
+            else {"part": choice.test_part, "offset_c": choice.test_offset_c},
+            why=choice.why,
+        )
+        return out
+
+    @staticmethod
+    def _suggestion_parts(usual, tonight, limits, test_part) -> list[dict[str, Any]]:
+        return [
+            {
+                "part": part,
+                "label": suggest.LABEL[part],
+                "usual_c": usual[part],
+                "tonight_c": tonight.get(part, usual[part]),
+                "low_c": limits[part].low_c,
+                "high_c": limits[part].high_c,
+                "test": part == test_part,
+            }
+            for part in suggest.PARTS
+            if part in usual and part in limits
+        ]
+
+    async def accept_suggestion(self) -> dict[str, Any]:
+        """Use tonight's suggestion for tonight. The routine is untouched."""
+        offered = self.suggestion()
+        if offered["state"] != "ready":
+            raise CommandFailed("There is no suggestion to take for tonight.")
+        temps = {p["part"]: p["tonight_c"] for p in offered["parts"]}
+        stages = tuple(
+            replace(s, temp_c=temps[s.stage.value]) if s.stage.value in temps else replace(s)
+            for s in self.tonight_now().stages
+        )
+        self._change_tonight(stages=stages)
+        test = offered["test"]
+        self.db.save_decision(
+            Decided(
+                wake_on=offered["wake_on"],
+                decision="accepted",
+                temps=temps,
+                test_part=test["part"] if test else None,
+                test_offset_c=test["offset_c"] if test else None,
+            ),
+            self.clock.now(),
+        )
+        said = ", ".join(
+            f"{p['label']} {p['tonight_c']}C{' (a test)' if p['test'] else ''}"
+            for p in offered["parts"]
+        )
+        self.events.info(
+            TONIGHT_KIND,
+            f"Using Autopilot's suggestion tonight: {said}. Your usual is untouched.",
+        )
+        self._followed_at = None
+        await self._follow_the_plan(loud=True)
+        return self.suggestion()
+
+    def decline_suggestion(self) -> dict[str, Any]:
+        """Not tonight. Tonight runs as it was going to."""
+        offered = self.suggestion()
+        if offered["state"] != "ready":
+            raise CommandFailed("There is no suggestion to turn down for tonight.")
+        self.db.save_decision(
+            Decided(offered["wake_on"], "declined", {}, None, None), self.clock.now()
+        )
+        self.events.info(TONIGHT_KIND, "Not using Autopilot's suggestion tonight.")
+        return self.suggestion()
+
+    def set_suggestion_reach(self, reach: int) -> dict[str, Any]:
+        """How far the suggestions may go, set around the schedule as it is now."""
+        if not 1 <= reach <= suggest.REACH_MAX:
+            raise CommandFailed(
+                f"Suggestions can go 1 to {suggest.REACH_MAX} degrees either side, not {reach}."
+            )
+        for part in suggest.PARTS:
+            usual = self.schedule.stage(Stage(part))
+            if usual is not None:
+                self.db.set_suggest_limit(part, usual.temp_c, reach)
+        self.events.info(
+            TONIGHT_KIND,
+            f"Autopilot's suggestions can now go {reach} degree{'s' if reach != 1 else ''} "
+            "either side of your usual Deep and REM.",
+        )
+        return self.suggestion()
 
     def _record_missing_quietly(self) -> None:
         try:

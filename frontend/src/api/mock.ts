@@ -32,6 +32,7 @@ import type {
   Scoreboard,
   SleepStage,
   SleepTiming,
+  Suggestion,
   Stage,
   TonightPhase,
   TonightState,
@@ -581,6 +582,90 @@ export class MockApiClient implements ApiClient {
   }
 
   private timingSince: string | null = null
+
+  /**
+   * Tonight's suggestion, for the seed site. Always evening here, whatever the
+   * clock says, so the card can be seen at any hour: Deep a degree cooler than
+   * usual as a test, REM as usual. Taking it goes through setStageTonight, the
+   * same tonight-only change the service makes, so Tonight only and Back to
+   * usual behave as they do on the Pi.
+   */
+  private suggested = {
+    decision: null as 'accepted' | 'declined' | null,
+    reach: 2,
+    centre: null as { deep: number; rem: number } | null,
+  }
+
+  private suggestionJson(): Suggestion {
+    const usualOf = (part: 'deep' | 'rem') =>
+      this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
+    const usual = { deep: usualOf('deep'), rem: usualOf('rem') }
+    this.suggested.centre ??= { ...usual }
+    const { reach, centre } = this.suggested
+    const low = (part: 'deep' | 'rem') => centre![part] - reach
+    const high = (part: 'deep' | 'rem') => centre![part] + reach
+    const deep = usual.deep - 1 >= low('deep') ? usual.deep - 1 : usual.deep + 1
+    const tonight = { deep, rem: usual.rem }
+    const running = this.tonightJson().running.stages
+    const undone =
+      this.suggested.decision === 'accepted' &&
+      running.find((st) => st.stage === 'deep')?.temp_c !== tonight.deep
+    return {
+      state: undone ? 'undone' : (this.suggested.decision ?? 'ready'),
+      wake_on: isoDay(new Date(Date.now() + 86_400_000)),
+      parts: (['deep', 'rem'] as const).map((part) => ({
+        part,
+        label: part === 'deep' ? 'Deep' : 'REM',
+        usual_c: usual[part],
+        tonight_c: tonight[part],
+        low_c: low(part),
+        high_c: high(part),
+        test: part === 'deep',
+      })),
+      test: { part: 'deep', offset_c: deep - usual.deep },
+      why: `A test night: Deep a degree ${deep < usual.deep ? 'cooler' : 'warmer'} than the best so far, to see what it does to your deep sleep and REM.`,
+      reach,
+      reach_max: 3,
+      test_every: 3,
+      limits: (['deep', 'rem'] as const).map((part) => ({
+        part,
+        label: part === 'deep' ? 'Deep' : 'REM',
+        low_c: low(part),
+        high_c: high(part),
+      })),
+    }
+  }
+
+  async getSuggestion(): Promise<Suggestion> {
+    await sleep(100)
+    return this.suggestionJson()
+  }
+
+  async acceptSuggestion(): Promise<Suggestion> {
+    const offered = this.suggestionJson()
+    if (offered.state !== 'ready') throw new ApiError('There is no suggestion to take for tonight.')
+    for (const p of offered.parts) {
+      if (p.tonight_c !== p.usual_c) await this.setStageTonight(p.part, p.tonight_c)
+    }
+    this.suggested.decision = 'accepted'
+    return this.suggestionJson()
+  }
+
+  async declineSuggestion(): Promise<Suggestion> {
+    await sleep(100)
+    this.suggested.decision = 'declined'
+    return this.suggestionJson()
+  }
+
+  async setSuggestionReach(reach: number): Promise<Suggestion> {
+    await sleep(100)
+    if (reach < 1 || reach > 3) throw new ApiError('Suggestions can go 1 to 3 degrees either side.')
+    const usualOf = (part: 'deep' | 'rem') =>
+      this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
+    this.suggested.reach = reach
+    this.suggested.centre = { deep: usualOf('deep'), rem: usualOf('rem') }
+    return this.suggestionJson()
+  }
 
   /** From the seed's nights and what each ran, through the real scoreboard.py. */
   async getScoreboard(): Promise<Scoreboard> {
