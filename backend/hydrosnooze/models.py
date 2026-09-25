@@ -248,6 +248,14 @@ QUIET_ARRIVED_C = 0.5
 #: other and could not be told apart, which was the real cost.
 QUIET_KIND = "quiet"
 
+#: The event kind the night-time trim is logged under (hold.py).
+#:
+#: A drift response like a mode correction, and the Autopilot screen counts it
+#: as one. Its own kind for the same reason QUIET_KIND is not "mode": the trim
+#: shipped under QUIET_KIND, and the morning report counted every trim, every
+#: failed one and every change of Hold level as a swap to keep the bed quiet.
+TRIM_KIND = "trim"
+
 #: And how far it has to fall back before warming is worth the noise again.
 #:
 #: Wider than the arrival margin on purpose, and the gap between the two is the

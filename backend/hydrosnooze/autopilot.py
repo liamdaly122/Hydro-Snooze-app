@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 
 from .db import PreconditionRow, Sample
 from .events import Event
-from .models import QUIET_KIND, NightPlan, StageStep
+from .models import QUIET_KIND, TRIM_KIND, NightPlan, StageStep
 from .report import FALLBACK_SAMPLE_S, kwh
 
 if TYPE_CHECKING:
@@ -73,6 +73,11 @@ REASONS = {
     AMBIENT_KIND: "Getting the bed ready",
     RESPONSE_KIND: "Drift response",
 }
+
+#: Logged under a kind of their own and counted as one of the above. The trim
+#: moves the bed mid-part because it drifted, which is a drift response, but it
+#: is not a swap of mode and the morning report must not count it as one.
+COUNTED_AS = {TRIM_KIND: RESPONSE_KIND}
 
 #: Nobody-asked-for-it, i.e. somebody did. See _marks.
 BY_HAND = "manual"
@@ -290,7 +295,11 @@ def _marks(plan: NightPlan, events: list[Event], track: list[Point]) -> list[Mar
 
     Whatever is left was nobody's plan, so it was somebody's hand.
     """
-    reasons = [(e.at, e.kind) for e in events if e.level == "info" and e.kind in REASONS]
+    reasons = [
+        (e.at, COUNTED_AS.get(e.kind, e.kind))
+        for e in events
+        if e.level == "info" and COUNTED_AS.get(e.kind, e.kind) in REASONS
+    ]
     commands = [e for e in events if e.level == "info" and e.kind in ADJUST_KINDS]
 
     claimed: dict[int, str] = {}
