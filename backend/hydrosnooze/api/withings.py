@@ -10,6 +10,7 @@ does is reachable from here, and nothing here can reach the bed.
     DELETE /api/withings            disconnect, keeping the nights
     GET    /api/health-report       one night, as the Health Report draws it
     GET    /api/sleep-timing        when I really sleep, against the schedule's parts
+    POST   /api/sleep-timing/forget start counting nights again
 """
 
 from __future__ import annotations
@@ -117,3 +118,23 @@ async def get_sleep_timing(request: Request) -> dict[str, object]:
     """
     service = _service(request)
     return timing.timing(service.db, service.schedule, service.clock.now().date())
+
+
+@router.post("/sleep-timing/forget")
+async def forget_sleep_timing(request: Request) -> dict[str, object]:
+    """Start again, for a routine that has changed.
+
+    The nights are kept. They stop counting towards the Sleep timing card, the
+    same way Start again on the Learning card sets nights aside without deleting
+    a record of a night that happened.
+    """
+    service = _service(request)
+    today = service.clock.now().date()
+    set_aside = timing.timing(service.db, service.schedule, today)["nights"]
+    timing.start_again(service.db, today)
+    service.events.info(
+        "sleep_timing",
+        f"Sleep timing starting again: {set_aside} "
+        f"{'night' if set_aside == 1 else 'nights'} set aside. The nights themselves are kept.",
+    )
+    return timing.timing(service.db, service.schedule, today)

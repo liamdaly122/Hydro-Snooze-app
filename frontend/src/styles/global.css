@@ -3154,3 +3154,173 @@ a.pill {
   width: 100%;
   margin: 12px 0 8px;
 }
+
+/* --- The "i" beside a card's title, and the sheet it opens ------------------- */
+
+.info-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -6px -6px -6px 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.info-btn:active {
+  background: var(--control);
+}
+
+/* Over the bottom bar and the drawer: it is the thing being read. */
+.info-scrim {
+  z-index: 40;
+  animation: drawer-fade 0.2s var(--ease);
+}
+
+.info-sheet {
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+}
+
+.info-sheet__body p {
+  margin: 0 0 12px;
+}
+
+.info-sheet__body p:last-child {
+  margin-bottom: 0;
+}
+
+/* At the end of the date line: the sparkle has the top corner. */
+.ap-hero__dateline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ap-hero__dateline .info-btn {
+  color: rgb(255 255 255 / 0.75);
+}
+
+/* --- Cards that fold ---------------------------------------------------------- */
+
+.fold__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fold__heading {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+
+.fold__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.fold__titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fold__summary {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-mid);
+}
+
+.fold__summary--ready {
+  color: #7dffa0;
+}
+
+.fold__chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 0.2s var(--ease);
+}
+
+.fold--open .fold__chevron {
+  transform: rotate(-90deg);
+}
+
+.fold__body {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+/* --- Nights counted, as a bar -------------------------------------------------- */
+
+.nights {
+  margin-top: 14px;
+}
+
+.nights__bar {
+  position: relative;
+}
+
+.nights__mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.35);
+}
+
+.nights__mark--passed {
+  background: var(--card);
+}
+
+.nights__caption {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* --- Inside the folds ----------------------------------------------------------- */
+
+.learn-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.learn-switch__label {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.timing__again {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+
+.timing__again-note {
+  font-size: 12px;
+  color: var(--text-faint);
+}

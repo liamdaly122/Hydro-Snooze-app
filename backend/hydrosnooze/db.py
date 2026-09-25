@@ -271,9 +271,13 @@ CREATE TABLE IF NOT EXISTS holiday (
 -- the pre-heat goes back to estimating and nothing corrects the temperature. It
 -- exists because the correction is the one learned thing that changes what the
 -- bed actually does, and a way out of that should not require SSH.
+--
+-- `timing_since` is the Sleep timing card's Start again: the last morning that
+-- no longer counts, or NULL for every night. The nights before it are kept.
 CREATE TABLE IF NOT EXISTS preferences (
-    id          INTEGER PRIMARY KEY CHECK (id = 1),
-    learning_on INTEGER NOT NULL DEFAULT 1
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    learning_on  INTEGER NOT NULL DEFAULT 1,
+    timing_since TEXT
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -485,6 +489,12 @@ class Database:
         night = {r["name"] for r in self._db.execute("PRAGMA table_info(tonight)")}
         if "cooling_speed" not in night:
             self._db.execute("ALTER TABLE tonight ADD COLUMN cooling_speed TEXT")
+
+        # The Sleep timing card's Start again. NULL is "count every night", which
+        # is what a database from before the button meant.
+        prefs = {r["name"] for r in self._db.execute("PRAGMA table_info(preferences)")}
+        if "timing_since" not in prefs:
+            self._db.execute("ALTER TABLE preferences ADD COLUMN timing_since TEXT")
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
@@ -1152,6 +1162,19 @@ class Database:
     def learning_on(self) -> bool:
         row = self._db.execute("SELECT learning_on FROM preferences WHERE id = 1").fetchone()
         return True if row is None else bool(row["learning_on"])
+
+    def timing_since(self) -> str | None:
+        """The last morning the Sleep timing card no longer counts, if it was reset."""
+        row = self._db.execute("SELECT timing_since FROM preferences WHERE id = 1").fetchone()
+        return None if row is None else row["timing_since"]
+
+    def set_timing_since(self, wake_on: str | None) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, timing_since) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET timing_since = excluded.timing_since",
+            (wake_on,),
+        )
+        self._db.commit()
 
     def set_learning_on(self, on: bool) -> None:
         self._db.execute(

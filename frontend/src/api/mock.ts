@@ -527,6 +527,10 @@ export class MockApiClient implements ApiClient {
   async getSleepTiming(): Promise<SleepTiming> {
     const seed = (await this.health()).timing
     await sleep(120)
+    // Started again: nothing new has been slept since, on the seed site.
+    if (this.timingSince !== null) {
+      return { ...seed, nights: 0, since: this.timingSince, profile: null, boundaries: [] }
+    }
     const step = MIN_STAGE_MINUTES
     let cursor = 0
     const parts = this.schedule.stages.map((s) => {
@@ -573,6 +577,13 @@ export class MockApiClient implements ApiClient {
         }
       }),
     }
+  }
+
+  private timingSince: string | null = null
+
+  async forgetSleepTiming(): Promise<SleepTiming> {
+    this.timingSince = isoDay(new Date())
+    return this.getSleepTiming()
   }
 
   async getWithings(): Promise<WithingsStatus> {

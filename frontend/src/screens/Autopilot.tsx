@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AdjustmentsChart, KIND_COLOUR } from '../components/AdjustmentsChart'
 import { Moon, Sparkle } from '../components/Icons'
+import { InfoButton } from '../components/InfoButton'
 import { LearningCard } from '../components/LearningCard'
 import { SleepTimingCard } from '../components/SleepTimingCard'
 import type { ApiClient } from '../api/client'
@@ -152,8 +153,22 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       .finally(() => setMoving(false))
   }
 
+  const startTimingAgain = () => {
+    setMoving(true)
+    void client
+      .forgetSleepTiming()
+      .then(setTiming)
+      .catch(() => undefined)
+      .finally(() => setMoving(false))
+  }
+
   const timingCard = timing && (
-    <SleepTimingCard timing={timing} onUse={takeTimes} busy={moving} />
+    <SleepTimingCard
+      timing={timing}
+      onUse={takeTimes}
+      onStartAgain={startTimingAgain}
+      busy={moving}
+    />
   )
 
   const change = (next: Promise<Learning>) => {
@@ -198,7 +213,22 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
         <Sparkle size={44} className="ap-hero__mark" glow />
         <p className="ap-hero__count">{night.adjustments}</p>
         <h2 className="ap-hero__title">Autopilot adjustments</h2>
-        <p className="ap-hero__date">{nightLabel(night.starts_at, night.wake_at)}</p>
+        <div className="ap-hero__dateline">
+          <p className="ap-hero__date">{nightLabel(night.starts_at, night.wake_at)}</p>
+          <InfoButton title="Last night">
+            <p>
+              Autopilot adjustments counts every time the service sent the unit a new temperature
+              or a new mode during the night, from what it actually sent.
+            </p>
+            {night.sleep.length > 0 && (
+              <p>
+                {night.sleep.some((s) => s.usual_seconds === null)
+                  ? 'Deep sleep, REM and time to fall asleep are measured by the Sleep Analyzer. The change against your usual appears once there are three nights before this one.'
+                  : `Deep sleep, REM and time to fall asleep are measured by the Sleep Analyzer, against your usual: the middle of your last ${night.sleep[0]!.nights} nights. They say what changed, not what changed it.`}
+              </p>
+            )}
+          </InfoButton>
+        </div>
 
         {night.sleep.length > 0 && (
           <div className="ap-sleep">
@@ -217,18 +247,35 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
         )}
       </section>
 
-      {night.sleep.length > 0 && (
-        <p className="footnote">
-          {night.sleep.some((s) => s.usual_seconds === null)
-            ? 'Measured by the Sleep Analyzer. The change against your usual appears once there are three nights before this one.'
-            : `Measured by the Sleep Analyzer, against your usual: the middle of your last ${night.sleep[0]!.nights} nights. It says what changed, not what changed it.`}
-        </p>
-      )}
-
       {/* --- What it actually did ------------------------------------------- */}
       <section className="card">
         <header className="card__head">
           <h2 className="card__label">Temperature</h2>
+          <InfoButton title="Temperature">
+            <p>
+              On target is how much of the night, after lights out, the bed was within half a
+              degree of what it was asked for. The chart is a picture of it: the dashed line is
+              what was asked for, the solid one the bed.
+            </p>
+            <p>
+              Each dot is one adjustment, coloured by why it happened. Phase and mode change is the
+              night moving on to its next part. Getting the bed ready is switching on before
+              bedtime. Drift response is a correction partway through a part, because the bed
+              drifted. Set by hand is you.
+            </p>
+            <p>
+              Rebuilt from what was recorded while the night happened, so it says what the service
+              did rather than what it meant to do.
+            </p>
+            {!night.from_record && (
+              <p>
+                This night was recorded before the app started writing down what it was asking
+                for, so the dashed line and the percentage are worked out backwards from your
+                schedule. Editing your routine moves them. Nights from then on carry their own
+                record.
+              </p>
+            )}
+          </InfoButton>
         </header>
 
         <div className="ap-split">
@@ -269,12 +316,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
         <AdjustmentsChart track={night.track} marks={night.marks} bands={night.bands} />
 
         {!night.from_record && (
-          <p className="ap-note">
-            This night was recorded before the app started writing down what it was asking for,
-            so the dashed line and the percentage are worked out backwards from your schedule
-            rather than from what actually happened. Editing your routine moves them. Nights from
-            here on carry their own record.
-          </p>
+          <p className="ap-note">Worked out from your schedule, not recorded on the night.</p>
         )}
 
         <div className="ap-key">
@@ -366,11 +408,6 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
           </ul>
         </section>
       )}
-
-      <p className="footnote">
-        Rebuilt from what was recorded while the night happened, so it says what the service did
-        rather than what it meant to do.
-      </p>
 
       {timingCard}
       {learnCard}

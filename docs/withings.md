@@ -446,6 +446,7 @@ Everything lives in `backend/hydrosnooze/withings/`, with its routes in
 | `DELETE /api/withings` | Disconnect. The nights stay |
 | `GET /api/health-report?date=` | One night as the Health Report draws it, and its week |
 | `GET /api/sleep-timing` | When I really sleep, against the schedule's parts |
+| `POST /api/sleep-timing/forget` | Start again: the nights so far stop counting, and are kept |
 
 **The rule that outranks the rest holds in code, with a test for each half.** The
 loop is its own task and never takes the command lock: a test holds the lock and
@@ -540,8 +541,15 @@ fifteen-minute steps, so the same buttons walk it back. REM's end and the Wake
 part are never touched: when to start warming for the morning is a question about
 the alarm, not about sleep stages.
 
-The card is on the Autopilot screen. **Use suggested times** moves where Drift and
-Deep end and nothing else: the temperatures stay as they are.
+The card is on the Autopilot screen, folded to one line ("Suggestions after 14
+nights", "2 suggestions ready") with a bar counting the nights until it has
+something to say. **Use suggested times** moves where Drift and Deep end and
+nothing else: the temperatures stay as they are.
+
+**Start again** is for a routine that has changed: a new job, a move. It stores
+this morning as the last one set aside (`preferences.timing_since`), and the count
+starts again from the next night. Nothing is deleted, the same rule as Start
+again on the Learning card, and it says so in the event log.
 
 Steps two and three, not built: a suggested night of temperatures each evening,
 then Full Autopilot running it by itself inside limits I set. Both need a

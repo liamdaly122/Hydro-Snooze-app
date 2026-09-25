@@ -142,6 +142,14 @@ def test_sleep_timing_answers_before_there_is_any_sleep(client, service):
     assert [p["part"] for p in built["parts"]] == ["drift", "deep", "rem", "wake"]
 
 
+def test_starting_sleep_timing_again_says_so_in_the_log(client, service):
+    built = client.post("/api/sleep-timing/forget").json()
+    assert built["since"] == service.clock.now().date().isoformat()
+    assert client.get("/api/sleep-timing").json()["since"] == built["since"]
+    said = [e.message for e in service.events.recent() if e.kind == "sleep_timing"]
+    assert said and "starting again" in said[0]
+
+
 def test_disconnecting_keeps_the_sleep(client):
     connect(client)
     client.post("/api/withings/sync")

@@ -284,3 +284,48 @@ def test_the_lights_out_is_the_schedules_on_the_night_the_clocks_go_back(db):
     history(db, 3, last=date(2026, 10, 25))
     built = timing.timing(db, every_day(), date(2026, 10, 25))
     assert boundary(built, "drift")["measured"]["median_min"] == ASLEEP_MIN
+
+
+# --- Starting again ----------------------------------------------------------------------
+
+
+def test_start_again_sets_the_nights_so_far_aside_and_keeps_them(db):
+    history(db, 14)
+    assert timing.timing(db, every_day(), LAST)["nights"] == 14
+    timing.start_again(db, LAST)
+    built = timing.timing(db, every_day(), LAST)
+    assert built["nights"] == 0 and built["since"] == LAST.isoformat()
+    assert built["profile"] is None and built["boundaries"] == []
+    assert len(db.sleep_nights()) == 14  # kept
+
+    # The next morning's night is the first that counts.
+    db.save_sleep_night(night_of(LAST + timedelta(days=1), TYPICAL))
+    assert timing.timing(db, every_day(), LAST + timedelta(days=1))["nights"] == 1
+
+
+def test_counting_every_night_until_started_again(db):
+    history(db, 3)
+    assert timing.timing(db, every_day(), LAST)["since"] is None
+
+
+def test_a_database_from_before_start_again_gains_it(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE preferences (id INTEGER PRIMARY KEY CHECK (id = 1), "
+        "learning_on INTEGER NOT NULL DEFAULT 1)"
+    )
+    old.execute("INSERT INTO preferences (id, learning_on) VALUES (1, 0)")
+    old.commit()
+    old.close()
+
+    database = Database(path)
+    try:
+        assert database.timing_since() is None
+        database.set_timing_since("2026-09-25")
+        assert database.timing_since() == "2026-09-25"
+        assert database.learning_on() is False  # untouched
+    finally:
+        database.close()

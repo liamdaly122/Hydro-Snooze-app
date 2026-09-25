@@ -21,6 +21,17 @@ export function ChevronRight({ size = 16, className }: IconProps) {
   )
 }
 
+/** Beside a card's title: what the card means, in a sheet. */
+export function InfoIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" {...stroke} strokeWidth={1.6} />
+      <path d="M12 11v5.5" {...stroke} strokeWidth={1.8} />
+      <circle cx="12" cy="7.8" r="1.1" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function Minus({ size = 22 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

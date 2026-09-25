@@ -145,6 +145,8 @@ export class HttpApiClient implements ApiClient {
   getHealthReport = (date?: string) =>
     request<HealthReport>(`/api/health-report${date ? `?date=${date}` : ''}`)
   getSleepTiming = () => request<SleepTiming>('/api/sleep-timing')
+  forgetSleepTiming = () =>
+    request<SleepTiming>('/api/sleep-timing/forget', { method: 'POST' })
   getWithings = () => request<WithingsStatus>('/api/withings')
   syncWithings = () =>
     request<WithingsStatus & { asked: boolean }>('/api/withings/sync', { method: 'POST' })

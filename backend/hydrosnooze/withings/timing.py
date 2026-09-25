@@ -15,7 +15,9 @@ the Deep part started before I was asleep, and that belongs in the answer.
 
 Only nights ending on a morning the schedule runs, because the others are a
 different routine, and only the last TIMING_NIGHTS of those within TIMING_DAYS,
-because a routine moves with the seasons. Nights under MIN_ASLEEP_S are left out:
+because a routine moves with the seasons. And only nights after a Start again,
+which is for a routine that has changed: a new job, a new baby, a move. The
+nights before it are kept; they stop counting here. Nights under MIN_ASLEEP_S are left out:
 a nap says nothing about where deep sleep falls in a night.
 
 The night the clocks go back is measured in real minutes from lights out, while
@@ -83,13 +85,15 @@ def timing(db: Database, schedule: Schedule, today: date) -> dict[str, Any]:
     night_minutes = schedule.night_minutes
     width = max(1, math.ceil(night_minutes / BIN_MIN))
 
+    since = db.timing_since()
     nights = [
         _measure(db, n, schedule, width)
-        for n in _recent(db, schedule, today)
+        for n in _recent(db, schedule, today, since)
     ]
 
     out: dict[str, Any] = {
         "nights": len(nights),
+        "since": since,
         "shows_at": TIMING_SHOWS,
         "suggests_at": TIMING_NEEDS,
         "lights_out": schedule.bed_time.strftime("%H:%M"),
@@ -149,19 +153,27 @@ def timing(db: Database, schedule: Schedule, today: date) -> dict[str, Any]:
 # --- Which nights ------------------------------------------------------------------
 
 
-def _recent(db: Database, schedule: Schedule, today: date) -> list[StoredNight]:
+def _recent(
+    db: Database, schedule: Schedule, today: date, since: str | None = None
+) -> list[StoredNight]:
     """The nights worth measuring, oldest first, one per morning."""
     days = set(schedule.days_of_week)
+    first = (today - timedelta(days=TIMING_DAYS)).isoformat()
+    if since is not None:
+        first = max(first, (date.fromisoformat(since) + timedelta(days=1)).isoformat())
     held: dict[str, StoredNight] = {}
-    for n in db.sleep_nights(
-        (today - timedelta(days=TIMING_DAYS)).isoformat(), today.isoformat()
-    ):
+    for n in db.sleep_nights(first, today.isoformat()):
         if days and date.fromisoformat(n.wake_on).weekday() not in days:
             continue
         if n.wake_on not in held or _length(n) > _length(held[n.wake_on]):
             held[n.wake_on] = n
     kept = [n for n in held.values() if _asleep_s(db, n) >= MIN_ASLEEP_S]
     return sorted(kept, key=lambda n: n.start_at)[-TIMING_NIGHTS:]
+
+
+def start_again(db: Database, today: date) -> None:
+    """Stop the nights so far counting. This morning's is the last one set aside."""
+    db.set_timing_since(today.isoformat())
 
 
 def _length(n: StoredNight) -> int:

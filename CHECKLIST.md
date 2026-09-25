@@ -544,6 +544,9 @@ API rather than read. Read that before writing any of it.
       mostly done, against where Drift and Deep end, with a tap to move them.
       **Built, and seen at phone size against invented nights.** It needs fourteen real nights on
       schedule mornings before it suggests anything
+- [x] Tidy the Autopilot screen. The footnotes went behind an "i" on each card, which opens them
+      in a sheet, and Sleep timing and Learning fold down to one line each. Sleep timing counts
+      its nights with a bar and has its own Start again
 - [ ] Step two: a suggested night of temperatures each evening, tested one degree at a time.
       Needs two decisions first: what it pushes for, and the limits it can never leave
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits

@@ -530,6 +530,8 @@ export interface TimingBoundary {
  */
 export interface SleepTiming {
   nights: number
+  /** The last morning set aside by Start again, or null when every night counts. */
+  since: string | null
   shows_at: number
   suggests_at: number
   lights_out: string

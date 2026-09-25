@@ -1,13 +1,18 @@
+import { useState } from 'react'
 import type { SleepTiming, TimingBoundary } from '../types'
+import { Fold } from './Fold'
 import { hourLabel, STAGE_COLOUR, wholeHours } from './Hypnogram'
+import { InfoButton } from './InfoButton'
+import { NightsProgress } from './NightsProgress'
 
 /**
  * When I really sleep, against the parts of the night the bed runs.
  *
- * The chart is the recent nights laid over each other from the schedule's
- * lights out: how often I was in deep sleep, and in REM, at each point of the
- * night. Under it, the schedule's own parts, so the Deep part can be read
- * against the deep sleep directly above it.
+ * Folded, it is one line saying where it is up to, with a bar counting the
+ * nights until it has something to suggest. Open, the chart is the recent
+ * nights laid over each other from the schedule's lights out: how often I was in
+ * deep sleep, and in REM, at each point of the night, with the schedule's own
+ * parts underneath so the Deep part can be read against the deep sleep above it.
  *
  * It suggests and never changes anything by itself. The button moves where
  * Drift and Deep end, in the Schedule screen's own steps, and the Schedule
@@ -22,6 +27,8 @@ const WIDTH = 1000
 const HEIGHT = 120
 const TOP = 6
 
+type Ends = Partial<Record<TimingBoundary['part'], number>>
+
 /** Minutes from lights out as a clock time, wrapping midnight. */
 function clock(lightsOut: string, offset: number): string {
   const [h, m] = lightsOut.split(':').map(Number)
@@ -34,6 +41,10 @@ function duration(minutes: number): string {
   const h = Math.floor(m / 60)
   if (h === 0) return `${m}m`
   return m % 60 === 0 ? `${h}h` : `${h}h ${m % 60}m`
+}
+
+function dayMonth(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
 /** What the measured time is, for each boundary. */
@@ -58,53 +69,207 @@ function verdict(b: TimingBoundary, t: SleepTiming): string | null {
   return `${b.label} ends at ${now}. Ending it at ${clock(t.lights_out, b.suggest_min)} ${WHY[b.part]}.`
 }
 
+/** The one line beside the title, folded or open. */
+function summary(t: SleepTiming): { text: string; ready: boolean } {
+  if (t.nights < t.shows_at || t.profile === null) {
+    return { text: `Chart after ${t.shows_at} nights`, ready: false }
+  }
+  if (t.nights < t.suggests_at) return { text: `Suggestions after ${t.suggests_at} nights`, ready: false }
+  const ready = t.boundaries.filter((b) => b.suggest_min !== null).length
+  if (ready > 0) return { text: `${ready} suggestion${ready === 1 ? '' : 's'} ready`, ready: true }
+  if (t.boundaries.some((b) => b.steady === false)) {
+    return { text: 'Nights vary too much to suggest', ready: false }
+  }
+  return { text: 'Your parts fit your sleep', ready: false }
+}
+
 export function SleepTimingCard({
   timing,
   onUse,
+  onStartAgain,
   busy = false,
 }: {
   timing: SleepTiming
   /** Move the boundaries to where the service suggests. */
-  onUse: (ends: Partial<Record<TimingBoundary['part'], number>>) => void
+  onUse: (ends: Ends) => void
+  /** Set the nights so far aside and count again. */
+  onStartAgain: () => void
   busy?: boolean
 }) {
+  const [confirming, setConfirming] = useState(false)
   const t = timing
-  const left = t.shows_at - t.nights
   // A schedule with no parts has nothing to set the sleep against.
   if (t.parts.length === 0) return null
 
-  if (t.profile === null || left > 0) {
-    return (
-      <section className="card">
-        <header className="card__head">
-          <h2 className="card__label">Sleep timing</h2>
-        </header>
-        <p className="learn-lead">
-          <b>
-            {Math.max(1, left)} more night{Math.max(1, left) === 1 ? '' : 's'}
-          </b>{' '}
-          on the mat before there is a pattern to show.
-        </p>
-        <p className="footnote">
-          This will show when your deep sleep and REM really happen, against the parts of your
-          night, and suggest moving where Drift and Deep end once {t.suggests_at} nights agree.
-        </p>
-      </section>
-    )
-  }
+  const said = summary(t)
+  const suggestions = t.boundaries.filter((b) => b.suggest_min !== null)
 
-  const x = (offset: number) => (Math.max(0, Math.min(t.night_minutes, offset)) / t.night_minutes) * WIDTH
+  return (
+    <Fold
+      id="timing"
+      label="Sleep timing"
+      summary={
+        <span className={said.ready ? 'fold__summary--ready' : undefined}>{said.text}</span>
+      }
+      info={
+        <InfoButton title="Sleep timing">
+          <p>
+            When your deep sleep and REM really happen, against the parts of your night: Drift,
+            Deep, REM and Wake.
+          </p>
+          <p>
+            Each night on the mornings your schedule runs is laid over your schedule&apos;s clock,
+            from lights out at {t.lights_out}. Falling asleep is when the mat first saw you asleep.
+            Deep sleep mostly done is when four fifths of that night&apos;s deep sleep had happened.
+          </p>
+          <p>
+            The chart appears after {t.shows_at} nights. Suggestions need {t.suggests_at}, and only
+            when half your nights land within an hour of each other.
+          </p>
+          <p>
+            Using a suggestion only moves where Drift and Deep end. Your temperatures stay as they
+            are, and the Schedule screen moves the times back.
+          </p>
+          <p>
+            Start again is for a routine that has changed. The nights so far stop counting here,
+            and they are kept.
+          </p>
+        </InfoButton>
+      }
+      peek={
+        t.nights < t.suggests_at && (
+          <NightsProgress
+            nights={t.nights}
+            needs={t.suggests_at}
+            marks={[{ at: t.shows_at, label: `Chart at ${t.shows_at}` }]}
+            label="Suggestions"
+          />
+        )
+      }
+    >
+      {t.profile !== null && t.nights >= t.shows_at ? (
+        <TimingChart timing={t} profile={t.profile} />
+      ) : (
+        <p className="ap-verdict ap-verdict--dim">
+          The chart of when your deep sleep and REM happen appears after {t.shows_at} nights on the
+          mat.
+        </p>
+      )}
+
+      {t.profile !== null && t.nights >= t.shows_at && (
+        <div className="timing__facts">
+          {t.boundaries.map((b) =>
+            b.measured === null ? null : (
+              <div key={b.part} className="timing__fact">
+                <span className="timing__fact-name">{MEASURES[b.part]}</span>
+                <span className="timing__fact-value">{clock(t.lights_out, b.measured.median_min)}</span>
+                <span className="timing__fact-range">
+                  {b.part === 'drift'
+                    ? `${duration(b.measured.median_min)} ${
+                        b.measured.median_min < 0 ? 'before' : 'after'
+                      } lights out. `
+                    : ''}
+                  Half your nights: {clock(t.lights_out, b.measured.low_min)} to{' '}
+                  {clock(t.lights_out, b.measured.high_min)}.
+                </span>
+              </div>
+            ),
+          )}
+        </div>
+      )}
+
+      {t.boundaries.map((b) => {
+        const line = verdict(b, t)
+        return line ? (
+          <p key={b.part} className="ap-verdict">
+            {line}
+          </p>
+        ) : null
+      })}
+
+      {suggestions.length > 0 && (
+        <button
+          type="button"
+          className="pill timing__use"
+          disabled={busy}
+          onClick={() =>
+            onUse(Object.fromEntries(suggestions.map((b) => [b.part, b.suggest_min!])) as Ends)
+          }
+        >
+          Use suggested times
+        </button>
+      )}
+
+      {/*
+        Two taps, the way Learning's Start again works: it sets weeks of nights
+        aside, and a button that does that on the first tap is one somebody
+        eventually hits by accident.
+      */}
+      <div className="timing__again">
+        <span className="timing__again-note">
+          {t.since
+            ? `Counting from ${dayMonth(t.since)}, when you started again.`
+            : `Counting your last ${t.nights} night${t.nights === 1 ? '' : 's'}.`}
+        </span>
+        {confirming ? (
+          <span className="learn-confirm">
+            <button
+              type="button"
+              className="learn-confirm__yes"
+              disabled={busy}
+              onClick={() => {
+                onStartAgain()
+                setConfirming(false)
+              }}
+            >
+              Set aside
+            </button>
+            <button type="button" className="learn-confirm__no" onClick={() => setConfirming(false)}>
+              Keep
+            </button>
+          </span>
+        ) : (
+          t.nights > 0 && (
+            <button
+              type="button"
+              className="learn-again"
+              disabled={busy}
+              onClick={() => setConfirming(true)}
+            >
+              Start again
+            </button>
+          )
+        )}
+      </div>
+      {confirming && (
+        <p className="learn-warn">
+          The {t.nights} night{t.nights === 1 ? '' : 's'} so far stop counting here, and the count
+          starts again from tomorrow morning. The nights themselves are kept.
+        </p>
+      )}
+    </Fold>
+  )
+}
+
+function TimingChart({
+  timing: t,
+  profile,
+}: {
+  timing: SleepTiming
+  profile: NonNullable<SleepTiming['profile']>
+}) {
+  const x = (offset: number) =>
+    (Math.max(0, Math.min(t.night_minutes, offset)) / t.night_minutes) * WIDTH
   const y = (share: number) => HEIGHT - share * (HEIGHT - TOP)
 
   // Each bin plotted at its middle, closed down to the baseline at both ends.
-  const area = (shares: number[]) => {
-    const pts = shares.map((v, i) => `${x((i + 0.5) * t.bin_min).toFixed(1)} ${y(v).toFixed(1)}`)
-    return `M0 ${HEIGHT} L0 ${y(shares[0] ?? 0).toFixed(1)} L${pts.join(' L')} L${WIDTH} ${y(
+  const points = (shares: number[]) =>
+    shares.map((v, i) => `${x((i + 0.5) * t.bin_min).toFixed(1)} ${y(v).toFixed(1)}`)
+  const area = (shares: number[]) =>
+    `M0 ${HEIGHT} L0 ${y(shares[0] ?? 0).toFixed(1)} L${points(shares).join(' L')} L${WIDTH} ${y(
       shares[shares.length - 1] ?? 0,
     ).toFixed(1)} L${WIDTH} ${HEIGHT} Z`
-  }
-  const line = (shares: number[]) =>
-    `M${shares.map((v, i) => `${x((i + 0.5) * t.bin_min).toFixed(1)} ${y(v).toFixed(1)}`).join(' L')}`
+  const line = (shares: number[]) => `M${points(shares).join(' L')}`
 
   // Clock hours along the bottom. Any day will do: only the hours are drawn.
   const [h, m] = t.lights_out.split(':').map(Number)
@@ -113,17 +278,9 @@ export function SleepTimingCard({
   const hourX = (at: number) => ((at - first) / (last - first)) * 100
 
   const suggestions = t.boundaries.filter((b) => b.suggest_min !== null)
-  const toGo = t.suggests_at - t.nights
 
   return (
-    <section className="card">
-      <header className="card__head">
-        <h2 className="card__label">Sleep timing</h2>
-      </header>
-      <p className="timing__sub">
-        When your deep sleep and REM really happen, against the parts of your night.
-      </p>
-
+    <>
       <div className="timing">
         <svg
           className="timing__svg"
@@ -144,17 +301,17 @@ export function SleepTimingCard({
               vectorEffect="non-scaling-stroke"
             />
           ))}
-          <path d={area(t.profile.deep)} fill={STAGE_COLOUR.deep} opacity={0.45} />
-          <path d={area(t.profile.rem)} fill={STAGE_COLOUR.rem} opacity={0.4} />
+          <path d={area(profile.deep)} fill={STAGE_COLOUR.deep} opacity={0.45} />
+          <path d={area(profile.rem)} fill={STAGE_COLOUR.rem} opacity={0.4} />
           <path
-            d={line(t.profile.deep)}
+            d={line(profile.deep)}
             fill="none"
             stroke={STAGE_COLOUR.deep}
             strokeWidth={1.8}
             vectorEffect="non-scaling-stroke"
           />
           <path
-            d={line(t.profile.rem)}
+            d={line(profile.rem)}
             fill="none"
             stroke={STAGE_COLOUR.rem}
             strokeWidth={1.8}
@@ -233,61 +390,6 @@ export function SleepTimingCard({
           </span>
         )}
       </div>
-
-      <div className="timing__facts">
-        {t.boundaries.map((b) =>
-          b.measured === null ? null : (
-            <div key={b.part} className="timing__fact">
-              <span className="timing__fact-name">{MEASURES[b.part]}</span>
-              <span className="timing__fact-value">{clock(t.lights_out, b.measured.median_min)}</span>
-              <span className="timing__fact-range">
-                {b.part === 'drift'
-                  ? `${duration(b.measured.median_min)} ${
-                      b.measured.median_min < 0 ? 'before' : 'after'
-                    } lights out. `
-                  : ''}
-                Half your nights: {clock(t.lights_out, b.measured.low_min)} to{' '}
-                {clock(t.lights_out, b.measured.high_min)}.
-              </span>
-            </div>
-          ),
-        )}
-      </div>
-
-      {toGo > 0 ? (
-        <p className="ap-verdict ap-verdict--dim">
-          Suggestions start after {t.suggests_at} nights. {toGo} to go.
-        </p>
-      ) : (
-        t.boundaries.map((b) => {
-          const said = verdict(b, t)
-          return said ? (
-            <p key={b.part} className="ap-verdict">
-              {said}
-            </p>
-          ) : null
-        })
-      )}
-
-      {suggestions.length > 0 && (
-        <button
-          type="button"
-          className="pill timing__use"
-          disabled={busy}
-          onClick={() =>
-            onUse(Object.fromEntries(suggestions.map((b) => [b.part, b.suggest_min!])))
-          }
-        >
-          Use suggested times
-        </button>
-      )}
-
-      <p className="footnote">
-        From your last {t.nights} night{t.nights === 1 ? '' : 's'} on the mornings your schedule
-        runs, measured from lights out at {t.lights_out}. Mostly done means four fifths of that
-        night&apos;s deep sleep. Using a suggestion only moves where each part ends. The
-        temperatures stay as they are, and you can move the times back on the Schedule screen.
-      </p>
-    </section>
+    </>
   )
 }

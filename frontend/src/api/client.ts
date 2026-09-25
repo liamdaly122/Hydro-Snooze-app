@@ -116,6 +116,8 @@ export interface ApiClient {
    * answers, with "N more nights" before there is enough to say.
    */
   getSleepTiming(): Promise<SleepTiming>
+  /** Start counting again, for a routine that has changed. The nights are kept. */
+  forgetSleepTiming(): Promise<SleepTiming>
   /** Where the Withings connection is up to. */
   getWithings(): Promise<WithingsStatus>
   /** Fetch now. `asked` is false when it was too soon after the last time. */
