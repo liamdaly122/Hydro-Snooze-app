@@ -1,5 +1,4 @@
 import { Card } from '../components/Card'
-import { RehearsalCard } from '../components/RehearsalCard'
 import { Toggle } from '../components/Toggle'
 import { Flame, Snowflake } from '../components/Icons'
 import {
@@ -14,7 +13,6 @@ import {
 import {
   MIN_STAGE_MINUTES,
   STAGE_LABEL,
-  type DeviceState,
   type Holiday,
   type Schedule as ScheduleType,
 } from '../types'
@@ -24,9 +22,6 @@ interface Props {
   onChange: (patch: Partial<ScheduleType>) => void
   error: string | null
   onDismissError: () => void
-  state: DeviceState
-  onStartRehearsal: (seconds: number) => Promise<void>
-  onStopRehearsal: () => Promise<void>
   /** Null when there is no night to skip: automation off, or hours away. */
   skippingTonight: boolean | null
   onSkipTonight: (skip: boolean) => void
@@ -63,9 +58,6 @@ export function Schedule({
   onChange,
   error,
   onDismissError,
-  state,
-  onStartRehearsal,
-  onStopRehearsal,
   holiday,
 }: Props) {
   const plan = nextPlan(draft, homeNow(), holiday)
@@ -360,13 +352,6 @@ export function Schedule({
           </div>
         </Card>
       )}
-
-      <RehearsalCard
-        state={state}
-        schedule={draft}
-        onStart={onStartRehearsal}
-        onStop={onStopRehearsal}
-      />
 
       {error && (
         <p className="footnote" onClick={onDismissError}>

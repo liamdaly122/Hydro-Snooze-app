@@ -273,8 +273,8 @@ the one that counts now.
 
 ### Then rehearse a whole night before trusting it to run one
 
-Four presses proves the blaster. It does not prove the night. Open the schedule behind the chevron on
-the Wake card and press **Run a test night**: tonight's own stages, in order, at their own
+Four presses proves the blaster. It does not prove the night. Start a test night with the `curl`
+command in SETUP.md (the button has gone from the app): tonight's own stages, in order, at their own
 temperatures and modes, compressed into about six minutes on the real unit.
 
 - [x] Get ready, Deep, REM, Wake, off. All five land, in order

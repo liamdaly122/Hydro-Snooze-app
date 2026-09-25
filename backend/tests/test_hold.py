@@ -17,7 +17,7 @@ from hydrosnooze import hold
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.db import Database
-from hydrosnooze.models import QUIET_KIND, Mode, Power, Schedule, SleepStage, Stage, quieter_mode
+from hydrosnooze.models import TRIM_KIND, Mode, Power, Schedule, SleepStage, Stage, quieter_mode
 from hydrosnooze.sequences import CommandFailed
 from hydrosnooze.service import Service
 
@@ -146,7 +146,7 @@ def test_a_bed_sat_low_for_half_an_hour_is_sent_a_degree_more(service):
     assert service.sent == []
     run_for(service, 2, start=T0 + timedelta(minutes=29.5))
     assert service.sent == [33]
-    said = [e for e in service.events.recent() if e.kind == QUIET_KIND]
+    said = [e for e in service.events.recent() if e.kind == TRIM_KIND]
     assert said and "a degree more" in said[-1].message, "filed as a drift response"
 
 

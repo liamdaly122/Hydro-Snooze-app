@@ -53,6 +53,7 @@ from .models import (
     NUDGE_MINUTES,
     PRECONDITION_MAX_MINUTES,
     QUIET_KIND,
+    TRIM_KIND,
     Stage,
     StageStep,
     Tonight,
@@ -110,6 +111,13 @@ LEARNING_KIND = "learning"
 
 #: What the three buttons on the bedside are logged under.
 BUTTON_KIND = "buttons"
+
+#: The Hold level changing, and the trim saying it has gone as far as it may.
+#: Neither sends anything to the unit, so neither may be QUIET_KIND or TRIM_KIND:
+#: the Autopilot screen treats those as the reason for whatever temperature was
+#: set beside them, and a change made by hand a minute after picking a Hold
+#: level was being credited to Autopilot as a drift response.
+HOLD_KIND = "hold"
 
 #: Below this the probe board is shouting hard enough to expect dropouts.
 #:
@@ -1482,7 +1490,9 @@ class Service:
             step.temp_c,
             running,
             bed,
-            self.schedule.cooling_speed,
+            # Tonight's speed, which is what the plan's cooling stages use. The
+            # usual one put a Turbo night back on Quiet at its first correction.
+            self.tonight_now().cooling_speed,
             cap_c=self.settings.max_temperature_c,
             arrived_c=level.arrived_c,
             fallen_c=level.fallen_c,
@@ -2071,7 +2081,7 @@ class Service:
             )
         self.db.set_hold(name)
         level = hold.HOLDS[name]
-        self.events.info(QUIET_KIND, f"Holding warm parts: {level.label}. {level.describe}")
+        self.events.info(HOLD_KIND, f"Holding warm parts: {level.label}. {level.describe}")
         return self.autopilot_state()
 
     def _reset_trim(self) -> None:
@@ -2134,7 +2144,7 @@ class Service:
             if self._trim_limit_told != part:
                 self._trim_limit_told = part
                 self.events.info(
-                    QUIET_KIND,
+                    HOLD_KIND,
                     f"The bed is at {bed:.1f}C against a {step.temp_c}C part, and {before}C is "
                     "already as far as the setting may go. Holding there.",
                 )
@@ -2146,10 +2156,10 @@ class Service:
                 await self._apply(mode, step.temp_c)
             except CommandFailed as exc:
                 self._trims[mode] -= way
-                self._fail(QUIET_KIND, exc)
+                self._fail(TRIM_KIND, exc)
                 return
         self.events.info(
-            QUIET_KIND,
+            TRIM_KIND,
             f"The bed has sat at {bed:.1f}C against a {step.temp_c}C part for half an hour, "
             f"so the unit is being sent {after}C now, a degree {'more' if way > 0 else 'less'}.",
         )
@@ -2611,8 +2621,9 @@ class Service:
         wanted = "warm" if plan.preconditioning.mode is Mode.WARMING else "cool"
         self.events.warning(
             "precool",
+            # The plan's, which is tonight's: the one it was aiming at.
             f"The unit never drew more than {peak:.0f} W while pre-conditioning, so it was "
-            f"not working. The bed was most likely already past {self.schedule.first_temp_c}C, "
+            f"not working. The bed was most likely already past {plan.first_temp_c}C, "
             f"and it cannot {wanted} in the other direction.",
         )
 
@@ -2737,7 +2748,9 @@ class Service:
         """
         return mode_for_target(
             target_c,
-            self.schedule.cooling_speed,
+            # The night's own speed, as set_temperature says: tonight's when
+            # it has one, not the usual.
+            self.tonight_now().cooling_speed,
             coming_from_c=self.state.assumed_target_c,
             coming_from_mode=self.state.assumed_mode,
         )
@@ -2915,7 +2928,15 @@ class Service:
             row["sends_c"] = self._correction(
                 int(row["target_c"]), Mode(str(row["mode"]))
             ).send_c
-        return {"on": self.db.learning_on(), "modes": rows}
+        # `on` is the Learning switch, which the card draws. Whether anything is
+        # used also needs Autopilot on, and the sentence under a measured drift
+        # has to know which one is off: with Autopilot off, sends_c is simply
+        # the target, and the card read that as "close enough to leave alone".
+        return {
+            "on": self.db.learning_on(),
+            "autopilot_on": self.db.autopilot_on(),
+            "modes": rows,
+        }
 
     def set_learning(self, on: bool) -> bool:
         self.db.set_learning_on(on)
@@ -3106,6 +3127,26 @@ class Service:
             else "Back on for tonight.",
         )
         return out
+
+    def keep_tonight(self) -> None:
+        """Save as my usual: tonight's temperatures and speed become the routine.
+
+        Times are not included: sleeping in once is never a new alarm.
+
+        Tonight's own copies are taken back off afterwards, because they now
+        match the usual. The speed always was. The temperatures were left in
+        place, so the banner went on saying "Tonight only" over a night that was
+        exactly the usual one, and Back to usual offered to undo nothing.
+        """
+        for stage in self.tonight_now().stages:
+            self._adopt_into_running_stage(stage.stage, stage.temp_c)
+        tonight = self.tonight_state()
+        if tonight is not None and tonight.cooling_speed is not None:
+            self.update_schedule({"cooling_speed": tonight.cooling_speed})
+            self.set_speed_tonight(tonight.cooling_speed)
+        tonight = self.tonight_state()
+        if tonight is not None and tonight.stages is not None:
+            self._change_tonight(stages=None)
 
     def clear_tonight(self) -> None:
         """Put tonight back to the routine."""
@@ -3307,10 +3348,12 @@ class Service:
             }
         )
         label = STAGE_LABEL[stage]
+        # Not "while it was running". Save as my usual is the only caller now,
+        # and it saves every part that moved tonight, running or not.
         self.events.info(
             "stage",
-            f"{label} changed from {was}C to {target_c}C while it was running, so {label} "
-            f"is {target_c}C from now on. Change it back on the {label} tab.",
+            f"{label} saved as your usual: {target_c}C from now on, was {was}C. "
+            f"Change it back on the {label} tab.",
         )
 
     # --- State ----------------------------------------------------------------

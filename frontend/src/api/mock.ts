@@ -392,19 +392,6 @@ export class MockApiClient implements ApiClient {
     ]
   }
 
-  async startRehearsal(seconds: number): Promise<void> {
-    await sleep(300)
-    const ends = new Date(Date.now() + (seconds + 30) * 1000).toISOString()
-    this.patchState({ rehearsal_ends_at: ends })
-    this.log('info', 'rehearsal', `Rehearsing the whole night in ${seconds}s, then off.`)
-  }
-
-  async stopRehearsal(): Promise<void> {
-    await sleep(300)
-    this.patchState({ rehearsal_ends_at: null, current_stage: null })
-    this.log('info', 'rehearsal', 'Rehearsal stopped.')
-  }
-
   async setTemperature(targetC: number): Promise<void> {
     if (targetC > MAX_TEMPERATURE_C) {
       throw new ApiError(`Refused: ${targetC}C is above the ${MAX_TEMPERATURE_C}C safety cap.`)
@@ -1323,7 +1310,14 @@ function seedNight(): AutopilotNight {
       high_c: 25.7,
       typical_off_c: Math.round((off.reduce((a, b) => a + b, 0) / off.length) * 10) / 10,
     },
-    ready: { minutes: 29, reached: true, target_c: 19, start_c: 21.1, end_c: 19.2 },
+    ready: {
+      minutes: 29,
+      reached: true,
+      target_c: 19,
+      start_c: 21.1,
+      end_c: 19.2,
+      decided_by: 'probes',
+    },
     energy_kwh: 1.21,
     notes: [],
   }

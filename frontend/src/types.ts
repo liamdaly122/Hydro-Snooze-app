@@ -391,6 +391,8 @@ export interface AutopilotNight {
     target_c: number
     start_c: number | null
     end_c: number | null
+    /** Which sensor said it was ready: the hose probes, or the plug alone. */
+    decided_by: 'probes' | 'plug' | null
   } | null
   energy_kwh: number
   notes: string[]

@@ -158,6 +158,19 @@ def test_keeping_it_is_the_only_one_that_touches_the_routine(client):
     ]
 
 
+def test_once_kept_tonight_stops_saying_it_is_different(client):
+    """Kept, tonight's temperatures are the usual ones, so there is nothing left
+    for the banner to name or for Back to usual to undo. The speed was already
+    taken back off like this; the temperatures were left in place."""
+    client.post("/api/tonight/stage", json={"stage": "deep", "temp_c": 17})
+    client.post("/api/tonight/keep")
+
+    body = client.get("/api/tonight").json()
+    assert body["stages_changed"] is False
+    assert body["changed"] is False
+    assert temps(body) == [19, 17, 22, 26]
+
+
 # --- Tonight's cooling speed --------------------------------------------------------
 #
 # From the review of 22 September. The Cooling speed card has a tab labelled
