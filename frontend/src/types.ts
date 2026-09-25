@@ -386,6 +386,23 @@ export interface TonightState {
   speed_changed: boolean
   nudge_c: number
   nudge_until: string | null
+  /**
+   * Tonight's change, when it is Autopilot's evening suggestion as it was taken.
+   * Home names it as Autopilot's and leaves out Save as my usual for it. Absent
+   * from older service builds.
+   */
+  suggested?: TonightSuggested | null
+}
+
+export interface TonightSuggested {
+  temps: Partial<Record<'deep' | 'rem', number>>
+  usual: Partial<Record<'deep' | 'rem', number>>
+  test: { part: 'deep' | 'rem'; offset_c: number } | null
+}
+
+/** The switch over all of Autopilot. */
+export interface AutopilotSwitch {
+  on: boolean
 }
 
 /* --- Health Report -------------------------------------------------------------
@@ -606,9 +623,11 @@ export interface Scoreboard {
  *   by_hand   tonight was already changed by hand
  *   skipped   tonight is not running
  *   no_mat    the Sleep Analyzer is not connected
+ *   off       Autopilot is switched off
  *   closed    no night ahead yet: suggestions open in the evening
  */
 export type SuggestionState =
+  | 'off'
   | 'ready'
   | 'accepted'
   | 'declined'

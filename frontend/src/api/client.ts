@@ -12,6 +12,7 @@
 
 import type {
   AutopilotNight,
+  AutopilotSwitch,
   HealthReport,
   Learning,
   DeviceEvent,
@@ -122,6 +123,14 @@ export interface ApiClient {
   forgetSleepTiming(): Promise<SleepTiming>
   /** Each temperature each part has run at, and the sleep on those nights. */
   getScoreboard(): Promise<Scoreboard>
+  /**
+   * The switch over all of Autopilot: learned timings and corrections, the
+   * drift response and the evening suggestion. Off, the bed runs exactly the
+   * temperatures set, and tonight goes back to usual if it was running a
+   * suggestion.
+   */
+  getAutopilotSwitch(): Promise<AutopilotSwitch>
+  setAutopilotSwitch(on: boolean): Promise<AutopilotSwitch>
   /** Tonight's suggested Deep and REM, and where it is up to. */
   getSuggestion(): Promise<Suggestion>
   /** Use it for tonight. Changes tonight only; the routine is untouched. */

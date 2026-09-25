@@ -181,3 +181,11 @@ def test_the_suggestion_answers_and_refuses_what_it_cannot_do(client):
     assert client.post("/api/suggestion/reach", json={"reach": 5}).status_code == 422
     widened = client.post("/api/suggestion/reach", json={"reach": 3}).json()
     assert widened["reach"] == 3
+
+
+def test_the_autopilot_switch_over_http(client):
+    assert client.get("/api/autopilot/switch").json() == {"on": True}
+    assert client.post("/api/autopilot/switch", json={"on": False}).json() == {"on": False}
+    assert client.get("/api/autopilot/switch").json() == {"on": False}
+    assert client.get("/api/suggestion").json()["state"] == "off"
+    assert "suggested" in client.get("/api/tonight").json()

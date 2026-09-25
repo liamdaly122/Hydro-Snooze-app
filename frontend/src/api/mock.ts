@@ -14,6 +14,7 @@
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   AutopilotNight,
+  AutopilotSwitch,
   AutopilotSleep,
   DeviceEvent,
   DeviceHealth,
@@ -371,6 +372,7 @@ export class MockApiClient implements ApiClient {
       speed_changed: t.cooling_speed !== null,
       nudge_c: t.nudge_c,
       nudge_until: t.nudge_until,
+      suggested: this.suggestedTonight(),
     }
   }
 
@@ -590,13 +592,53 @@ export class MockApiClient implements ApiClient {
    * same tonight-only change the service makes, so Tonight only and Back to
    * usual behave as they do on the Pi.
    */
+  private autopilotOn = true
+
+  async getAutopilotSwitch(): Promise<AutopilotSwitch> {
+    await sleep(60)
+    return { on: this.autopilotOn }
+  }
+
+  /** Off puts tonight back to usual if it was running the suggestion, as on the Pi. */
+  async setAutopilotSwitch(on: boolean): Promise<AutopilotSwitch> {
+    await sleep(120)
+    this.autopilotOn = on
+    if (!on && this.suggestedTonight()) {
+      this.tonightState.stages = null
+      // As the service does after any change to tonight, so Home re-reads it.
+      this.emit({ schedule: { ...this.schedule } })
+    }
+    return { on }
+  }
+
+  /** Tonight's change, when it is the suggestion as taken. */
+  private suggestedTonight(): TonightState['suggested'] {
+    if (this.suggested.decision !== 'accepted' || this.tonightState.stages === null) return null
+    const offered = this.suggestionParts()
+    const running = this.tonightState.stages
+    const matches = offered.every(
+      (p) => (running.find((st) => st.stage === p.part)?.temp_c ?? p.usual_c) === p.tonight_c,
+    )
+    if (!matches) return null
+    const test = offered.find((p) => p.test)
+    return {
+      temps: Object.fromEntries(offered.map((p) => [p.part, p.tonight_c])),
+      usual: Object.fromEntries(offered.map((p) => [p.part, p.usual_c])),
+      test: test ? { part: test.part, offset_c: test.tonight_c - test.usual_c } : null,
+    }
+  }
+
+  private suggestionParts() {
+    return this.suggestionJson(true).parts
+  }
+
   private suggested = {
     decision: null as 'accepted' | 'declined' | null,
     reach: 2,
     centre: null as { deep: number; rem: number } | null,
   }
 
-  private suggestionJson(): Suggestion {
+  private suggestionJson(ignoreSwitch = false): Suggestion {
     const usualOf = (part: 'deep' | 'rem') =>
       this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
     const usual = { deep: usualOf('deep'), rem: usualOf('rem') }
@@ -606,12 +648,17 @@ export class MockApiClient implements ApiClient {
     const high = (part: 'deep' | 'rem') => centre![part] + reach
     const deep = usual.deep - 1 >= low('deep') ? usual.deep - 1 : usual.deep + 1
     const tonight = { deep, rem: usual.rem }
-    const running = this.tonightJson().running.stages
+    const running = (this.tonightState.stages ?? this.schedule.stages)
     const undone =
       this.suggested.decision === 'accepted' &&
       running.find((st) => st.stage === 'deep')?.temp_c !== tonight.deep
     return {
-      state: undone ? 'undone' : (this.suggested.decision ?? 'ready'),
+      state:
+        !this.autopilotOn && !ignoreSwitch
+          ? 'off'
+          : undone
+            ? 'undone'
+            : (this.suggested.decision ?? 'ready'),
       wake_on: isoDay(new Date(Date.now() + 86_400_000)),
       parts: (['deep', 'rem'] as const).map((part) => ({
         part,
@@ -638,7 +685,9 @@ export class MockApiClient implements ApiClient {
 
   async getSuggestion(): Promise<Suggestion> {
     await sleep(100)
-    return this.suggestionJson()
+    const s = this.suggestionJson()
+    // Off, the service sends the limits and nothing about tonight.
+    return s.state === 'off' ? { ...s, parts: [], test: null, why: null } : s
   }
 
   async acceptSuggestion(): Promise<Suggestion> {

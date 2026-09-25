@@ -555,6 +555,9 @@ API rather than read. Read that before writing any of it.
       either side in one part about one night in three, marked as a test. **Pushes for deep sleep
       and REM together; limits two degrees either side, widenable to three.** Seen against invented
       nights; the first real test night is the next thing to look at
+- [x] One switch over all of Autopilot. Off runs exactly the temperatures set, and puts tonight
+      back to usual if it was running a suggestion. Home names a taken suggestion as Autopilot's
+      and does not offer to save a test temperature as the usual
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

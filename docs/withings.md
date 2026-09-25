@@ -641,8 +641,28 @@ been changed by hand. What was decided is kept in the `suggestions` table, and t
 morning record marks a night as a test only if the test temperature is what the
 bed was actually asked for: taken and then put back to usual, it was not a test.
 
+On Home, tonight taken from a suggestion reads **Autopilot test tonight** (or
+Autopilot's suggestion tonight), with the usual beside each moved part and Back
+to usual as the undo. Save as my usual is not offered for it: saving a test
+temperature as the usual ends the test before it has been measured, and moves
+the usual every later suggestion is set against. Changed again by hand, tonight
+is somebody's own change like any other, with Save back, and the night no longer
+counts as a test.
+
+### The Autopilot switch
+
+At the top of the Autopilot screen, over everything Autopilot does: learned
+timings and corrections (Learning keeps its own switch inside it), the drift
+response that moves to the quieter mode partway through a part, and the evening
+suggestion. Off, the bed runs exactly the temperatures set, at the times set, and
+still gets ready before lights out on the standard estimate. Turning it off puts
+tonight back to the usual Deep and REM if it was running a suggestion, and leaves
+any change made by hand alone. Every night is still written down either way, so
+the reports carry on and turning it back on loses nothing. Kept as
+`preferences.autopilot_on`, served at `GET` and `POST /api/autopilot/switch`.
+
 Step three, not built: the same choice made without asking, inside the same
-limits, with one switch to turn it off.
+limits, under the same switch.
 
 To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
 restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report

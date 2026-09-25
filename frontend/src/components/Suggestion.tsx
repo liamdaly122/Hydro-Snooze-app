@@ -81,6 +81,8 @@ export function SuggestionCard({
 function summary(s: Suggestion): { text: string; ready: boolean } {
   const test = s.parts.find((p) => p.test)
   switch (s.state) {
+    case 'off':
+      return { text: 'Autopilot is off', ready: false }
     case 'ready':
       return { text: 'Ready for tonight', ready: true }
     case 'accepted':
@@ -159,7 +161,9 @@ export function SuggestionFold({
         </>
       ) : (
         <p className="ap-verdict ap-verdict--dim">
-          {s.state === 'no_mat'
+          {s.state === 'off'
+            ? 'Autopilot is off, so nothing is suggested. The bed runs your usual temperatures.'
+            : s.state === 'no_mat'
             ? 'Suggestions need the Sleep Analyzer connected, or a test night would teach nothing.'
             : s.state === 'closed'
               ? "Tonight's suggestion appears in the evening, before the bed starts getting ready."

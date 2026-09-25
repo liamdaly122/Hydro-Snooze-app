@@ -5,6 +5,7 @@ import { InfoButton } from '../components/InfoButton'
 import { LearningCard } from '../components/LearningCard'
 import { ScoreboardCard } from '../components/ScoreboardCard'
 import { SuggestionFold } from '../components/Suggestion'
+import { AutopilotSwitchCard } from '../components/AutopilotSwitchCard'
 import { SleepTimingCard } from '../components/SleepTimingCard'
 import type { ApiClient } from '../api/client'
 import type {
@@ -119,6 +120,8 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
   const [board, setBoard] = useState<Scoreboard | null>(null)
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
   const [deciding, setDeciding] = useState(false)
+  const [autopilotOn, setAutopilotOn] = useState<boolean | null>(null)
+  const [switching, setSwitching] = useState(false)
   const [moving, setMoving] = useState(false)
 
   useEffect(() => {
@@ -139,6 +142,10 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
     void client
       .getSuggestion()
       .then((s) => live && setSuggestion(s))
+      .catch(() => undefined)
+    void client
+      .getAutopilotSwitch()
+      .then((a) => live && setAutopilotOn(a.on))
       .catch(() => undefined)
     return () => {
       live = false
@@ -187,6 +194,23 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       .finally(() => setDeciding(false))
   }
 
+  // Everything that depends on the switch is asked again after it moves: the
+  // suggestion goes to off or comes back, and Learning says whether it is used.
+  const flip = (on: boolean) => {
+    setSwitching(true)
+    void client
+      .setAutopilotSwitch(on)
+      .then((a) => setAutopilotOn(a.on))
+      .then(() => client.getSuggestion())
+      .then(setSuggestion)
+      .catch(() => undefined)
+      .finally(() => setSwitching(false))
+  }
+
+  const switchCard = autopilotOn !== null && (
+    <AutopilotSwitchCard on={autopilotOn} onSwitch={flip} busy={switching} />
+  )
+
   const suggestCard = suggestion && (
     <SuggestionFold
       suggestion={suggestion}
@@ -203,6 +227,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       onUse={takeTimes}
       onStartAgain={startTimingAgain}
       busy={moving}
+      canUse={autopilotOn !== false}
     />
   )
 
@@ -220,12 +245,14 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       busy={busy}
       onSwitch={(on) => change(client.setLearning(on))}
       onForget={(mode: Mode) => change(client.forgetLearning(mode))}
+      autopilotOn={autopilotOn !== false}
     />
   )
 
   if (error) {
     return (
       <>
+        {switchCard}
         <section className="card">
           <p className="empty">{error}</p>
           <p className="footnote">
@@ -245,6 +272,8 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
 
   return (
     <>
+      {switchCard}
+
       {/* --- The hero ------------------------------------------------------- */}
       <section className="ap-hero">
         <Sparkle size={44} className="ap-hero__mark" glow />

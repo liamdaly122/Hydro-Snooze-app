@@ -54,11 +54,14 @@ export function LearningCard({
   onSwitch,
   onForget,
   busy = false,
+  autopilotOn = true,
 }: {
   learning: Learning
   onSwitch: (on: boolean) => void
   onForget: (mode: Mode) => void
   busy?: boolean
+  /** Off, nothing learned is used whatever Learning's own switch says. */
+  autopilotOn?: boolean
 }) {
   // Which mode is one tap from being cleared. Two taps rather than a dialog:
   // starting again throws away nights of measurement, and a button that does
@@ -70,7 +73,9 @@ export function LearningCard({
 
   // The one line worth reading if nothing else is: how far off the next
   // measurement is, or that there is nothing left to wait for.
-  const lead = !learning.on
+  const lead = !autopilotOn
+    ? 'Not used while Autopilot is off'
+    : !learning.on
     ? 'Switched off'
     : learning.modes.length === 0
       ? 'Nothing measured yet'
@@ -105,6 +110,13 @@ export function LearningCard({
         </InfoButton>
       }
     >
+      {!autopilotOn && (
+        <p className="learn-off">
+          Autopilot is off, so nothing here is used: the head start is estimated and the
+          temperatures go out exactly as you set them. The nights are still measured.
+        </p>
+      )}
+
       <div className="learn-switch">
         <span className="learn-switch__label">Use what it has learned</span>
         <Toggle on={learning.on} onChange={onSwitch} label="Use what this bed has taught the app" />

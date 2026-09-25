@@ -286,10 +286,15 @@ CREATE TABLE IF NOT EXISTS holiday (
 --
 -- `timing_since` is the Sleep timing card's Start again: the last morning that
 -- no longer counts, or NULL for every night. The nights before it are kept.
+--
+-- `autopilot_on` is the switch over all of Autopilot: learned timings and
+-- corrections, the drift response and the evening suggestion. Off, the bed runs
+-- exactly the temperatures set, at the times set.
 CREATE TABLE IF NOT EXISTS preferences (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     learning_on  INTEGER NOT NULL DEFAULT 1,
-    timing_since TEXT
+    timing_since TEXT,
+    autopilot_on INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -544,6 +549,12 @@ class Database:
         prefs = {r["name"] for r in self._db.execute("PRAGMA table_info(preferences)")}
         if "timing_since" not in prefs:
             self._db.execute("ALTER TABLE preferences ADD COLUMN timing_since TEXT")
+        # The switch over all of Autopilot. On, which is what every database from
+        # before the switch was running.
+        if "autopilot_on" not in prefs:
+            self._db.execute(
+                "ALTER TABLE preferences ADD COLUMN autopilot_on INTEGER NOT NULL DEFAULT 1"
+            )
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
@@ -1211,6 +1222,18 @@ class Database:
     def learning_on(self) -> bool:
         row = self._db.execute("SELECT learning_on FROM preferences WHERE id = 1").fetchone()
         return True if row is None else bool(row["learning_on"])
+
+    def autopilot_on(self) -> bool:
+        row = self._db.execute("SELECT autopilot_on FROM preferences WHERE id = 1").fetchone()
+        return True if row is None else bool(row["autopilot_on"])
+
+    def set_autopilot_on(self, on: bool) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, autopilot_on) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET autopilot_on = excluded.autopilot_on",
+            (int(on),),
+        )
+        self._db.commit()
 
     def timing_since(self) -> str | None:
         """The last morning the Sleep timing card no longer counts, if it was reset."""

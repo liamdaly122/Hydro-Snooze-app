@@ -184,12 +184,17 @@ class SpeedTonight(BaseModel):
 def _tonight(service: Service) -> dict[str, object]:
     # tonight_state rather than scheduler.tonight: the second is whatever was last
     # read off disk, and a row for a night that is over is spent.
-    return tonight_json(
-        service.tonight_now(),
-        service.tonight_state(),
-        service.tonight_phase(),
-        running=service.tonight_as_shown(),
-    )
+    return {
+        **tonight_json(
+            service.tonight_now(),
+            service.tonight_state(),
+            service.tonight_phase(),
+            running=service.tonight_as_shown(),
+        ),
+        # Tonight's change, when it is Autopilot's suggestion as taken. Home
+        # names it as such and leaves out Save as my usual for it.
+        "suggested": service.tonight_suggested(),
+    }
 
 
 @router.get("/tonight")
@@ -348,6 +353,22 @@ async def get_autopilot(request: Request) -> dict[str, object]:
     if plan is None:
         raise HTTPException(404, "No finished night to report on yet.")
     return autopilot_json(service.night_report(plan))
+
+
+class AutopilotSwitch(BaseModel):
+    on: bool
+
+
+@router.get("/autopilot/switch")
+async def get_autopilot_switch(request: Request) -> dict[str, object]:
+    """Whether Autopilot is on: learned timings and corrections, the drift
+    response and the evening suggestion. Off, the bed runs the set temperatures."""
+    return _service(request).autopilot_state()
+
+
+@router.post("/autopilot/switch")
+async def post_autopilot_switch(request: Request, body: AutopilotSwitch) -> dict[str, object]:
+    return await _service(request).set_autopilot(body.on)
 
 
 @router.get("/learning")

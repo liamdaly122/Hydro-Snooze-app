@@ -1436,6 +1436,9 @@ class Service:
     async def _correct_mode(self, step: StageStep | None, power: Power, now: datetime) -> None:
         """Swap the running mode for the quieter one when the bed allows it.
 
+        Part of Autopilot, and off with it: the stage stays in the mode the
+        schedule gave it.
+
         The mode on the schedule card was decided at plan time from the stage
         before it. That is a prediction about a bed with nobody in it, and it is
         wrong in the one case that matters: a stage that steps the temperature up
@@ -1446,7 +1449,7 @@ class Service:
         So the question gets asked again every thirty seconds, with a measurement
         in hand, and the answer is allowed to differ from the plan.
         """
-        if step is None or power is not Power.ON:
+        if step is None or power is not Power.ON or not self.db.autopilot_on():
             return
         running = self.state.assumed_mode
         if running is None:
@@ -1762,7 +1765,7 @@ class Service:
         return max(low, min(high, target_c))
 
     def _learned_lead(self, mode: Mode, target_c: int, gap_c: float) -> int | None:
-        if not self.db.learning_on():
+        if not self._learning_active():
             return None
         return self.db.learned_lead_minutes(mode.value, target_c, gap_c)
 
@@ -2008,6 +2011,78 @@ class Service:
             written += 1
         return written
 
+    # --- The switch over all of Autopilot -------------------------------------
+
+    def _learning_active(self) -> bool:
+        """Whether what has been learned about the bed is used: Autopilot on, and
+        Learning on inside it. Either off, and the head start is estimated and
+        the temperatures go out exactly as set."""
+        return self.db.autopilot_on() and self.db.learning_on()
+
+    def autopilot_state(self) -> dict[str, Any]:
+        return {"on": self.db.autopilot_on()}
+
+    async def set_autopilot(self, on: bool) -> dict[str, Any]:
+        """Everything Autopilot does, on or off.
+
+        Off: the bed runs exactly the temperatures set, at the times set. No
+        learned head start or correction, no drift response, no evening
+        suggestion, and tonight goes back to the usual Deep and REM if it was
+        running one. The bed still gets ready before lights out, on the
+        standard estimate, and every night is still written down, so turning it
+        back on loses nothing.
+        """
+        self.db.set_autopilot_on(on)
+        if on:
+            self.events.info(
+                LEARNING_KIND,
+                "Autopilot on: learned timings and corrections, the drift response and the "
+                "evening suggestion are back.",
+            )
+            return self.autopilot_state()
+
+        undone = self.tonight_suggested() is not None
+        if undone:
+            self._change_tonight(stages=None)
+        self.events.info(
+            LEARNING_KIND,
+            "Autopilot off: the bed runs exactly the temperatures you set, at the times you "
+            "set." + (" Tonight is back to your usual Deep and REM." if undone else ""),
+        )
+        if undone:
+            self._followed_at = None
+            await self._follow_the_plan(loud=True)
+        return self.autopilot_state()
+
+    def tonight_suggested(self) -> dict[str, Any] | None:
+        """Tonight's change, when it is Autopilot's suggestion as it was taken.
+
+        So Home can say "Autopilot test tonight" rather than "Tonight only", and
+        leave out Save as my usual: a test saved as the usual ends the test and
+        moves what every later suggestion is measured from. Changed again by
+        hand since, and it is somebody's own change like any other.
+        """
+        wake_on = self._tonight_date()
+        if wake_on is None:
+            return None
+        decided = self.db.decision_for(wake_on.isoformat())
+        if decided is None or decided.decision != "accepted":
+            return None
+        running = {s.stage.value: s.temp_c for s in self.tonight_now().stages}
+        if any(running.get(k) != v for k, v in decided.temps.items()):
+            return None
+        usual = {
+            part: self.schedule.stage(Stage(part)).temp_c
+            for part in decided.temps
+            if self.schedule.stage(Stage(part)) is not None
+        }
+        return {
+            "temps": decided.temps,
+            "usual": usual,
+            "test": None if not decided.test_part
+            else {"part": decided.test_part, "offset_c": decided.test_offset_c},
+        }
+
     # --- The evening suggestion (suggest.py) -----------------------------------
 
     def _mat_ready(self) -> bool:
@@ -2039,6 +2114,7 @@ class Service:
             undone    taken, then put back to usual
             usual     nothing to change: tonight runs the usual
             by_hand   tonight was already changed by hand, so it stays out of it
+            off       Autopilot is switched off
             skipped   tonight is not running
             no_mat    the Sleep Analyzer is not connected, so nothing would be learned
             closed    no night ahead yet: suggestions open in the evening
@@ -2063,6 +2139,9 @@ class Service:
                 for part, lim in limits.items()
             ],
         }
+        if not self.db.autopilot_on():
+            out["state"] = "off"
+            return out
         wake_on = self._tonight_date()
         phase = self.tonight_phase()
         if wake_on is None or phase in ("none", "after") or set(usual) != set(suggest.PARTS):
@@ -2988,7 +3067,7 @@ class Service:
         # The switch gates both learned things, and it is checked here rather
         # than somewhere clever, because this is the one that changes what the bed
         # does. Off means send exactly what was asked for.
-        off = self.db.learned_offset_c(mode.value, wanted_c) if self.db.learning_on() else None
+        off = self.db.learned_offset_c(mode.value, wanted_c) if self._learning_active() else None
         if off is None or abs(off) < 0.5:
             return Correction(wanted_c, off, capped=False)
 

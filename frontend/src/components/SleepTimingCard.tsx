@@ -88,6 +88,7 @@ export function SleepTimingCard({
   onUse,
   onStartAgain,
   busy = false,
+  canUse = true,
 }: {
   timing: SleepTiming
   /** Move the boundaries to where the service suggests. */
@@ -95,6 +96,8 @@ export function SleepTimingCard({
   /** Set the nights so far aside and count again. */
   onStartAgain: () => void
   busy?: boolean
+  /** False with Autopilot off: the suggestions are shown, not offered. */
+  canUse?: boolean
 }) {
   const [confirming, setConfirming] = useState(false)
   const t = timing
@@ -187,7 +190,13 @@ export function SleepTimingCard({
         ) : null
       })}
 
-      {suggestions.length > 0 && (
+      {suggestions.length > 0 && !canUse && (
+        <p className="ap-verdict ap-verdict--dim">
+          Autopilot is off, so these are shown and not offered. Turn it on to use them.
+        </p>
+      )}
+
+      {suggestions.length > 0 && canUse && (
         <button
           type="button"
           className="pill timing__use"

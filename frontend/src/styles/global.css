@@ -3546,3 +3546,23 @@ a.pill {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* --- The switch over all of Autopilot ------------------------------------------ */
+
+.ap-switch__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ap-switch__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ap-switch__state {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-mid);
+}
