@@ -13,6 +13,10 @@
 
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
+  TrendNight,
+  TrendRange,
+  TrendSummary,
+  Trends,
   NightNote,
   NightNotePatch,
   AuthState,
@@ -51,7 +55,7 @@ import {
   STAGE_LABEL,
   WARMING_FLOOR_C,
 } from '../types'
-import { daysBetween, isoDay } from '../domain'
+import { addDays, daysBetween, isoDay } from '../domain'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -65,6 +69,29 @@ const MOCK_TAGS = [
   { key: 'exercise', label: 'Exercise', leaves_out: false },
   { key: 'stressed', label: 'Stressed', leaves_out: false },
 ]
+
+function mockSummary(rows: TrendNight[]): TrendSummary {
+  const mean = (get: (r: TrendNight) => number | null, places = 0) => {
+    const v = rows.map(get).filter((x): x is number => x !== null)
+    if (!v.length) return null
+    const m = v.reduce((a, b) => a + b, 0) / v.length
+    return places ? Math.round(m * 10 ** places) / 10 ** places : Math.round(m)
+  }
+  const kwh = rows.map((r) => r.kwh).filter((x): x is number => x !== null)
+  const cost = rows.map((r) => r.cost_p).filter((x): x is number => x !== null)
+  return {
+    nights: rows.length,
+    score: mean((r) => r.score),
+    deep_rem_s: mean((r) => r.deep_rem_s),
+    latency_s: mean((r) => r.latency_s),
+    asleep_s: mean((r) => r.asleep_s),
+    bed_c: mean((r) => r.bed_c, 1),
+    room_c: mean((r) => r.room_c, 1),
+    kwh_per_night: mean((r) => r.kwh, 2),
+    kwh_total: kwh.length ? Math.round(kwh.reduce((a, b) => a + b, 0) * 10) / 10 : null,
+    cost_p_total: cost.length ? Math.round(cost.reduce((a, b) => a + b, 0)) : null,
+  }
+}
 
 function mockNote(wakeOn: string): NightNote {
   return {
@@ -179,6 +206,69 @@ export class MockApiClient implements ApiClient {
   }
 
   private notes = new Map<string, NightNote>()
+  private tariffP: number | null = null
+
+  /**
+   * Trends from the seed's own nights, with the bed, the room and the energy
+   * invented alongside, steadily and deterministically, the way the rest of the
+   * seed is. The summary is worked out the way trends.py works it out.
+   */
+  async getTrends(days: TrendRange): Promise<Trends> {
+    const seed = await this.health()
+    await sleep(160)
+    const last = seed.latest
+    const first = addDays(last, -(days - 1))
+    const before = addDays(first, -days)
+    const rows: TrendNight[] = Object.values(seed.reports)
+      .map((r) => r.night)
+      .filter((n): n is NonNullable<typeof n> => n !== null && n.wake_on >= before)
+      .sort((a, b) => (a.wake_on < b.wake_on ? -1 : 1))
+      .map((n, i) => {
+        const deep = n.totals.deep
+        const rem = n.totals.rem
+        const kwh = Math.round((1.3 + 0.25 * Math.sin(i * 1.7)) * 100) / 100
+        const stages = Object.values(n.bed.by_stage).filter((s) => s.mean_c !== null)
+        const bed = stages.length
+          ? stages.reduce((a, s) => a + s.mean_c! * s.of, 0) / stages.reduce((a, s) => a + s.of, 0)
+          : null
+        const latency = n.fell_asleep_at
+          ? (new Date(n.fell_asleep_at).getTime() - new Date(n.in_bed.starts_at).getTime()) / 1000
+          : null
+        const note = this.notes.get(n.wake_on)
+        return {
+          wake_on: n.wake_on,
+          score: n.score.value,
+          asleep_s: n.tiles.time_slept.seconds,
+          deep_s: deep,
+          rem_s: rem,
+          deep_rem_s: deep !== null && rem !== null ? deep + rem : null,
+          latency_s: latency,
+          bed_c: bed === null ? null : Math.round(bed * 10) / 10,
+          room_c: Math.round((18.6 + 0.8 * Math.cos(i * 0.9)) * 10) / 10,
+          kwh,
+          cost_p: this.tariffP === null ? null : Math.round(kwh * this.tariffP * 10) / 10,
+          rating: note?.rating ?? null,
+          tags: note ? MOCK_TAGS.filter((t) => note.tags.includes(t.key)).map((t) => t.label) : [],
+          left_out: (note?.left_out.length ?? 0) > 0,
+          test: null,
+        }
+      })
+    const now = rows.filter((r) => r.wake_on >= first)
+    const then = rows.filter((r) => r.wake_on < first)
+    return {
+      days,
+      first,
+      last,
+      tariff_p: this.tariffP,
+      nights: now,
+      summary: { now: mockSummary(now), before: mockSummary(then) },
+    }
+  }
+
+  async setTariff(pencePerKwh: number | null): Promise<{ tariff_p: number | null }> {
+    this.tariffP = pencePerKwh
+    return { tariff_p: pencePerKwh }
+  }
 
   async getNote(wakeOn: string): Promise<NightNote> {
     return this.notes.get(wakeOn) ?? mockNote(wakeOn)

@@ -793,3 +793,54 @@ export interface WithingsStatus {
   last_error: string | null
   latest_night: string | null
 }
+
+/** The stretches Trends offers. See backend/hydrosnooze/trends.py. */
+export type TrendRange = 30 | 90 | 365
+
+/** One night, as Trends draws it. Null wherever nothing measured it: a gap, never a nought. */
+export interface TrendNight {
+  wake_on: string
+  score: number | null
+  asleep_s: number | null
+  deep_s: number | null
+  rem_s: number | null
+  deep_rem_s: number | null
+  latency_s: number | null
+  /** The bed across the night, each part by how long it ran. */
+  bed_c: number | null
+  room_c: number | null
+  kwh: number | null
+  /** Pence, when a rate is set. */
+  cost_p: number | null
+  rating: number | null
+  /** Tag labels. */
+  tags: string[]
+  /** Tagged with something that leaves it out of the scoreboard. It stays in here. */
+  left_out: boolean
+  test: 'deep' | 'rem' | null
+}
+
+export interface TrendSummary {
+  nights: number
+  score: number | null
+  deep_rem_s: number | null
+  latency_s: number | null
+  asleep_s: number | null
+  bed_c: number | null
+  room_c: number | null
+  kwh_per_night: number | null
+  kwh_total: number | null
+  cost_p_total: number | null
+}
+
+export interface Trends {
+  days: TrendRange
+  first: string
+  last: string
+  /** Pence per kWh, or null until it is set. */
+  tariff_p: number | null
+  nights: TrendNight[]
+  /** This stretch, and the same number of mornings before it. */
+  summary: { now: TrendSummary; before: TrendSummary }
+}
+

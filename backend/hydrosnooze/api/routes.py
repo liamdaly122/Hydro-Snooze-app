@@ -19,6 +19,7 @@ from ..models import (
     modes_for,
     range_for,
 )
+from .. import trends
 from ..sequences import CommandFailed
 from ..service import Service
 from .schemas import (
@@ -402,6 +403,29 @@ async def post_autopilot_switch(request: Request, body: AutopilotSwitch) -> dict
     if body.on is not None:
         out = await service.set_autopilot(body.on)
     return out
+
+
+@router.get("/trends")
+async def get_trends(request: Request, days: int = 90) -> dict[str, object]:
+    """A row per night over the last 30, 90 or 365 mornings, and a summary of
+    them against the same stretch before. See trends.py."""
+    if days not in trends.RANGES:
+        raise HTTPException(422, f"days must be one of {', '.join(map(str, trends.RANGES))}")
+    service = _service(request)
+    return trends.trends(service.db, service.clock.now().date(), days, service.db.tariff_p())
+
+
+class TariffBody(BaseModel):
+    #: Pence per kWh. None clears it. A flat rate: a tariff that changes by the
+    #: hour would need the readings priced one by one, and this does not.
+    pence_per_kwh: float | None = Field(default=None, gt=0, le=200)
+
+
+@router.put("/trends/tariff")
+async def put_tariff(request: Request, body: TariffBody) -> dict[str, object]:
+    service = _service(request)
+    service.db.set_tariff_p(body.pence_per_kwh)
+    return {"tariff_p": service.db.tariff_p()}
 
 
 @router.get("/learning")

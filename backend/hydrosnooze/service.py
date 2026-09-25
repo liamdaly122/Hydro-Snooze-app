@@ -51,6 +51,7 @@ from .models import (
     Schedule,
     NUDGE_LIMIT_C,
     NUDGE_MINUTES,
+    PRECONDITION_MAX_MINUTES,
     QUIET_KIND,
     Stage,
     StageStep,
@@ -1997,6 +1998,10 @@ class Service:
             [m.at for m in marks if m.kind == autopilot.BY_HAND],
             rebuilt=rebuilt,
         )
+        # What it used, the same figure the morning report gives. Not nought
+        # when the plug said nothing: that is a night nobody measured.
+        if len(samples) >= 2:
+            run = replace(run, kwh=report.kwh(samples))
         # A test night is one only if the test temperature is what actually ran.
         # Taken and then put back to usual, or changed again by hand, it was not.
         decided = self.db.decision_for(run.wake_on)
@@ -2033,7 +2038,26 @@ class Service:
                 self.scheduler.shape(self.schedule, wake_on).plan_for(wake_on), rebuilt=True
             )
             written += 1
+        self._fill_in_kwh(first, last)
         return written
+
+    def _fill_in_kwh(self, first: str, last: str) -> None:
+        """What each earlier night used, on rows written before that was kept.
+
+        From the plug's readings between lights out, less the longest the bed
+        can take getting ready and the hour of margin the morning report uses,
+        and half an hour after the alarm: the morning report's own window, as
+        near as the row can say without the evening's plan.
+        """
+        for run in self.db.night_runs(first, last):
+            if run.kwh is not None:
+                continue
+            ahead = timedelta(minutes=PRECONDITION_MAX_MINUTES) + timedelta(hours=1)
+            samples = self.db.night_history(
+                run.bedtime_at - ahead, run.wake_at + timedelta(minutes=30)
+            )
+            if len(samples) >= 2:
+                self.db.set_night_kwh(run.wake_on, report.kwh(samples))
 
     # --- Holding the bed at the number (hold.py) ---------------------------------
 

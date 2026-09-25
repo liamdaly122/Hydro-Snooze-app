@@ -201,7 +201,7 @@ export function App({ client, auth, onAuth }: Props) {
         ) : screen === 'dev' ? (
           <Dev state={state} realPlug={!(info?.fake_power_monitor ?? true)} />
         ) : screen === 'history' ? (
-          <History power={power} events={events} />
+          <History client={client} power={power} events={events} />
         ) : screen === 'report' ? (
           <HealthReport client={client} onOpenAutopilot={() => openFromMenu('autopilot')} />
         ) : view === 'holiday' ? (

@@ -592,6 +592,12 @@ API rather than read. Read that before writing any of it.
       scoreboard, which nothing the mat measures could. Alcohol, Ill and Someone else in the
       bed leave a night out of the scoreboard, and say so; the other tags are recorded only
 - [ ] Rate a fortnight of mornings, so Wake has something to compare
+- [x] Trends, at the top of History: 30 days, 90 days or a year of nights, the sleep
+      score, deep and REM, time to fall asleep, the bed against the room, and the energy,
+      each as a seven-night average over the nights themselves, set against the same
+      stretch before. Every night kWh is written down with the morning's record, the same
+      figure the morning report gives, and older nights are filled in from the plug
+- [ ] Set the electricity rate on the Trends card, so it shows the cost
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

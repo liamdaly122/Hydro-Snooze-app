@@ -121,6 +121,7 @@ backend/hydrosnooze/
   notify.py            push, when something needs saying
   access.py            the password, signed-in devices, and what came through Tailscale
   notes.py             how a night felt, and the tags that leave one out of the scoreboard
+  trends.py            weeks and months of nights, and what they cost
   watchdog.py          the last line of defence
   pi.py                temperature, throttling, disk, uptime
   ircodes.py           the eight captured codes
@@ -146,7 +147,7 @@ frontend/src/
   screens/Alarm.tsx    the wake time, and the way into the whole schedule
   screens/CoolingSpeed.tsx  the cooling speed, now or for tonight
   screens/Status.tsx   what the unit is doing, as far as anything can tell
-  screens/History.tsx  power, temperature and the event log
+  screens/History.tsx  trends over weeks and months, then power, temperature and the event log
   screens/Holiday.tsx  holiday mode: the day I leave and the day I am back
   screens/Dev.tsx      the time machine and the press log
 scripts/dev.sh         run the whole thing on this machine

@@ -261,3 +261,18 @@ def test_filling_in_never_touches_what_the_morning_wrote(service):
     service.clock.jump_to(datetime.combine(WAKE, time(9, 0)))
     assert service.record_missing() == 0
     assert service.db.night_runs()[0].rebuilt is False
+
+
+def test_the_morning_writes_down_what_the_night_used(service):
+    """The same figure the morning report gives, from the same readings, so
+    Trends and the push can never disagree about a night's energy."""
+    from hydrosnooze import report
+
+    morning = WAKE - timedelta(days=1)
+    plan = service.schedule.plan_for(morning)
+    keep(service, readings(plan))
+    run = service.record_night(plan)
+    start, end = report.window(plan)
+    assert run is not None and run.kwh is not None
+    assert run.kwh == report.kwh(service.db.night_history(start, end))
+    assert service.db.night_runs()[0].kwh == run.kwh

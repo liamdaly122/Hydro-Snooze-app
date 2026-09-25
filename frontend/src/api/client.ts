@@ -11,6 +11,8 @@
  */
 
 import type {
+  TrendRange,
+  Trends,
   NightNote,
   NightNotePatch,
   AuthState,
@@ -75,6 +77,11 @@ export interface ApiClient {
   signOut(): Promise<AuthState>
   /** Every device, this one included. For a phone that has gone missing. */
   signOutEverywhere(): Promise<AuthState>
+
+  /** The nights over weeks and months. See trends.py. */
+  getTrends(days: TrendRange): Promise<Trends>
+  /** Pence per kWh, or null to clear it. */
+  setTariff(pencePerKwh: number | null): Promise<{ tariff_p: number | null }>
 
   /** How a night felt, keyed by the morning it ended. See notes.py. */
   getNote(wakeOn: string): Promise<NightNote>

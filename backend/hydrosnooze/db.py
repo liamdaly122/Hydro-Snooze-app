@@ -314,7 +314,8 @@ CREATE TABLE IF NOT EXISTS preferences (
     learning_on  INTEGER NOT NULL DEFAULT 1,
     timing_since TEXT,
     autopilot_on INTEGER NOT NULL DEFAULT 1,
-    hold         TEXT    NOT NULL DEFAULT 'balanced'
+    hold         TEXT    NOT NULL DEFAULT 'balanced',
+    tariff_p     REAL
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -417,7 +418,8 @@ CREATE TABLE IF NOT EXISTS night_runs (
     test_part     TEXT,
     test_offset_c INTEGER,
     rebuilt       INTEGER NOT NULL DEFAULT 0,
-    written_at    TEXT    NOT NULL
+    written_at    TEXT    NOT NULL,
+    kwh           REAL
 );
 
 -- What was decided about each evening's suggestion (suggest.py), one row per
@@ -607,6 +609,15 @@ class Database:
             self._db.execute(
                 "ALTER TABLE preferences ADD COLUMN hold TEXT NOT NULL DEFAULT 'balanced'"
             )
+        # What electricity costs, for Trends. NULL until it is set.
+        if "tariff_p" not in prefs:
+            self._db.execute("ALTER TABLE preferences ADD COLUMN tariff_p REAL")
+
+        # What each night used. NULL on rows from before, filled in from the
+        # plug's readings by Service.record_missing.
+        runs = {r["name"] for r in self._db.execute("PRAGMA table_info(night_runs)")}
+        if "kwh" not in runs:
+            self._db.execute("ALTER TABLE night_runs ADD COLUMN kwh REAL")
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
@@ -1601,13 +1612,14 @@ class Database:
         ])
         self._db.execute(
             "INSERT INTO night_runs (wake_on, bedtime_at, wake_at, parts, room_c, test_part, "
-            "test_offset_c, rebuilt, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "test_offset_c, rebuilt, written_at, kwh) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(wake_on) DO UPDATE SET "
             "bedtime_at = excluded.bedtime_at, wake_at = excluded.wake_at, "
             "parts = excluded.parts, room_c = excluded.room_c, "
             "test_part = COALESCE(excluded.test_part, night_runs.test_part), "
             "test_offset_c = COALESCE(excluded.test_offset_c, night_runs.test_offset_c), "
-            "rebuilt = excluded.rebuilt, written_at = excluded.written_at "
+            "rebuilt = excluded.rebuilt, written_at = excluded.written_at, "
+            "kwh = COALESCE(excluded.kwh, night_runs.kwh) "
             "WHERE excluded.rebuilt = 0 OR night_runs.rebuilt = 1",
             (
                 run.wake_on,
@@ -1619,7 +1631,26 @@ class Database:
                 run.test_offset_c,
                 int(run.rebuilt),
                 written_at.isoformat(),
+                run.kwh,
             ),
+        )
+        self._db.commit()
+
+    def set_night_kwh(self, wake_on: str, kwh: float) -> None:
+        """Fill in what an earlier night used, on a row written before it was kept."""
+        self._db.execute("UPDATE night_runs SET kwh = ? WHERE wake_on = ?", (kwh, wake_on))
+        self._db.commit()
+
+    def tariff_p(self) -> float | None:
+        """What a kWh costs, in pence, or None until it has been set."""
+        row = self._db.execute("SELECT tariff_p FROM preferences WHERE id = 1").fetchone()
+        return None if row is None else row["tariff_p"]
+
+    def set_tariff_p(self, pence: float | None) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, tariff_p) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET tariff_p = excluded.tariff_p",
+            (pence,),
         )
         self._db.commit()
 
@@ -1794,6 +1825,7 @@ def _night_run(row: sqlite3.Row) -> NightRun:
         test_part=row["test_part"],
         test_offset_c=row["test_offset_c"],
         rebuilt=bool(row["rebuilt"]),
+        kwh=row["kwh"],
     )
 
 

@@ -10,6 +10,8 @@
 
 import { ApiError, SIGNED_OUT_EVENT, type ApiClient, type LiveUpdate } from './client'
 import type {
+  TrendRange,
+  Trends,
   NightNote,
   NightNotePatch,
   AuthState,
@@ -72,6 +74,13 @@ export class HttpApiClient implements ApiClient {
     request<AuthState>('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
   signOut = () => request<AuthState>('/api/auth/logout', { method: 'POST' })
   signOutEverywhere = () => request<AuthState>('/api/auth/logout-everywhere', { method: 'POST' })
+
+  getTrends = (days: TrendRange) => request<Trends>(`/api/trends?days=${days}`)
+  setTariff = (pencePerKwh: number | null) =>
+    request<{ tariff_p: number | null }>('/api/trends/tariff', {
+      method: 'PUT',
+      body: JSON.stringify({ pence_per_kwh: pencePerKwh }),
+    })
 
   getNote = (wakeOn: string) => request<NightNote>(`/api/notes?date=${wakeOn}`)
   saveNote = (wakeOn: string, patch: NightNotePatch) =>
