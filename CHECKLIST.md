@@ -540,6 +540,30 @@ API rather than read. Read that before writing any of it.
 - [ ] See what an unfinished night looks like. The Pi writes it down by itself now:
       `journalctl -u hydrosnooze | grep "Withings observed"` on a morning after a trip out of bed
 - [ ] Check the error table in [docs/withings.md](docs/withings.md#errors) against `openapi.yaml`
+- [x] Sleep timing, step one of a cleverer Autopilot: when I fall asleep and when my deep sleep is
+      mostly done, against where Drift and Deep end, with a tap to move them.
+      **Built, and seen at phone size against invented nights.** It needs fourteen real nights on
+      schedule mornings before it suggests anything
+- [x] Tidy the Autopilot screen. The footnotes went behind an "i" on each card, which opens them
+      in a sheet, and Sleep timing and Learning fold down to one line each. Sleep timing counts
+      its nights with a bar and has its own Start again
+- [x] Step two, the record: what each part of each night was set to, read from what the bed was
+      asked for, written every morning by itself and filled in back to when the mat went in
+- [x] Step two, the scoreboard: each setting each part has run at and the sleep on those nights,
+      saying not sure yet until a gap is bigger than the swing between ordinary nights
+- [x] Step two, the evening suggestion: tonight's Deep and REM from the scoreboard, a degree
+      either side in one part about one night in three, marked as a test. **Pushes for deep sleep
+      and REM together; limits two degrees either side, widenable to three.** Seen against invented
+      nights; the first real test night is the next thing to look at
+- [x] One switch over all of Autopilot. Off runs exactly the temperatures set, and puts tonight
+      back to usual if it was running a suggestion. Home names a taken suggestion as Autopilot's
+      and does not offer to save a test temperature as the usual
+- [x] The morning result: Last night's test on the Autopilot screen, set beside the usual
+- [x] Hold the bed at the number: a Hold setting for warm parts (Quiet, Balanced, Close; Balanced by
+      default) and a night-time trim that moves the setting a degree after half an hour off it.
+      **Built and tested against a simulated bed.** The first real night at Balanced is the next
+      thing to look at: the on-target figure on the Autopilot screen says how it went
+- [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

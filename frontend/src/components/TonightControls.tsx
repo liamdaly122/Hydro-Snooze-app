@@ -77,6 +77,10 @@ export function KeepTonight({
   onKeep: () => void
 }) {
   if (!tonight.stages_changed) return null
+  // Not for Autopilot's suggestion. Saving a test temperature as the usual ends
+  // the test before it has been measured, and moves the usual every later
+  // suggestion is set against. Back to usual is still the undo for it.
+  if (tonight.suggested) return null
 
   const moved = tonight.running.stages.filter((s) => {
     const before = usualStages.find((u) => u.stage === s.stage)

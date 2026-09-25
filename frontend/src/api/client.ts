@@ -12,6 +12,8 @@
 
 import type {
   AutopilotNight,
+  AutopilotSwitch,
+  HoldName,
   HealthReport,
   Learning,
   DeviceEvent,
@@ -25,6 +27,9 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  Scoreboard,
+  SleepTiming,
+  Suggestion,
   WithingsStatus,
 } from '../types'
 
@@ -109,6 +114,34 @@ export interface ApiClient {
    * is no sleep at all yet, which getWithings then explains.
    */
   getHealthReport(date?: string): Promise<HealthReport>
+  /**
+   * The recent nights against the schedule's parts: when I fall asleep, when my
+   * deep sleep is mostly done, and where the boundaries could move to. Always
+   * answers, with "N more nights" before there is enough to say.
+   */
+  getSleepTiming(): Promise<SleepTiming>
+  /** Start counting again, for a routine that has changed. The nights are kept. */
+  forgetSleepTiming(): Promise<SleepTiming>
+  /** Each temperature each part has run at, and the sleep on those nights. */
+  getScoreboard(): Promise<Scoreboard>
+  /**
+   * The switch over all of Autopilot: learned timings and corrections, the
+   * drift response and the evening suggestion. Off, the bed runs exactly the
+   * temperatures set, and tonight goes back to usual if it was running a
+   * suggestion.
+   */
+  getAutopilotSwitch(): Promise<AutopilotSwitch>
+  setAutopilotSwitch(on: boolean): Promise<AutopilotSwitch>
+  /** How closely warm parts are held: quiet, balanced or close. */
+  setHold(hold: HoldName): Promise<AutopilotSwitch>
+  /** Tonight's suggested Deep and REM, and where it is up to. */
+  getSuggestion(): Promise<Suggestion>
+  /** Use it for tonight. Changes tonight only; the routine is untouched. */
+  acceptSuggestion(): Promise<Suggestion>
+  /** Not tonight. */
+  declineSuggestion(): Promise<Suggestion>
+  /** How many degrees either side of the usual Deep and REM it may go, 1 to 3. */
+  setSuggestionReach(reach: number): Promise<Suggestion>
   /** Where the Withings connection is up to. */
   getWithings(): Promise<WithingsStatus>
   /** Fetch now. `asked` is false when it was too soon after the last time. */

@@ -3,8 +3,9 @@ import { TemperatureCard } from '../components/TemperatureCard'
 import { TonightBanner } from '../components/TonightBanner'
 import { HolidayBanner } from '../components/HolidayBanner'
 import { KeepTonight, NudgeControls } from '../components/TonightControls'
+import { SuggestionCard } from '../components/Suggestion'
 import type { ApiClient } from '../api/client'
-import type { DeviceState, Holiday, Schedule, Stage, TonightState } from '../types'
+import type { DeviceState, Holiday, Schedule, Stage, Suggestion, TonightState } from '../types'
 
 // Its own chunk, fetched after the rest of the screen is up. A 3D engine is
 // most of the app by weight, and the temperature should never wait for it.
@@ -46,8 +47,34 @@ export function Home({
 }: Props) {
   const [draft, setDraft] = useState<Schedule>(schedule)
   const [error, setError] = useState<string | null>(null)
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
+  const [deciding, setDeciding] = useState(false)
 
   useEffect(() => setDraft(schedule), [schedule])
+
+  // Asked again when the evening opens and whenever tonight changes, so a
+  // suggestion answered or overtaken by a change made by hand goes away.
+  useEffect(() => {
+    let live = true
+    void client
+      .getSuggestion()
+      .then((s) => live && setSuggestion(s))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [client, tonight?.phase, tonight?.changed])
+
+  function decide(work: Promise<Suggestion>) {
+    setError(null)
+    setDeciding(true)
+    void work
+      .then(setSuggestion)
+      .then(() => client.getTonight())
+      .then(onTonight)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setDeciding(false))
+  }
 
   function run(work: Promise<TonightState>) {
     setError(null)
@@ -77,6 +104,16 @@ export function Home({
           tonight={tonight}
           usual={schedule}
           onClear={() => run(client.clearTonight())}
+        />
+      )}
+
+      {/* Evenings only, and only until it is answered. */}
+      {suggestion && (
+        <SuggestionCard
+          suggestion={suggestion}
+          busy={deciding}
+          onAccept={() => decide(client.acceptSuggestion())}
+          onDecline={() => decide(client.declineSuggestion())}
         />
       )}
 

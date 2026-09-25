@@ -135,6 +135,21 @@ def test_fetching_now_then_the_health_report(client):
     assert client.get("/api/health-report", params={"date": "2026-13-45"}).status_code == 422
 
 
+def test_sleep_timing_answers_before_there_is_any_sleep(client, service):
+    built = client.get("/api/sleep-timing").json()
+    assert built["nights"] == 0 and built["profile"] is None
+    assert built["lights_out"] == service.schedule.bed_time.strftime("%H:%M")
+    assert [p["part"] for p in built["parts"]] == ["drift", "deep", "rem", "wake"]
+
+
+def test_starting_sleep_timing_again_says_so_in_the_log(client, service):
+    built = client.post("/api/sleep-timing/forget").json()
+    assert built["since"] == service.clock.now().date().isoformat()
+    assert client.get("/api/sleep-timing").json()["since"] == built["since"]
+    said = [e.message for e in service.events.recent() if e.kind == "sleep_timing"]
+    assert said and "starting again" in said[0]
+
+
 def test_disconnecting_keeps_the_sleep(client):
     connect(client)
     client.post("/api/withings/sync")
@@ -150,3 +165,29 @@ def test_connecting_and_fetching_never_press_a_button(client, service):
     client.delete("/api/withings")
     assert service.transmitter.sent == []
     assert not service._lock.locked()
+
+
+def test_the_scoreboard_answers_before_anything_is_recorded(client):
+    built = client.get("/api/scoreboard").json()
+    assert built["recorded"] == 0 and built["nights"] == 0
+    assert [p["verdict"] for p in built["parts"]] == ["empty", "empty", "empty"]
+
+
+def test_the_suggestion_answers_and_refuses_what_it_cannot_do(client):
+    got = client.get("/api/suggestion").json()
+    assert got["state"] in ("closed", "no_mat") and got["reach"] == 2
+    assert client.post("/api/suggestion/accept").status_code == 409
+    assert client.post("/api/suggestion/decline").status_code == 409
+    assert client.post("/api/suggestion/reach", json={"reach": 5}).status_code == 422
+    widened = client.post("/api/suggestion/reach", json={"reach": 3}).json()
+    assert widened["reach"] == 3
+
+
+def test_the_autopilot_switch_over_http(client):
+    assert client.get("/api/autopilot/switch").json()["on"] is True
+    assert client.post("/api/autopilot/switch", json={"on": False}).json()["on"] is False
+    assert client.get("/api/autopilot/switch").json()["on"] is False
+    assert client.post("/api/autopilot/switch", json={"hold": "close"}).json()["hold"] == "close"
+    assert client.post("/api/autopilot/switch", json={"hold": "loud"}).status_code == 422
+    assert client.get("/api/suggestion").json()["state"] == "off"
+    assert "suggested" in client.get("/api/tonight").json()

@@ -307,7 +307,29 @@ export interface Learning {
   modes: LearningMode[]
 }
 
+/** Last night's test, if it was one, and how it compared. See scoreboard.test_result. */
+export interface AutopilotTest {
+  part: 'deep' | 'rem'
+  label: string
+  set_c: number
+  usual_c: number
+  offset_c: number
+  /** Null until the morning's record is written; false when it does not count. */
+  counted: boolean | null
+  deep_s: number | null
+  rem_s: number | null
+  together_s: number | null
+  usual_mean_s: number | null
+  usual_nights: number
+  test_nights: number
+  needs: number
+  verdict: ScorePart['verdict']
+  leader_c: number | null
+}
+
 export interface AutopilotNight {
+  /** Whether last night was a test, and how it compared. Absent from older builds. */
+  test?: AutopilotTest | null
   wake_at: string
   starts_at: string
   adjustments: number
@@ -386,6 +408,28 @@ export interface TonightState {
   speed_changed: boolean
   nudge_c: number
   nudge_until: string | null
+  /**
+   * Tonight's change, when it is Autopilot's evening suggestion as it was taken.
+   * Home names it as Autopilot's and leaves out Save as my usual for it. Absent
+   * from older service builds.
+   */
+  suggested?: TonightSuggested | null
+}
+
+export interface TonightSuggested {
+  temps: Partial<Record<'deep' | 'rem', number>>
+  usual: Partial<Record<'deep' | 'rem', number>>
+  test: { part: 'deep' | 'rem'; offset_c: number } | null
+}
+
+/** How closely warm parts are held. See backend/hydrosnooze/hold.py. */
+export type HoldName = 'quiet' | 'balanced' | 'close'
+
+/** The switch over all of Autopilot, and how closely it holds the bed. */
+export interface AutopilotSwitch {
+  on: boolean
+  hold: HoldName
+  holds: { name: HoldName; label: string; describe: string }[]
 }
 
 /* --- Health Report -------------------------------------------------------------
@@ -491,6 +535,160 @@ export interface HealthBed {
   target_c: (number | null)[]
   by_stage: Partial<Record<SleepStateName | 'out_of_bed', BedInState>>
   measured: boolean
+}
+
+/** A part of the schedule's night, in minutes from lights out. */
+export interface TimingPart {
+  part: Stage
+  label: string
+  starts_min: number
+  ends_min: number
+  temp_c: number
+}
+
+/** The middle of the nights, and the middle half of them either side. */
+export interface TimingSpread {
+  median_min: number
+  low_min: number
+  high_min: number
+}
+
+/**
+ * One boundary the mat can speak to. Drift's end against when I fall asleep;
+ * Deep's end against when my deep sleep is mostly done.
+ */
+export interface TimingBoundary {
+  part: 'drift' | 'deep'
+  label: string
+  ends_min: number
+  measured: TimingSpread | null
+  /** Whether the nights agree closely enough to move it. Null with nothing measured. */
+  steady: boolean | null
+  /** Where to move it, or null: too few nights, too unsteady, or already there. */
+  suggest_min: number | null
+}
+
+/**
+ * When I really sleep, against the parts of the night the bed runs. Every time
+ * is minutes from the schedule's lights out.
+ */
+export interface SleepTiming {
+  nights: number
+  /** The last morning set aside by Start again, or null when every night counts. */
+  since: string | null
+  shows_at: number
+  suggests_at: number
+  lights_out: string
+  wake: string
+  night_minutes: number
+  bin_min: number
+  parts: TimingPart[]
+  /** How often each state was happening in each bin, 0 to 1. Null before shows_at. */
+  profile: Record<SleepStateName, number[]> | null
+  boundaries: TimingBoundary[]
+}
+
+/** One temperature a part has run at, and the sleep on those nights. */
+export interface ScoreSetting {
+  set_c: number
+  nights: number
+  tests: number
+  mean_s: number
+  sd_s: number
+  low_s: number
+  high_s: number
+  /** What else was going on: the bedroom, and what the bed actually averaged. */
+  room_c: number | null
+  bed_c: number | null
+  /** What a setting must not make worse, whatever it is scored on. */
+  awake_s: number | null
+  asleep_after_s: number | null
+  /** The two halves of a Deep or REM score, so a trade between them shows. */
+  deep_s: number | null
+  rem_s: number | null
+}
+
+export interface ScorePart {
+  part: 'deep' | 'rem' | 'drift'
+  label: string
+  /** What the part is scored on: deep sleep, REM, or time to fall asleep. */
+  measure: string
+  more_is_better: boolean
+  settings: ScoreSetting[]
+  /**
+   * empty: nothing yet. one_setting: only one temperature tried. not_sure: the
+   * gap is inside the night-to-night swing, or too few nights to compare.
+   * clear: the leader is ahead by more than the swing explains.
+   */
+  verdict: 'empty' | 'one_setting' | 'not_sure' | 'clear'
+  leader_c: number | null
+  runner_c: number | null
+  gap_s: number | null
+  swing_s: number | null
+}
+
+/** Each part's settings and the sleep on them, from night_runs and the mat. */
+export interface Scoreboard {
+  window_days: number
+  /** Nights written down, mat or not. */
+  recorded: number
+  /** Nights written down that the mat has too. */
+  nights: number
+  tests: number
+  setting_needs: number
+  parts: ScorePart[]
+}
+
+/**
+ * Where tonight's suggestion is up to. See Service.suggestion.
+ *
+ *   ready     offered, not yet answered
+ *   accepted  taken for tonight
+ *   declined  not tonight
+ *   undone    taken, then put back to usual
+ *   usual     nothing to change: tonight runs the usual
+ *   by_hand   tonight was already changed by hand
+ *   skipped   tonight is not running
+ *   no_mat    the Sleep Analyzer is not connected
+ *   off       Autopilot is switched off
+ *   closed    no night ahead yet: suggestions open in the evening
+ */
+export type SuggestionState =
+  | 'off'
+  | 'ready'
+  | 'accepted'
+  | 'declined'
+  | 'undone'
+  | 'usual'
+  | 'by_hand'
+  | 'skipped'
+  | 'no_mat'
+  | 'closed'
+
+export interface SuggestionPart {
+  part: 'deep' | 'rem'
+  label: string
+  usual_c: number
+  tonight_c: number
+  low_c: number
+  high_c: number
+  /** The part moved on purpose tonight. */
+  test: boolean
+}
+
+/** Tonight's suggested Deep and REM, from the scoreboard. */
+export interface Suggestion {
+  state: SuggestionState
+  wake_on: string | null
+  parts: SuggestionPart[]
+  test: { part: 'deep' | 'rem'; offset_c: number } | null
+  why: string | null
+  /** Degrees either side of the usual it may go, and the most it can be set to. */
+  reach: number
+  reach_max: number
+  /** About one night in this many is a test. */
+  test_every: number
+  limits: { part: 'deep' | 'rem'; label: string; low_c: number; high_c: number }[]
 }
 
 export interface HealthReport {

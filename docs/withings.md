@@ -435,6 +435,8 @@ Everything lives in `backend/hydrosnooze/withings/`, with its routes in
 | `parse.py` | Nights, stages and minutes, with every trap above stepped round |
 | `sync.py` | The loop, every half hour |
 | `health.py` | The Health Report, built on request from what is stored |
+| `timing.py` | When I really sleep, against the parts of the night the bed runs |
+| `scoreboard.py` | Each setting each part has run at, and the sleep on those nights |
 
 | Route | |
 |---|---|
@@ -444,6 +446,13 @@ Everything lives in `backend/hydrosnooze/withings/`, with its routes in
 | `POST /api/withings/sync` | Fetch now, at most every ten minutes |
 | `DELETE /api/withings` | Disconnect. The nights stay |
 | `GET /api/health-report?date=` | One night as the Health Report draws it, and its week |
+| `GET /api/sleep-timing` | When I really sleep, against the schedule's parts |
+| `POST /api/sleep-timing/forget` | Start again: the nights so far stop counting, and are kept |
+| `GET /api/scoreboard` | Each setting each part has run at, and the sleep on those nights |
+| `GET /api/suggestion` | Tonight's suggested Deep and REM, and where it is up to |
+| `POST /api/suggestion/accept` | Use it for tonight. Tonight only; the routine is untouched |
+| `POST /api/suggestion/decline` | Not tonight |
+| `POST /api/suggestion/reach` | How many degrees either side it may go, 1 to 3 |
 
 **The rule that outranks the rest holds in code, with a test for each half.** The
 loop is its own task and never takes the command lock: a test holds the lock and
@@ -501,6 +510,167 @@ measured sleep. In their place are deep sleep, REM and time to fall asleep from 
 mat, for the same morning, each against my usual: the median of up to fourteen
 nights before it within the last sixty days. The change appears once there are
 three. With no night on the mat for that morning, the section is not drawn at all.
+
+### Sleep timing
+
+Step one of a cleverer Autopilot, and the only step that changes nothing by
+itself. The Withings API only hands a night over once I am up, so the bed can
+never follow my stages as they happen. What it can do is run a night whose parts
+sit where my sleep usually falls. Deep sleep comes early in the night and REM
+late, fairly reliably, so a plan made from the nights before gets most of the
+way.
+
+`timing.py` lays the recent nights over the schedule's clock. It takes the last
+thirty nights within sixty days, only on mornings the schedule runs, and leaves
+out anything under three hours asleep. Each night is measured in minutes from
+that evening's lights out as the schedule has it, not from when I fell asleep,
+because the bed changes at a time on the wall whatever I am doing. A night I went
+to bed late is a night the Deep part started without me, and that belongs in the
+answer.
+
+From those nights it works out two times and draws one chart:
+
+- **When I fall asleep**, set against where Drift ends
+- **When my deep sleep is mostly done**, meaning four fifths of that night's deep
+  sleep had happened, set against where Deep ends. Not all of it, because a few
+  minutes of deep sleep often turn up late, and stretching Deep to cover them
+  would keep the bed at the Deep temperature through the REM it is meant to be
+  different for
+- **How often I was in deep sleep and in REM** at each ten minutes of the night,
+  with the schedule's parts drawn underneath on the same minutes
+
+The pattern is drawn from three nights. A boundary is only suggested from
+fourteen, and only when the middle half of the nights agree to within an hour.
+Wider than that and one time would be wrong on too many of them, so the card says
+the nights vary too much instead. A suggestion moves in the Schedule screen's
+fifteen-minute steps, so the same buttons walk it back. REM's end and the Wake
+part are never touched: when to start warming for the morning is a question about
+the alarm, not about sleep stages.
+
+The card is on the Autopilot screen, folded to one line ("Suggestions after 14
+nights", "2 suggestions ready") with a bar counting the nights until it has
+something to say. **Use suggested times** moves where Drift and Deep end and
+nothing else: the temperatures stay as they are.
+
+**Start again** is for a routine that has changed: a new job, a move. It stores
+this morning as the last one set aside (`preferences.timing_since`), and the count
+starts again from the next night. Nothing is deleted, the same rule as Start
+again on the Learning card, and it says so in the event log.
+
+### What each night ran, and the scoreboard
+
+Step two is learning which temperature in each part of the night goes with more
+deep sleep and more REM. That needs two things side by side for every night: what
+the bed was set to in each part, and what the mat measured. The mat's half was
+already stored. `backend/hydrosnooze/trials.py` is the other half, kept in the
+`night_runs` table, one row per morning.
+
+**The setting is read from the record, not the schedule.** Every power sample
+carries what the bed was being asked for (`target_c`: the number set, a hand
+nudge included, before the service's own correction). A part's setting is
+whatever was asked for through most of it. So a tonight-only change, a saved
+night loaded for one evening, or a part that never landed all come out as they
+really were.
+
+It is written by itself, with no app open:
+
+- **Each morning**, when the morning report goes out, from the night's own plan
+- **Every hour**, for any earlier morning with a night on the mat and no row: a
+  morning report that never ran, a service down over the wake time. These use
+  today's schedule for where each part starts and ends and are marked `rebuilt`;
+  the settings are still the recorded ones. The first start after this arrived
+  fills in every night since the mat went in. A rebuilt row never replaces one
+  the morning wrote
+
+A part does not count when nothing was asked for in it, when its setting was held
+for under half of it, or when anything was changed by hand during it (as the
+Autopilot screen attributes it, so the two agree). The row keeps a test night's
+part and offset too, for when the evening suggestions exist to make one.
+
+`withings/scoreboard.py` reads those rows beside the mat's nights for the last
+120 days. The mat's numbers are never copied into the row, because Withings goes
+on changing a night for most of the next day. Deep and REM are both scored on
+deep sleep and REM added together, because that is what Autopilot pushes for: a
+colder Deep that buys ten minutes of deep sleep with fifteen of REM is not a win,
+and scoring each part on its own stage would call it one. The split is kept
+beside each setting. Drift is scored on time to fall asleep. Wake is not scored:
+nothing the mat measures says how waking felt.
+
+**It never calls two settings apart on too little.** Each needs five nights, and
+the gap between the two best averages has to be more than twice the standard
+error their night-to-night swing gives at those numbers of nights. Until then it
+says not sure yet, which is the honest answer for the first months. Beside each
+setting it keeps the median room temperature, the bed's own average, time awake
+and time to fall asleep, so a warm week cannot pass for a good temperature and a
+setting that buys deep sleep with a restless night shows it.
+
+The Scoreboard card on the Autopilot screen draws it, folded to one line.
+
+### The evening suggestion
+
+`backend/hydrosnooze/suggest.py`. Each evening, once tonight's controls open,
+Autopilot suggests tonight's Deep and REM. Home shows it as a card with **Use for
+tonight** and **Not tonight**; the Autopilot screen has it folded, with the
+limits. Nothing changes unless it is taken, and taking it changes tonight only,
+through the same tonight-only change the temperature card makes, so the Tonight
+only line says what moved and Back to usual undoes it.
+
+The two decisions it needed, and what they became:
+
+- **What it pushes for:** deep sleep and REM together, as long as time awake and
+  time to fall asleep do not get worse. A leader that costs more than ten
+  minutes of either against the usual is not followed
+- **Limits:** two degrees either side of the usual Deep and REM to begin with,
+  widened to three on the Autopilot screen. Set around the schedule when first
+  needed or when changed, then left there: moving the usual later does not move
+  them, so a run of suggestions can never walk the bed somewhere nobody chose
+
+Most nights it suggests the best so far, which is the usual until the scoreboard
+calls something clearly ahead. About one night in three is a test: one part, one
+degree either side of the best, inside the limits and inside what the unit can
+do. It tests the part with fewer test nights so far and the side with fewer
+nights at it, so the scoreboard fills in evenly. The dice are seeded with the
+night's date, so opening the app twice in one evening shows the same thing.
+
+Drift and Wake are never moved. They are about falling asleep and waking up, and
+neither is what deep sleep and REM measure.
+
+It is not offered when the Sleep Analyzer is not connected (a test the mat
+cannot see teaches nothing), when tonight is skipped, or when tonight has already
+been changed by hand. What was decided is kept in the `suggestions` table, and the
+morning record marks a night as a test only if the test temperature is what the
+bed was actually asked for: taken and then put back to usual, it was not a test.
+
+On Home, tonight taken from a suggestion reads **Autopilot test tonight** (or
+Autopilot's suggestion tonight), with the usual beside each moved part and Back
+to usual as the undo. Save as my usual is not offered for it: saving a test
+temperature as the usual ends the test before it has been measured, and moves
+the usual every later suggestion is set against. Changed again by hand, tonight
+is somebody's own change like any other, with Save back, and the night no longer
+counts as a test.
+
+The morning after a test night, the Autopilot screen has a **Last night's test**
+card under the hero: what was tried, deep sleep and REM that night against the
+average at the usual temperature for that part, and how many nights the test
+temperature has towards the five it needs before it is compared at all. The
+verdict, when there is one, is the scoreboard's. Before the morning record is
+written it reads what was decided the evening before (`scoreboard.test_result`,
+served as `test` on `/api/autopilot`).
+
+### The Autopilot switch
+
+At the top of the Autopilot screen, over everything Autopilot does: learned
+timings and corrections (Learning keeps its own switch inside it), the drift
+response that moves to the quieter mode partway through a part, and the evening
+suggestion. Off, the bed runs exactly the temperatures set, at the times set, and
+still gets ready before lights out on the standard estimate. Turning it off puts
+tonight back to the usual Deep and REM if it was running a suggestion, and leaves
+any change made by hand alone. Every night is still written down either way, so
+the reports carry on and turning it back on loses nothing. Kept as
+`preferences.autopilot_on`, served at `GET` and `POST /api/autopilot/switch`.
+
+Step three, not built: the same choice made without asking, inside the same
+limits, under the same switch.
 
 To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
 restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report

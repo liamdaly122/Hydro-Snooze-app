@@ -3057,3 +3057,604 @@ a.pill {
 
 .ap-sleep__change--better { color: #7dffa0; }
 .ap-sleep__change--worse { color: #ffc978; }
+
+/* --- Sleep timing, on the Autopilot screen ---------------------------------- */
+
+.timing__sub {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.timing {
+  position: relative;
+  margin-top: 18px;
+}
+
+.timing__svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+/* The schedule's parts, on the same minutes as the chart above them. */
+.timing__parts {
+  display: flex;
+  margin-top: 6px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.timing__part {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-right: 1px solid rgb(0 0 0 / 0.6);
+}
+
+.timing__part:last-child {
+  border-right: 0;
+}
+
+.timing__part--drift,
+.timing__part--rem {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.timing__part--deep,
+.timing__part--wake {
+  background: rgb(255 255 255 / 0.05);
+}
+
+.timing__legend-suggest {
+  border-top: 2px dashed #7dffa0;
+}
+
+.timing__facts {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.timing__fact {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 12px;
+  row-gap: 2px;
+}
+
+.timing__fact-name {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.timing__fact-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.timing__fact-range {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.timing__use {
+  width: 100%;
+  margin: 12px 0 8px;
+}
+
+/* --- The "i" beside a card's title, and the sheet it opens ------------------- */
+
+.info-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -6px -6px -6px 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.info-btn:active {
+  background: var(--control);
+}
+
+/* Over the bottom bar and the drawer: it is the thing being read. */
+.info-scrim {
+  z-index: 40;
+  animation: drawer-fade 0.2s var(--ease);
+}
+
+.info-sheet {
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+}
+
+.info-sheet__body p {
+  margin: 0 0 12px;
+}
+
+.info-sheet__body p:last-child {
+  margin-bottom: 0;
+}
+
+/* At the end of the date line: the sparkle has the top corner. */
+.ap-hero__dateline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ap-hero__dateline .info-btn {
+  color: rgb(255 255 255 / 0.75);
+}
+
+/* --- Cards that fold ---------------------------------------------------------- */
+
+.fold__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fold__heading {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+
+.fold__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.fold__titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fold__summary {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-mid);
+}
+
+.fold__summary--ready {
+  color: #7dffa0;
+}
+
+.fold__chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 0.2s var(--ease);
+}
+
+.fold--open .fold__chevron {
+  transform: rotate(-90deg);
+}
+
+.fold__body {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+/* --- Nights counted, as a bar -------------------------------------------------- */
+
+.nights {
+  margin-top: 14px;
+}
+
+.nights__bar {
+  position: relative;
+}
+
+.nights__mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.35);
+}
+
+.nights__mark--passed {
+  background: var(--card);
+}
+
+.nights__caption {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* --- Inside the folds ----------------------------------------------------------- */
+
+.learn-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.learn-switch__label {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.timing__again {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+
+.timing__again-note {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* --- The scoreboard ----------------------------------------------------------- */
+
+.score-part + .score-part {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.score-part__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.score-part__measure {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.score-row {
+  display: grid;
+  /* A fixed width for the value, so every bar in a part ends in the same place
+     and the lengths can be compared by eye. */
+  grid-template-columns: 40px 1fr 64px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.score-row__temp {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.score-row__middle {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.score-row__track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  overflow: hidden;
+}
+
+.score-row__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgb(140 182 255 / 0.75);
+}
+
+.score-row__note {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.score-row__value {
+  text-align: right;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Too few nights to be compared yet: there, but not to be read into. */
+.score-row--few .score-row__temp,
+.score-row--few .score-row__value {
+  color: var(--text-dim);
+}
+
+.score-row--few .score-row__fill {
+  background: rgb(255 255 255 / 0.25);
+}
+
+.score-row--leads .score-row__fill {
+  background: #7dffa0;
+}
+
+.score-part__verdict {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.score-foot {
+  margin: 16px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* --- The evening suggestion --------------------------------------------------- */
+
+.suggest__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: #8cb6ff;
+}
+
+.suggest__rows {
+  display: grid;
+  gap: 8px;
+}
+
+.suggest__row {
+  display: grid;
+  grid-template-columns: 56px auto 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.suggest__part {
+  font-size: 15px;
+  color: var(--text-mid);
+}
+
+.suggest__temp {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.suggest__usual {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.suggest__chip {
+  align-self: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgb(125 255 160 / 0.14);
+  color: #7dffa0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.suggest__why {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.suggest__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.suggest__actions .sheet__btn {
+  height: 46px;
+  font-size: 15px;
+}
+
+.suggest__limits {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.suggest__limits-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.suggest__limits-title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.suggest__reach {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--control);
+}
+
+.suggest__reach-btn {
+  min-width: 44px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.suggest__reach-btn[aria-pressed='true'] {
+  background: rgb(255 255 255 / 0.14);
+  color: var(--text);
+}
+
+.suggest__limits-range {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* --- The switch over all of Autopilot ------------------------------------------ */
+
+.ap-switch__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ap-switch__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ap-switch__state {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-mid);
+}
+
+/* --- Last night's test --------------------------------------------------------- */
+
+.test-result__what {
+  margin: 14px 0 0;
+  font-size: 15px;
+  color: var(--text-mid);
+}
+
+.test-result__what b {
+  color: var(--text);
+}
+
+.test-result__compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.test-result__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.05);
+}
+
+.test-result__value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.test-result__figure--usual .test-result__value {
+  color: var(--text-mid);
+}
+
+.test-result__label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.test-result__split {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.test-result__gap {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.test-result__gap--more {
+  color: #7dffa0;
+}
+
+.test-result__gap--less {
+  color: #ffc978;
+}
+
+.ap-hold {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+
+.ap-hold__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ap-hold__title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.ap-hold__describe {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.ap-hold--off .ap-hold__title {
+  color: var(--text-dim);
+}

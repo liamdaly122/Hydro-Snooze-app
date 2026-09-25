@@ -11,6 +11,8 @@
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   AutopilotNight,
+  AutopilotSwitch,
+  HoldName,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -24,6 +26,9 @@ import type {
   ServiceInfo,
   Stage,
   TonightState,
+  Scoreboard,
+  SleepTiming,
+  Suggestion,
   WithingsStatus,
 } from '../types'
 
@@ -143,6 +148,29 @@ export class HttpApiClient implements ApiClient {
 
   getHealthReport = (date?: string) =>
     request<HealthReport>(`/api/health-report${date ? `?date=${date}` : ''}`)
+  getSleepTiming = () => request<SleepTiming>('/api/sleep-timing')
+  forgetSleepTiming = () =>
+    request<SleepTiming>('/api/sleep-timing/forget', { method: 'POST' })
+  getScoreboard = () => request<Scoreboard>('/api/scoreboard')
+  getAutopilotSwitch = () => request<AutopilotSwitch>('/api/autopilot/switch')
+  setAutopilotSwitch = (on: boolean) =>
+    request<AutopilotSwitch>('/api/autopilot/switch', {
+      method: 'POST',
+      body: JSON.stringify({ on }),
+    })
+  setHold = (hold: HoldName) =>
+    request<AutopilotSwitch>('/api/autopilot/switch', {
+      method: 'POST',
+      body: JSON.stringify({ hold }),
+    })
+  getSuggestion = () => request<Suggestion>('/api/suggestion')
+  acceptSuggestion = () => request<Suggestion>('/api/suggestion/accept', { method: 'POST' })
+  declineSuggestion = () => request<Suggestion>('/api/suggestion/decline', { method: 'POST' })
+  setSuggestionReach = (reach: number) =>
+    request<Suggestion>('/api/suggestion/reach', {
+      method: 'POST',
+      body: JSON.stringify({ reach }),
+    })
   getWithings = () => request<WithingsStatus>('/api/withings')
   syncWithings = () =>
     request<WithingsStatus & { asked: boolean }>('/api/withings/sync', { method: 'POST' })

@@ -32,7 +32,7 @@ from .adapters.probes import (
 )
 from .clock import Clock, RealClock, SimClock, VirtualClock
 from .config import Settings
-from .db import Database
+from .db import Database, Decided
 from .events import Event, EventLog
 from .models import (
     COOLING_RANGE,
@@ -60,11 +60,12 @@ from .models import (
     range_for,
     rehearsal_plan,
 )
-from . import autopilot, clocksync, pi, report, watchdog
+from . import autopilot, clocksync, hold, pi, report, suggest, trials, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
 from .withings import health as withings_health
+from .withings import scoreboard
 from .withings.sync import WithingsSync
 
 log = logging.getLogger(__name__)
@@ -210,6 +211,10 @@ HISTORY = timedelta(days=365 * 5)
 #: is trimmed by row count. Generous against the twenty-odd a real night writes,
 #: so the limit that actually bites is the age one above.
 EVENTS_KEPT = 40 * 365 * 5
+
+#: How far back the scoreboard looks, and so how far back a morning with a night
+#: on the mat and nothing written down for it gets filled in. See record_missing.
+RECORD_DAYS = 120
 
 #: How long without a completed tick before the scheduler counts as stuck.
 #: Generous against a one second loop, and far shorter than a stage boundary.
@@ -418,6 +423,13 @@ class Service:
 
         # When a mode was last changed by a correction rather than by a stage.
         self._mode_changed_at: datetime | None = None
+        # The trim (hold.py): degrees added to what is sent, per mode, for the
+        # part running now, and the readings since anything last changed.
+        self._trims: dict[Mode, int] = {}
+        self._trim_part: tuple[datetime, int] | None = None
+        self._trim_mode: Mode | None = None
+        self._trim_readings: list[tuple[datetime, float]] = []
+        self._trim_limit_told: tuple[datetime, int] | None = None
         #: When the running temperature was last re-asserted off the plan. Keeps
         #: a blaster that has gone away from being retried on every sample.
         self._followed_at: datetime | None = None
@@ -747,6 +759,10 @@ class Service:
 
         if self.withings.configured:
             self._tasks.append(asyncio.create_task(self.withings.run(), name="withings"))
+
+        # Anything the scoreboard is missing, which on the first start after it
+        # arrived is every night since the mat went in.
+        self._record_missing_quietly()
 
         if self.notifier.enabled:
             self.events.info("service", "Notifications on. Problems will reach the phone.")
@@ -1120,6 +1136,7 @@ class Service:
         )
         if trusted:
             await self._correct_mode(step, power, now)
+            await self._trim(step, power, now)
             await self._follow_the_plan(step, power, now)
         # Not written down either while the clock is unconfirmed. A sample filed
         # an hour early lands in the wrong stage of the report, and a gap in the
@@ -1145,6 +1162,9 @@ class Service:
                 self.db.prune_power(now - HISTORY)
                 self.db.prune_events(keep=EVENTS_KEPT)
                 self._check_the_pi()
+                # A morning report that never ran, a service down over the
+                # wake time: the night still gets written down, within the hour.
+                self._record_missing_quietly()
 
     def _check_the_pi(self) -> None:
         """Ask the machine underneath whether it is coping.
@@ -1424,6 +1444,9 @@ class Service:
     async def _correct_mode(self, step: StageStep | None, power: Power, now: datetime) -> None:
         """Swap the running mode for the quieter one when the bed allows it.
 
+        Part of Autopilot, and off with it: the stage stays in the mode the
+        schedule gave it.
+
         The mode on the schedule card was decided at plan time from the stage
         before it. That is a prediction about a bed with nobody in it, and it is
         wrong in the one case that matters: a stage that steps the temperature up
@@ -1434,7 +1457,7 @@ class Service:
         So the question gets asked again every thirty seconds, with a measurement
         in hand, and the answer is allowed to differ from the plan.
         """
-        if step is None or power is not Power.ON:
+        if step is None or power is not Power.ON or not self.db.autopilot_on():
             return
         running = self.state.assumed_mode
         if running is None:
@@ -1443,12 +1466,15 @@ class Service:
             return
 
         bed = self.probes.bed_c
+        level = self._hold()
         wanted = quieter_mode(
             step.temp_c,
             running,
             bed,
             self.schedule.cooling_speed,
             cap_c=self.settings.max_temperature_c,
+            arrived_c=level.arrived_c,
+            fallen_c=level.fallen_c,
         )
         if wanted is None or wanted is running or bed is None:
             return
@@ -1750,7 +1776,7 @@ class Service:
         return max(low, min(high, target_c))
 
     def _learned_lead(self, mode: Mode, target_c: int, gap_c: float) -> int | None:
-        if not self.db.learning_on():
+        if not self._learning_active():
             return None
         return self.db.learned_lead_minutes(mode.value, target_c, gap_c)
 
@@ -1930,9 +1956,457 @@ class Service:
 
         self.events.add(summary.level, "report", summary.body)
         self.notifier.push(summary.title, summary.body, tag="sleeping_accommodation")
+
+        # And what the night ran, for the scoreboard. After the message and
+        # never in its way: a record that could not be written is a line in the
+        # log, and the hourly pass fills it in from the same readings later.
+        try:
+            self.record_night(plan)
+        except Exception:  # noqa: BLE001
+            log.exception("could not write down what the night ran")
         return True
 
+    # --- What each night ran, for the scoreboard --------------------------------
+
+    def record_night(self, plan: NightPlan, *, rebuilt: bool = False) -> trials.NightRun | None:
+        """Write down what a night ran: each part's setting, read from what was
+        recorded across it. See trials.py.
+
+        Who changed what by hand comes from the Autopilot screen's own reading of
+        the night, so the scoreboard and the screen agree about which nights
+        somebody touched. None for a rehearsal, which is nobody's night.
+        """
+        if plan.rehearsal:
+            return None
+        start, end = report.window(plan)
+        samples = self.db.night_history(start, end)
+        marks = autopilot.build(plan, samples, self.db.events_between(start, end), set()).marks
+        run = trials.build_run(
+            plan,
+            samples,
+            [m.at for m in marks if m.kind == autopilot.BY_HAND],
+            rebuilt=rebuilt,
+        )
+        # A test night is one only if the test temperature is what actually ran.
+        # Taken and then put back to usual, or changed again by hand, it was not.
+        decided = self.db.decision_for(run.wake_on)
+        if decided and decided.decision == "accepted" and decided.test_part:
+            tested = run.part(decided.test_part)
+            if tested and tested.set_c == decided.temps.get(decided.test_part):
+                run = replace(
+                    run, test_part=decided.test_part, test_offset_c=decided.test_offset_c
+                )
+        self.db.save_night_run(run, self.clock.now())
+        return run
+
+    def record_missing(self) -> int:
+        """Fill in every morning with a night on the mat and nothing written down.
+
+        Worked out from today's schedule for where each part starts and ends,
+        and marked rebuilt for it; the settings themselves are still the ones
+        recorded on the night. Never today, whose morning report writes the
+        exact one, and never over a row the morning wrote. Returns how many.
+        """
+        today = self.clock.now().date()
+        first = (today - timedelta(days=RECORD_DAYS)).isoformat()
+        last = (today - timedelta(days=1)).isoformat()
+        held = {r.wake_on for r in self.db.night_runs(first, last)}
+        written = 0
+        for night in self.db.sleep_nights(first, last):
+            if night.wake_on in held:
+                continue
+            held.add(night.wake_on)
+            self.record_night(
+                self.schedule.plan_for(date.fromisoformat(night.wake_on)), rebuilt=True
+            )
+            written += 1
+        return written
+
+    # --- Holding the bed at the number (hold.py) ---------------------------------
+
+    def _hold(self) -> hold.Hold:
+        return hold.HOLDS.get(self.db.hold(), hold.HOLDS[hold.DEFAULT_HOLD])
+
+    def set_hold(self, name: str) -> dict[str, Any]:
+        if name not in hold.HOLDS:
+            raise CommandFailed(
+                f"Hold is one of {', '.join(hold.HOLDS)}, not {name}."
+            )
+        self.db.set_hold(name)
+        level = hold.HOLDS[name]
+        self.events.info(QUIET_KIND, f"Holding warm parts: {level.label}. {level.describe}")
+        return self.autopilot_state()
+
+    def _reset_trim(self) -> None:
+        self._trims = {}
+        self._trim_part = None
+        self._trim_mode = None
+        self._trim_readings = []
+
+    def _trim_for(self, wanted_c: int, mode: Mode) -> int:
+        """The trim in force for this number in this mode, if it is the part's."""
+        if not self.db.autopilot_on() or self._trim_part is None:
+            return 0
+        return self._trims.get(mode, 0) if self._trim_part[1] == wanted_c else 0
+
+    async def _trim(self, step: StageStep | None, power: Power, now: datetime) -> None:
+        """Move what is sent a degree when the bed has sat off the number.
+
+        See hold.py. Every sample: note where the bed is, and once a full window
+        says the bed is off and staying off, send a degree more or less. Never
+        with Autopilot off, never while a nudge is moving the bed on purpose,
+        and never queued behind another command.
+        """
+        mode = self.state.assumed_mode
+        if not self.db.autopilot_on() or step is None or power is not Power.ON or mode is None:
+            self._reset_trim()
+            return
+        part = (step.starts_at, step.temp_c)
+        if part != self._trim_part:
+            self._reset_trim()
+            self._trim_part = part
+        if mode is not self._trim_mode:
+            self._trim_mode = mode
+            self._trim_readings = []
+        tonight = self.tonight_state()
+        if tonight is not None and tonight.nudge_at(now):
+            self._trim_readings = []
+            return
+        bed = self.probes.bed_c
+        if bed is None:
+            return
+        self._trim_readings.append((now, bed))
+        keep = hold.TRIM_WINDOW + timedelta(minutes=5)
+        self._trim_readings = [(at, c) for at, c in self._trim_readings if now - at <= keep]
+
+        way = hold.trim_needed(self._trim_readings, step.temp_c, now)
+        if way == 0 or self._lock.locked():
+            return
+        # The arithmetic only, never _corrected: that one writes a line into the
+        # night's log, and a line about a temperature with no command behind it
+        # reads to the Autopilot screen as somebody pressing a button.
+        now_trim = self._trims.get(mode, 0)
+        before = self._correction(step.temp_c, mode, now_trim).send_c
+        after = self._correction(step.temp_c, mode, now_trim + way).send_c
+        self._trims[mode] = now_trim + way
+        if after == before:
+            # Already as far as it may go: the limit, the mode's range or the
+            # safety cap. Said once a part, and the trim is left where it was.
+            self._trims[mode] -= way
+            self._trim_readings = []
+            if self._trim_limit_told != part:
+                self._trim_limit_told = part
+                self.events.info(
+                    QUIET_KIND,
+                    f"The bed is at {bed:.1f}C against a {step.temp_c}C part, and {before}C is "
+                    "already as far as the setting may go. Holding there.",
+                )
+            return
+
+        self._trim_readings = []
+        async with self._lock:
+            try:
+                await self._apply(mode, step.temp_c)
+            except CommandFailed as exc:
+                self._trims[mode] -= way
+                self._fail(QUIET_KIND, exc)
+                return
+        self.events.info(
+            QUIET_KIND,
+            f"The bed has sat at {bed:.1f}C against a {step.temp_c}C part for half an hour, "
+            f"so the unit is being sent {after}C now, a degree {'more' if way > 0 else 'less'}.",
+        )
+
+    # --- The switch over all of Autopilot -------------------------------------
+
+    def _learning_active(self) -> bool:
+        """Whether what has been learned about the bed is used: Autopilot on, and
+        Learning on inside it. Either off, and the head start is estimated and
+        the temperatures go out exactly as set."""
+        return self.db.autopilot_on() and self.db.learning_on()
+
+    def autopilot_state(self) -> dict[str, Any]:
+        return {
+            "on": self.db.autopilot_on(),
+            "hold": self._hold().name,
+            "holds": [
+                {"name": h.name, "label": h.label, "describe": h.describe}
+                for h in hold.HOLDS.values()
+            ],
+        }
+
+    async def set_autopilot(self, on: bool) -> dict[str, Any]:
+        """Everything Autopilot does, on or off.
+
+        Off: the bed runs exactly the temperatures set, at the times set. No
+        learned head start or correction, no drift response, no evening
+        suggestion, and tonight goes back to the usual Deep and REM if it was
+        running one. The bed still gets ready before lights out, on the
+        standard estimate, and every night is still written down, so turning it
+        back on loses nothing.
+        """
+        self.db.set_autopilot_on(on)
+        if on:
+            self.events.info(
+                LEARNING_KIND,
+                "Autopilot on: learned timings and corrections, the drift response and the "
+                "evening suggestion are back.",
+            )
+            return self.autopilot_state()
+
+        undone = self.tonight_suggested() is not None
+        if undone:
+            self._change_tonight(stages=None)
+        self.events.info(
+            LEARNING_KIND,
+            "Autopilot off: the bed runs exactly the temperatures you set, at the times you "
+            "set." + (" Tonight is back to your usual Deep and REM." if undone else ""),
+        )
+        if undone:
+            self._followed_at = None
+            await self._follow_the_plan(loud=True)
+        return self.autopilot_state()
+
+    def tonight_suggested(self) -> dict[str, Any] | None:
+        """Tonight's change, when it is Autopilot's suggestion as it was taken.
+
+        So Home can say "Autopilot test tonight" rather than "Tonight only", and
+        leave out Save as my usual: a test saved as the usual ends the test and
+        moves what every later suggestion is measured from. Changed again by
+        hand since, and it is somebody's own change like any other.
+        """
+        wake_on = self._tonight_date()
+        if wake_on is None:
+            return None
+        decided = self.db.decision_for(wake_on.isoformat())
+        if decided is None or decided.decision != "accepted":
+            return None
+        running = {s.stage.value: s.temp_c for s in self.tonight_now().stages}
+        if any(running.get(k) != v for k, v in decided.temps.items()):
+            return None
+        usual = {
+            part: self.schedule.stage(Stage(part)).temp_c
+            for part in decided.temps
+            if self.schedule.stage(Stage(part)) is not None
+        }
+        return {
+            "temps": decided.temps,
+            "usual": usual,
+            "test": None if not decided.test_part
+            else {"part": decided.test_part, "offset_c": decided.test_offset_c},
+        }
+
+    # --- The evening suggestion (suggest.py) -----------------------------------
+
+    def _mat_ready(self) -> bool:
+        """Whether tonight will be measured. A test the mat cannot see is a night
+        spent on a different temperature for nothing."""
+        return self.withings.configured and self.db.withings_account() is not None
+
+    def _suggest_limits(self) -> dict[str, suggest.Limit]:
+        """Each part's limits, set around the schedule the first time they are
+        needed and left there after, so they never follow the schedule about."""
+        held = self.db.suggest_limits()
+        out = {}
+        for part in suggest.PARTS:
+            if part not in held:
+                usual = self.schedule.stage(Stage(part))
+                if usual is None:
+                    continue
+                held[part] = (usual.temp_c, suggest.REACH_DEFAULT)
+                self.db.set_suggest_limit(part, *held[part])
+            out[part] = suggest.Limit(*held[part])
+        return out
+
+    def suggestion(self) -> dict[str, Any]:
+        """Tonight's suggestion, and where it is up to.
+
+            ready     offered, not yet answered
+            accepted  taken for tonight
+            declined  not tonight
+            undone    taken, then put back to usual
+            usual     nothing to change: tonight runs the usual
+            by_hand   tonight was already changed by hand, so it stays out of it
+            off       Autopilot is switched off
+            skipped   tonight is not running
+            no_mat    the Sleep Analyzer is not connected, so nothing would be learned
+            closed    no night ahead yet: suggestions open in the evening
+        """
+        limits = self._suggest_limits()
+        usual = {
+            part: self.schedule.stage(Stage(part)).temp_c
+            for part in suggest.PARTS
+            if self.schedule.stage(Stage(part)) is not None
+        }
+        out: dict[str, Any] = {
+            "state": "closed",
+            "wake_on": None,
+            "parts": [],
+            "test": None,
+            "why": None,
+            "reach": max((lim.reach for lim in limits.values()), default=suggest.REACH_DEFAULT),
+            "reach_max": suggest.REACH_MAX,
+            "test_every": suggest.TEST_EVERY,
+            "limits": [
+                {"part": part, "label": suggest.LABEL[part], "low_c": lim.low_c, "high_c": lim.high_c}
+                for part, lim in limits.items()
+            ],
+        }
+        if not self.db.autopilot_on():
+            out["state"] = "off"
+            return out
+        wake_on = self._tonight_date()
+        phase = self.tonight_phase()
+        if wake_on is None or phase in ("none", "after") or set(usual) != set(suggest.PARTS):
+            return out
+        out["wake_on"] = wake_on.isoformat()
+
+        decided = self.db.decision_for(wake_on.isoformat())
+        tonight = self.tonight_state()
+        if decided is not None:
+            running = {s.stage.value: s.temp_c for s in self.tonight_now().stages}
+            took = decided.decision == "accepted"
+            state = decided.decision
+            if took and any(running.get(k) != v for k, v in decided.temps.items()):
+                state = "undone"
+            out.update(
+                state=state,
+                parts=self._suggestion_parts(usual, decided.temps, limits, decided.test_part),
+                test=None if not decided.test_part
+                else {"part": decided.test_part, "offset_c": decided.test_offset_c},
+            )
+            return out
+        if phase != "evening":
+            return out
+        if not self._mat_ready():
+            out["state"] = "no_mat"
+            return out
+        if tonight is not None and tonight.skip:
+            out["state"] = "skipped"
+            return out
+        if tonight is not None and tonight.stages is not None:
+            out["state"] = "by_hand"
+            return out
+
+        low, high = COOLING_RANGE[0], min(WARMING_RANGE[1], self.settings.max_temperature_c)
+        choice = suggest.choose(
+            scoreboard.scoreboard(self.db, self.clock.now().date()),
+            usual,
+            limits,
+            wake_on.isoformat(),
+            lowest=low,
+            highest=high,
+        )
+        out.update(
+            state="ready" if choice.changes_anything else "usual",
+            parts=self._suggestion_parts(usual, choice.tonight, limits, choice.test_part),
+            test=None if choice.test_part is None
+            else {"part": choice.test_part, "offset_c": choice.test_offset_c},
+            why=choice.why,
+        )
+        return out
+
+    @staticmethod
+    def _suggestion_parts(usual, tonight, limits, test_part) -> list[dict[str, Any]]:
+        return [
+            {
+                "part": part,
+                "label": suggest.LABEL[part],
+                "usual_c": usual[part],
+                "tonight_c": tonight.get(part, usual[part]),
+                "low_c": limits[part].low_c,
+                "high_c": limits[part].high_c,
+                "test": part == test_part,
+            }
+            for part in suggest.PARTS
+            if part in usual and part in limits
+        ]
+
+    async def accept_suggestion(self) -> dict[str, Any]:
+        """Use tonight's suggestion for tonight. The routine is untouched."""
+        offered = self.suggestion()
+        if offered["state"] != "ready":
+            raise CommandFailed("There is no suggestion to take for tonight.")
+        temps = {p["part"]: p["tonight_c"] for p in offered["parts"]}
+        stages = tuple(
+            replace(s, temp_c=temps[s.stage.value]) if s.stage.value in temps else replace(s)
+            for s in self.tonight_now().stages
+        )
+        self._change_tonight(stages=stages)
+        test = offered["test"]
+        self.db.save_decision(
+            Decided(
+                wake_on=offered["wake_on"],
+                decision="accepted",
+                temps=temps,
+                test_part=test["part"] if test else None,
+                test_offset_c=test["offset_c"] if test else None,
+            ),
+            self.clock.now(),
+        )
+        said = ", ".join(
+            f"{p['label']} {p['tonight_c']}C{' (a test)' if p['test'] else ''}"
+            for p in offered["parts"]
+        )
+        self.events.info(
+            TONIGHT_KIND,
+            f"Using Autopilot's suggestion tonight: {said}. Your usual is untouched.",
+        )
+        self._followed_at = None
+        await self._follow_the_plan(loud=True)
+        return self.suggestion()
+
+    def decline_suggestion(self) -> dict[str, Any]:
+        """Not tonight. Tonight runs as it was going to."""
+        offered = self.suggestion()
+        if offered["state"] != "ready":
+            raise CommandFailed("There is no suggestion to turn down for tonight.")
+        self.db.save_decision(
+            Decided(offered["wake_on"], "declined", {}, None, None), self.clock.now()
+        )
+        self.events.info(TONIGHT_KIND, "Not using Autopilot's suggestion tonight.")
+        return self.suggestion()
+
+    def set_suggestion_reach(self, reach: int) -> dict[str, Any]:
+        """How far the suggestions may go, set around the schedule as it is now."""
+        if not 1 <= reach <= suggest.REACH_MAX:
+            raise CommandFailed(
+                f"Suggestions can go 1 to {suggest.REACH_MAX} degrees either side, not {reach}."
+            )
+        for part in suggest.PARTS:
+            usual = self.schedule.stage(Stage(part))
+            if usual is not None:
+                self.db.set_suggest_limit(part, usual.temp_c, reach)
+        self.events.info(
+            TONIGHT_KIND,
+            f"Autopilot's suggestions can now go {reach} degree{'s' if reach != 1 else ''} "
+            "either side of your usual Deep and REM.",
+        )
+        return self.suggestion()
+
+    def test_result(self, plan: NightPlan) -> dict[str, Any] | None:
+        """Last night's test and how it compared, for the Autopilot screen."""
+        return scoreboard.test_result(
+            self.db, plan.wake_at.date().isoformat(), self.clock.now().date()
+        )
+
+    def _record_missing_quietly(self) -> None:
+        try:
+            written = self.record_missing()
+        except Exception:  # noqa: BLE001
+            log.exception("could not write down what earlier nights ran")
+            return
+        if written:
+            log.info(
+                "wrote down what %d earlier %s ran, for the scoreboard",
+                written,
+                "night" if written == 1 else "nights",
+            )
+
     async def _run_stage(self, plan: NightPlan, step: StageStep) -> bool:
+        # A new part starts from the learned correction alone. What the last
+        # part needed says nothing about this one.
+        self._reset_trim()
         # PHASE_KIND rather than "stage", which still carries the warnings and the
         # retries. Autopilot counts adjustments by kind, and the alternative was
         # matching words in a message, which is the sort of thing that quietly
@@ -2705,22 +3179,27 @@ class Service:
 
     # --- The bed, not the dial -------------------------------------------------
 
-    def _correction(self, wanted_c: int, mode: Mode) -> Correction:
+    def _correction(self, wanted_c: int, mode: Mode, trim_c: int = 0) -> Correction:
         """The arithmetic on its own: what to send, and the drift behind it.
 
         Split out of `_corrected` so the Learning card can show what the
         correction is doing without a screen being read writing a line into the
         night's log. Nothing here has a side effect.
+
+        `trim_c` is the night-time trim on top (hold.py). Learned and trimmed
+        together stay within CORRECTION_LIMIT_C of what was asked for, and the
+        mode's range and the safety cap bound the result either way.
         """
         # The switch gates both learned things, and it is checked here rather
         # than somewhere clever, because this is the one that changes what the bed
         # does. Off means send exactly what was asked for.
-        off = self.db.learned_offset_c(mode.value, wanted_c) if self.db.learning_on() else None
-        if off is None or abs(off) < 0.5:
+        off = self.db.learned_offset_c(mode.value, wanted_c) if self._learning_active() else None
+        learned = 0 if off is None or abs(off) < 0.5 else round(-off)
+        if learned == 0 and trim_c == 0:
             return Correction(wanted_c, off, capped=False)
 
         # Away from the bed's drift: it lands 2.1 low, so send 2 high.
-        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, round(-off)))
+        shift = max(-CORRECTION_LIMIT_C, min(CORRECTION_LIMIT_C, learned + trim_c))
         send = self.settings.within(wanted_c + shift, mode)
         return Correction(send, off, capped=send != wanted_c + shift)
 
@@ -2742,10 +3221,13 @@ class Service:
         No correction at all until the bed has been measured enough times to have
         earned one. No correction is better than a confident wrong one.
         """
-        correction = self._correction(wanted_c, mode)
+        correction = self._correction(wanted_c, mode, self._trim_for(wanted_c, mode))
         send, off = correction.send_c, correction.drift_c
-        if send == wanted_c or off is None:
+        if send == wanted_c:
             return wanted_c
+        if off is None:
+            # The trim alone. It says what it is doing when it moves.
+            return send
 
         # Said once a night rather than at every boundary. It is worth knowing
         # that the number being sent is not the number on the screen, and not

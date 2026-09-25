@@ -184,12 +184,17 @@ class SpeedTonight(BaseModel):
 def _tonight(service: Service) -> dict[str, object]:
     # tonight_state rather than scheduler.tonight: the second is whatever was last
     # read off disk, and a row for a night that is over is spent.
-    return tonight_json(
-        service.tonight_now(),
-        service.tonight_state(),
-        service.tonight_phase(),
-        running=service.tonight_as_shown(),
-    )
+    return {
+        **tonight_json(
+            service.tonight_now(),
+            service.tonight_state(),
+            service.tonight_phase(),
+            running=service.tonight_as_shown(),
+        ),
+        # Tonight's change, when it is Autopilot's suggestion as taken. Home
+        # names it as such and leaves out Save as my usual for it.
+        "suggested": service.tonight_suggested(),
+    }
 
 
 @router.get("/tonight")
@@ -347,7 +352,35 @@ async def get_autopilot(request: Request) -> dict[str, object]:
     plan = service.scheduler.last_finished(service.schedule, service.clock.now())
     if plan is None:
         raise HTTPException(404, "No finished night to report on yet.")
-    return autopilot_json(service.night_report(plan))
+    # And whether it was a test, with how it compared: see scoreboard.test_result.
+    return {**autopilot_json(service.night_report(plan)), "test": service.test_result(plan)}
+
+
+class AutopilotSwitch(BaseModel):
+    on: bool | None = None
+    #: How closely warm parts are held: quiet, balanced or close. See hold.py.
+    hold: str | None = None
+
+
+@router.get("/autopilot/switch")
+async def get_autopilot_switch(request: Request) -> dict[str, object]:
+    """Whether Autopilot is on: learned timings and corrections, the drift
+    response and the evening suggestion. Off, the bed runs the set temperatures."""
+    return _service(request).autopilot_state()
+
+
+@router.post("/autopilot/switch")
+async def post_autopilot_switch(request: Request, body: AutopilotSwitch) -> dict[str, object]:
+    service = _service(request)
+    out = service.autopilot_state()
+    if body.hold is not None:
+        try:
+            out = service.set_hold(body.hold)
+        except CommandFailed as exc:
+            raise HTTPException(422, str(exc)) from exc
+    if body.on is not None:
+        out = await service.set_autopilot(body.on)
+    return out
 
 
 @router.get("/learning")

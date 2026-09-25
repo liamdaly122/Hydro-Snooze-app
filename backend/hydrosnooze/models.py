@@ -269,9 +269,16 @@ def quieter_mode(
     cooling_speed: Mode,
     *,
     cap_c: int,
+    arrived_c: float = -0.5,
+    fallen_c: float = 2.0,
 ) -> Mode | None:
     """The mode this stage should really be in, judged from the bed rather than
     the schedule. None means leave it alone, which is most of the time.
+
+    `arrived_c` and `fallen_c` are the Hold level's (hold.py): quiet once the
+    bed is at target + arrived_c, warming again at target - fallen_c. The
+    defaults are the Quiet level, which was the only behaviour before there was
+    a choice.
 
     `mode_for_target` decides at plan time, from the stage before it. That is a
     prediction, made hours early, about a bed with nobody in it. This is the same
@@ -298,11 +305,11 @@ def quieter_mode(
 
     if running is Mode.WARMING:
         # Arrived. Hand it to the quiet mode and let body heat do the rest.
-        return speed if bed_c >= target_c - QUIET_ARRIVED_C else None
+        return speed if bed_c >= target_c + arrived_c else None
 
     # Cooling, and losing. Nothing but warming can put heat back into a bed, and
     # it can only be asked for numbers it can reach.
-    if bed_c <= target_c - QUIET_FALLEN_C and target_c <= cap_c:
+    if bed_c <= target_c - fallen_c and target_c <= cap_c:
         return Mode.WARMING
     return None
 

@@ -23,6 +23,10 @@ export function TonightBanner({
 }) {
   if (!tonight.changed) return null
 
+  // Autopilot's evening suggestion, as it was taken. Named as Autopilot's, with
+  // the usual beside each moved part, so a test night reads as a test and not
+  // as something somebody set and forgot.
+  const suggested = tonight.suggested ?? null
   const parts: string[] = []
 
   if (tonight.skip) {
@@ -33,7 +37,11 @@ export function TonightBanner({
     for (const stage of tonight.running.stages) {
       const before = usual.stages.find((s) => s.stage === stage.stage)
       if (before && before.temp_c !== stage.temp_c) {
-        parts.push(`${STAGE_LABEL[stage.stage]} ${stage.temp_c}°`)
+        parts.push(
+          suggested
+            ? `${STAGE_LABEL[stage.stage]} ${stage.temp_c}°, usual ${before.temp_c}°`
+            : `${STAGE_LABEL[stage.stage]} ${stage.temp_c}°`,
+        )
       }
     }
     if (tonight.running.wake_time !== usual.wake_time) {
@@ -48,7 +56,13 @@ export function TonightBanner({
     <div className="tonight">
       <span className="tonight__dot" />
       <span className="tonight__text">
-        <span className="tonight__title">Tonight only</span>
+        <span className="tonight__title">
+          {suggested
+            ? suggested.test
+              ? 'Autopilot test tonight'
+              : "Autopilot's suggestion tonight"
+            : 'Tonight only'}
+        </span>
         <span className="tonight__sub">{parts.join(' · ') || 'changed'}</span>
       </span>
       <button type="button" className="tonight__undo" onClick={onClear}>

@@ -14,6 +14,9 @@
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
   AutopilotNight,
+  AutopilotSwitch,
+  AutopilotTest,
+  HoldName,
   AutopilotSleep,
   DeviceEvent,
   DeviceHealth,
@@ -29,13 +32,22 @@ import type {
   Profile,
   Schedule,
   ServiceInfo,
+  Scoreboard,
   SleepStage,
+  SleepTiming,
+  Suggestion,
   Stage,
   TonightPhase,
   TonightState,
   WithingsStatus,
 } from '../types'
-import { MAX_TEMPERATURE_C, MIN_STAGE_MINUTES, MODE_RANGE, WARMING_FLOOR_C } from '../types'
+import {
+  MAX_TEMPERATURE_C,
+  MIN_STAGE_MINUTES,
+  MODE_RANGE,
+  STAGE_LABEL,
+  WARMING_FLOOR_C,
+} from '../types'
 import { daysBetween, isoDay } from '../domain'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -362,6 +374,7 @@ export class MockApiClient implements ApiClient {
       speed_changed: t.cooling_speed !== null,
       nudge_c: t.nudge_c,
       nudge_until: t.nudge_until,
+      suggested: this.suggestedTonight(),
     }
   }
 
@@ -482,7 +495,8 @@ export class MockApiClient implements ApiClient {
 
   async getAutopilot(): Promise<AutopilotNight> {
     await sleep(120)
-    return { ...seedNight(), sleep: (await this.health()).autopilot_sleep }
+    const seed = await this.health()
+    return { ...seedNight(), sleep: seed.autopilot_sleep, test: seed.autopilot_test }
   }
 
   /**
@@ -507,6 +521,248 @@ export class MockApiClient implements ApiClient {
     if (held) return held
     // A week the seed has nothing for, so it can still be stepped through.
     return { week: emptyWeek(on), earliest: seed.earliest, latest: seed.latest, night: null }
+  }
+
+  /**
+   * The seed's Sleep timing, measured by the real timing.py against the seed
+   * site's starting schedule, with the parts and suggestions re-read from the
+   * schedule as it stands now. Mirrors _snap and _fit there, so taking a
+   * suggestion here leaves nothing to suggest, the way it does on the Pi. The
+   * nights stay measured from the starting lights out: moving lights out on the
+   * seed site does not move them.
+   */
+  async getSleepTiming(): Promise<SleepTiming> {
+    const seed = (await this.health()).timing
+    await sleep(120)
+    // Started again: nothing new has been slept since, on the seed site.
+    if (this.timingSince !== null) {
+      return { ...seed, nights: 0, since: this.timingSince, profile: null, boundaries: [] }
+    }
+    const step = MIN_STAGE_MINUTES
+    let cursor = 0
+    const parts = this.schedule.stages.map((s) => {
+      const part = {
+        part: s.stage,
+        label: STAGE_LABEL[s.stage],
+        starts_min: cursor,
+        ends_min: cursor + s.duration_minutes,
+        temp_c: s.temp_c,
+      }
+      cursor += s.duration_minutes
+      return part
+    })
+    const ends = Object.fromEntries(parts.map((p) => [p.part, p.ends_min])) as Record<Stage, number>
+    const snap = (target: number, current: number) =>
+      current + step * Math.floor((target - current) / step + 0.5)
+
+    const wanted: Partial<Record<Stage, number>> = {}
+    if (seed.nights >= seed.suggests_at) {
+      for (const b of seed.boundaries) {
+        if (b.steady && b.measured) wanted[b.part] = snap(b.measured.median_min, ends[b.part])
+      }
+    }
+    const deep = Math.min(wanted.deep ?? ends.deep, ends.rem - step)
+    const drift = Math.max(step, Math.min(wanted.drift ?? ends.drift, deep - step))
+    const fitted: Partial<Record<Stage, number>> = {}
+    if (deep - drift >= step) {
+      if (wanted.drift !== undefined || drift !== ends.drift) fitted.drift = drift
+      if (wanted.deep !== undefined) fitted.deep = deep
+    }
+
+    return {
+      ...seed,
+      lights_out: this.schedule.bed_time,
+      wake: this.schedule.wake_time,
+      night_minutes: this.schedule.night_minutes,
+      parts,
+      boundaries: seed.boundaries.map((b) => {
+        const to = fitted[b.part]
+        return {
+          ...b,
+          ends_min: ends[b.part],
+          suggest_min: to !== undefined && to !== ends[b.part] ? to : null,
+        }
+      }),
+    }
+  }
+
+  private timingSince: string | null = null
+
+  /**
+   * Tonight's suggestion, for the seed site. Always evening here, whatever the
+   * clock says, so the card can be seen at any hour: Deep a degree cooler than
+   * usual as a test, REM as usual. Taking it goes through setStageTonight, the
+   * same tonight-only change the service makes, so Tonight only and Back to
+   * usual behave as they do on the Pi.
+   */
+  private autopilotOn = true
+  private holdName: HoldName = 'balanced'
+
+  private switchJson(): AutopilotSwitch {
+    return {
+      on: this.autopilotOn,
+      hold: this.holdName,
+      holds: [
+        {
+          name: 'quiet',
+          label: 'Quiet',
+          describe:
+            'Quietest. The bed goes quiet half a degree short of a warm target and warms again at 2° below, so it can sit up to 2° under.',
+        },
+        {
+          name: 'balanced',
+          label: 'Balanced',
+          describe:
+            'Quiet once the bed reaches the target, warming again at 1° below. Within about a degree, with more warming time.',
+        },
+        {
+          name: 'close',
+          label: 'Close',
+          describe:
+            'Warm parts keep warming unless your body heat pushes the bed a degree over. Closest to the target, and the noisiest.',
+        },
+      ],
+    }
+  }
+
+  async getAutopilotSwitch(): Promise<AutopilotSwitch> {
+    await sleep(60)
+    return this.switchJson()
+  }
+
+  async setHold(hold: HoldName): Promise<AutopilotSwitch> {
+    await sleep(100)
+    this.holdName = hold
+    return this.switchJson()
+  }
+
+  /** Off puts tonight back to usual if it was running the suggestion, as on the Pi. */
+  async setAutopilotSwitch(on: boolean): Promise<AutopilotSwitch> {
+    await sleep(120)
+    this.autopilotOn = on
+    if (!on && this.suggestedTonight()) {
+      this.tonightState.stages = null
+      // As the service does after any change to tonight, so Home re-reads it.
+      this.emit({ schedule: { ...this.schedule } })
+    }
+    return this.switchJson()
+  }
+
+  /** Tonight's change, when it is the suggestion as taken. */
+  private suggestedTonight(): TonightState['suggested'] {
+    if (this.suggested.decision !== 'accepted' || this.tonightState.stages === null) return null
+    const offered = this.suggestionParts()
+    const running = this.tonightState.stages
+    const matches = offered.every(
+      (p) => (running.find((st) => st.stage === p.part)?.temp_c ?? p.usual_c) === p.tonight_c,
+    )
+    if (!matches) return null
+    const test = offered.find((p) => p.test)
+    return {
+      temps: Object.fromEntries(offered.map((p) => [p.part, p.tonight_c])),
+      usual: Object.fromEntries(offered.map((p) => [p.part, p.usual_c])),
+      test: test ? { part: test.part, offset_c: test.tonight_c - test.usual_c } : null,
+    }
+  }
+
+  private suggestionParts() {
+    return this.suggestionJson(true).parts
+  }
+
+  private suggested = {
+    decision: null as 'accepted' | 'declined' | null,
+    reach: 2,
+    centre: null as { deep: number; rem: number } | null,
+  }
+
+  private suggestionJson(ignoreSwitch = false): Suggestion {
+    const usualOf = (part: 'deep' | 'rem') =>
+      this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
+    const usual = { deep: usualOf('deep'), rem: usualOf('rem') }
+    this.suggested.centre ??= { ...usual }
+    const { reach, centre } = this.suggested
+    const low = (part: 'deep' | 'rem') => centre![part] - reach
+    const high = (part: 'deep' | 'rem') => centre![part] + reach
+    const deep = usual.deep - 1 >= low('deep') ? usual.deep - 1 : usual.deep + 1
+    const tonight = { deep, rem: usual.rem }
+    const running = (this.tonightState.stages ?? this.schedule.stages)
+    const undone =
+      this.suggested.decision === 'accepted' &&
+      running.find((st) => st.stage === 'deep')?.temp_c !== tonight.deep
+    return {
+      state:
+        !this.autopilotOn && !ignoreSwitch
+          ? 'off'
+          : undone
+            ? 'undone'
+            : (this.suggested.decision ?? 'ready'),
+      wake_on: isoDay(new Date(Date.now() + 86_400_000)),
+      parts: (['deep', 'rem'] as const).map((part) => ({
+        part,
+        label: part === 'deep' ? 'Deep' : 'REM',
+        usual_c: usual[part],
+        tonight_c: tonight[part],
+        low_c: low(part),
+        high_c: high(part),
+        test: part === 'deep',
+      })),
+      test: { part: 'deep', offset_c: deep - usual.deep },
+      why: `A test night: Deep a degree ${deep < usual.deep ? 'cooler' : 'warmer'} than the best so far, to see what it does to your deep sleep and REM.`,
+      reach,
+      reach_max: 3,
+      test_every: 3,
+      limits: (['deep', 'rem'] as const).map((part) => ({
+        part,
+        label: part === 'deep' ? 'Deep' : 'REM',
+        low_c: low(part),
+        high_c: high(part),
+      })),
+    }
+  }
+
+  async getSuggestion(): Promise<Suggestion> {
+    await sleep(100)
+    const s = this.suggestionJson()
+    // Off, the service sends the limits and nothing about tonight.
+    return s.state === 'off' ? { ...s, parts: [], test: null, why: null } : s
+  }
+
+  async acceptSuggestion(): Promise<Suggestion> {
+    const offered = this.suggestionJson()
+    if (offered.state !== 'ready') throw new ApiError('There is no suggestion to take for tonight.')
+    for (const p of offered.parts) {
+      if (p.tonight_c !== p.usual_c) await this.setStageTonight(p.part, p.tonight_c)
+    }
+    this.suggested.decision = 'accepted'
+    return this.suggestionJson()
+  }
+
+  async declineSuggestion(): Promise<Suggestion> {
+    await sleep(100)
+    this.suggested.decision = 'declined'
+    return this.suggestionJson()
+  }
+
+  async setSuggestionReach(reach: number): Promise<Suggestion> {
+    await sleep(100)
+    if (reach < 1 || reach > 3) throw new ApiError('Suggestions can go 1 to 3 degrees either side.')
+    const usualOf = (part: 'deep' | 'rem') =>
+      this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
+    this.suggested.reach = reach
+    this.suggested.centre = { deep: usualOf('deep'), rem: usualOf('rem') }
+    return this.suggestionJson()
+  }
+
+  /** From the seed's nights and what each ran, through the real scoreboard.py. */
+  async getScoreboard(): Promise<Scoreboard> {
+    const seed = await this.health()
+    await sleep(120)
+    return seed.scoreboard
+  }
+
+  async forgetSleepTiming(): Promise<SleepTiming> {
+    this.timingSince = isoDay(new Date())
+    return this.getSleepTiming()
   }
 
   async getWithings(): Promise<WithingsStatus> {
@@ -777,6 +1033,9 @@ interface HealthSeed {
   status: WithingsStatus
   reports: Record<string, HealthReport>
   autopilot_sleep: AutopilotSleep[]
+  timing: SleepTiming
+  scoreboard: Scoreboard
+  autopilot_test: AutopilotTest | null
 }
 
 /** Seven empty days, Sunday first, around a morning. */

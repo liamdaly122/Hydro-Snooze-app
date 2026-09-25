@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { Fold } from './Fold'
 import { Sparkle } from './Icons'
+import { InfoButton } from './InfoButton'
 import { Toggle } from './Toggle'
 import { MODE_LABEL } from '../types'
 import type { Learning, LearningSkill, Mode } from '../types'
@@ -18,6 +20,10 @@ import type { Learning, LearningSkill, Mode } from '../types'
  * waiting for; an unlocked one says what was measured and what the unit is being
  * sent because of it. No trophies, no streaks, nothing that would make somebody
  * want the number to go up for its own sake.
+ *
+ * Folded by default to the one line worth reading ("2 more nights to unlock how
+ * fast your bed cools"), because it is the bottom of a long screen and changes
+ * a few times a month. The switch is inside, next to what it switches.
  */
 
 /** The nearest thing to unlocking, which is the only one worth a headline. */
@@ -48,11 +54,14 @@ export function LearningCard({
   onSwitch,
   onForget,
   busy = false,
+  autopilotOn = true,
 }: {
   learning: Learning
   onSwitch: (on: boolean) => void
   onForget: (mode: Mode) => void
   busy?: boolean
+  /** Off, nothing learned is used whatever Learning's own switch says. */
+  autopilotOn?: boolean
 }) {
   // Which mode is one tap from being cleared. Two taps rather than a dialog:
   // starting again throws away nights of measurement, and a button that does
@@ -62,38 +71,62 @@ export function LearningCard({
   const next = nextUp(learning)
   const measured = learning.modes.reduce((n, m) => n + m.unlocked, 0)
 
-  return (
-    <section className="card learn">
-      <header className="card__head">
-        <h2 className="card__label">Learning</h2>
-        <Toggle
-          on={learning.on}
-          onChange={onSwitch}
-          label="Use what this bed has taught the app"
-        />
-      </header>
+  // The one line worth reading if nothing else is: how far off the next
+  // measurement is, or that there is nothing left to wait for.
+  const lead = !autopilotOn
+    ? 'Not used while Autopilot is off'
+    : !learning.on
+    ? 'Switched off'
+    : learning.modes.length === 0
+      ? 'Nothing measured yet'
+      : next
+        ? `${next.left} more night${next.left === 1 ? '' : 's'} to unlock ${next.skill.title.toLowerCase()}`
+        : 'Everything measured'
 
-      {/*
-        One line at the top, and it is the one thing worth reading if nothing
-        else is. Either how far off the next measurement is, or that there is
-        nothing left to wait for.
-      */}
-      <p className="learn-lead">
-        {learning.modes.length === 0 ? (
-          'Nothing measured yet. The first night the bed gets ready, this starts counting.'
-        ) : next ? (
-          <>
-            <b>
-              {next.left} more night{next.left === 1 ? '' : 's'}
-            </b>{' '}
-            to unlock {next.skill.title.toLowerCase()}.
-          </>
-        ) : (
-          <>
-            <b>Everything measured.</b> Nothing here is estimated any more.
-          </>
-        )}
-      </p>
+  return (
+    <Fold
+      id="learning"
+      label="Learning"
+      summary={lead}
+      info={
+        <InfoButton title="Learning">
+          <p>
+            How fast your bed warms and cools, and where it settles against what it is asked for,
+            timed from this bed rather than estimated. Each needs three nights that move the bed
+            far enough to measure.
+          </p>
+          <p>
+            Switched off, tonight is estimated and the temperatures go out exactly as you set them.
+            The nights carry on being measured either way.
+          </p>
+          <p>
+            Measured on nights the hose probes decided, never on nights the plug timed out. A run
+            the plug ended says the unit stopped working; it never says where the bed got to.
+          </p>
+          <p>
+            Start again sets a mode&apos;s nights aside and goes back to estimating. The nights
+            themselves are kept, and Autopilot still has every one of them.
+          </p>
+        </InfoButton>
+      }
+    >
+      {!autopilotOn && (
+        <p className="learn-off">
+          Autopilot is off, so nothing here is used: the head start is estimated and the
+          temperatures go out exactly as you set them. The nights are still measured.
+        </p>
+      )}
+
+      <div className="learn-switch">
+        <span className="learn-switch__label">Use what it has learned</span>
+        <Toggle on={learning.on} onChange={onSwitch} label="Use what this bed has taught the app" />
+      </div>
+
+      {learning.modes.length === 0 && (
+        <p className="learn-lead">
+          The first night the bed gets ready, this starts counting.
+        </p>
+      )}
 
       {!learning.on && measured > 0 && (
         <p className="learn-off">
@@ -175,10 +208,6 @@ export function LearningCard({
         </div>
       ))}
 
-      <p className="footnote">
-        Measured on nights the hose probes decided, never on nights the plug timed out. A run the
-        plug ended says the unit stopped working; it never says where the bed got to.
-      </p>
-    </section>
+    </Fold>
   )
 }

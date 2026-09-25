@@ -273,21 +273,38 @@ early, about a bed with nobody in it, and it is wrong in the one case that matte
 steps the temperature up is planned as warming, but with a body in the bed it is already at the
 number and warming has nothing to do except make a noise.
 
-So the question is asked again every thirty seconds, with a measurement in hand:
+So the question is asked again every thirty seconds, with a measurement in hand. Where a warm part
+goes quiet and where warming comes back is the **Hold** setting on the Autopilot screen
+(`backend/hydrosnooze/hold.py`):
 
-| The bed | What runs |
-|---|---|
-| within 0.5°C of the setpoint | cooling, and body heat holds it there |
-| between 0.5 and 2°C below | whatever was already running |
-| more than 2°C below | warming, because nothing else can put heat back |
+| Hold | Goes quiet once the bed is | Warming again once the bed is |
+|---|---|---|
+| Quiet | 0.5°C short of the setpoint | 2°C below |
+| **Balanced** (the default) | at the setpoint | 1°C below |
+| Close | 1°C over the setpoint | 0.5°C below |
 
 The gap between the two thresholds is the design. A single line would swap modes on every half degree
 of probe wobble, thirty-five presses at a time, all night. Half an hour has to pass between one
 correction and the next, though never before the first one in a stage: waiting out the noise this
 feature exists to remove would be a strange way to start.
 
-Two degrees below the setpoint in silence is a better night than exactly the setpoint next to a
-geiger counter. That judgement is mine, not the software's, and the thresholds are where it lives.
+Quiet was the only behaviour until 26 September, on the judgement that two degrees below the setpoint
+in silence is a better night than exactly the setpoint next to a geiger counter. Then a 32°C REM part
+spent the small hours at 30: warming to 31.5, quiet, a slow fall to 30 in a cold room, warming again,
+and on target a quarter of the night. Balanced is the default now, and the judgement is a setting
+rather than a constant, because it is mine to change.
+
+## Holding the number: the trim
+
+What the bed settles at is learned before bedtime, with nobody in it, and applied once as each part
+starts. At three in the morning the room is colder, there is a body in the bed and the hoses lose a
+different amount of heat, and nothing checked. Now, once the bed has sat more than half a degree off
+the setpoint for a whole half hour, and is not still heading towards it, the setting sent moves a
+degree the other way. Then another full half hour before it may move again, never more than 4°C from
+what was asked for counting the learned correction, and never past the safety cap. It starts again
+at every part, pauses while a nudge is moving the bed on purpose, and is part of Autopilot, so the
+switch turns it off. Each trim is logged as a drift response, which is what it is, so the Autopilot
+screen files it as Autopilot's and the scoreboard never mistakes it for a hand on the controls.
 
 ---
 
