@@ -28,6 +28,8 @@ from .models import (
     default_stages,
     with_all_stages,
 )
+from .notes import NightNote
+
 # Renamed on the way in. `Stage` here already means Drift, Deep, REM and Wake:
 # what the bed is asked for. This is what the sleeper was measured doing.
 from .trials import NightRun, PartRun
@@ -437,6 +439,16 @@ CREATE TABLE IF NOT EXISTS suggest_limits (
     part     TEXT    PRIMARY KEY,
     centre_c INTEGER NOT NULL,
     reach    INTEGER NOT NULL
+);
+
+-- How a night felt, from me rather than the mat (notes.py). One row a morning,
+-- keyed like every other night. `tags` is a JSON list of notes.TAGS keys.
+CREATE TABLE IF NOT EXISTS night_notes (
+    wake_on    TEXT PRIMARY KEY,
+    rating     INTEGER,
+    felt       TEXT,
+    tags       TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
 );
 
 -- Each device signed in (access.py). The token itself is never stored, only a
@@ -1677,6 +1689,30 @@ class Database:
             for r in rows
         ]
 
+    # --- How nights felt (notes.py) ------------------------------------------------
+
+    def night_note(self, wake_on: str) -> NightNote | None:
+        row = self._db.execute(
+            "SELECT * FROM night_notes WHERE wake_on = ?", (wake_on,)
+        ).fetchone()
+        return _night_note(row) if row is not None else None
+
+    def night_notes(self, first: str, last: str) -> dict[str, NightNote]:
+        rows = self._db.execute(
+            "SELECT * FROM night_notes WHERE wake_on BETWEEN ? AND ?", (first, last)
+        ).fetchall()
+        return {r["wake_on"]: _night_note(r) for r in rows}
+
+    def save_night_note(self, note: NightNote, at: datetime) -> None:
+        self._db.execute(
+            "INSERT INTO night_notes (wake_on, rating, felt, tags, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(wake_on) DO UPDATE SET rating = excluded.rating, "
+            "felt = excluded.felt, tags = excluded.tags, updated_at = excluded.updated_at",
+            (note.wake_on, note.rating, note.felt, json.dumps(list(note.tags)), at.isoformat()),
+        )
+        self._db.commit()
+
     # --- Signed-in devices (access.py) ---------------------------------------------
 
     def add_session(self, session: StoredSession) -> None:
@@ -1726,6 +1762,15 @@ class Database:
 
     def session_count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+
+def _night_note(row: sqlite3.Row) -> NightNote:
+    return NightNote(
+        wake_on=row["wake_on"],
+        rating=row["rating"],
+        felt=row["felt"],
+        tags=tuple(json.loads(row["tags"] or "[]")),
+    )
 
 
 def _night_run(row: sqlite3.Row) -> NightRun:

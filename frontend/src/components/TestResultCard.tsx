@@ -18,6 +18,9 @@ function minutes(seconds: number): string {
 }
 
 function verdict(t: AutopilotTest): string {
+  if (t.left_out && t.left_out.length > 0) {
+    return `Tagged ${t.left_out.join(' and ').toLowerCase()}, so this night is left out of the scoreboard and the test does not count.`
+  }
   if (t.counted === false) {
     return `${t.label} was changed by hand during the night, or did not hold its setting, so this one does not count.`
   }

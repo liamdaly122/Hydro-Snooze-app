@@ -10,6 +10,8 @@
 
 import { ApiError, SIGNED_OUT_EVENT, type ApiClient, type LiveUpdate } from './client'
 import type {
+  NightNote,
+  NightNotePatch,
   AuthState,
   AutopilotNight,
   AutopilotSwitch,
@@ -70,6 +72,10 @@ export class HttpApiClient implements ApiClient {
     request<AuthState>('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
   signOut = () => request<AuthState>('/api/auth/logout', { method: 'POST' })
   signOutEverywhere = () => request<AuthState>('/api/auth/logout-everywhere', { method: 'POST' })
+
+  getNote = (wakeOn: string) => request<NightNote>(`/api/notes?date=${wakeOn}`)
+  saveNote = (wakeOn: string, patch: NightNotePatch) =>
+    request<NightNote>(`/api/notes/${wakeOn}`, { method: 'PUT', body: JSON.stringify(patch) })
 
   info = () => request<ServiceInfo>('/api/info')
   getState = () => request<DeviceState>('/api/state')

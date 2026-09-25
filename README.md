@@ -120,6 +120,7 @@ backend/hydrosnooze/
   events.py            the log the app reads
   notify.py            push, when something needs saying
   access.py            the password, signed-in devices, and what came through Tailscale
+  notes.py             how a night felt, and the tags that leave one out of the scoreboard
   watchdog.py          the last line of defence
   pi.py                temperature, throttling, disk, uptime
   ircodes.py           the eight captured codes

@@ -170,7 +170,8 @@ def test_connecting_and_fetching_never_press_a_button(client, service):
 def test_the_scoreboard_answers_before_anything_is_recorded(client):
     built = client.get("/api/scoreboard").json()
     assert built["recorded"] == 0 and built["nights"] == 0
-    assert [p["verdict"] for p in built["parts"]] == ["empty", "empty", "empty"]
+    assert [p["verdict"] for p in built["parts"]] == ["empty", "empty", "empty", "empty"]
+    assert built["left_out"] == {"nights": 0, "by_tag": {}}
 
 
 def test_the_suggestion_answers_and_refuses_what_it_cannot_do(client):

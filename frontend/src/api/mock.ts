@@ -13,6 +13,8 @@
 
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
+  NightNote,
+  NightNotePatch,
   AuthState,
   AutopilotNight,
   AutopilotSwitch,
@@ -52,6 +54,36 @@ import {
 import { daysBetween, isoDay } from '../domain'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** The same list as backend/hydrosnooze/notes.py. */
+const MOCK_TAGS = [
+  { key: 'alcohol', label: 'Alcohol', leaves_out: true },
+  { key: 'ill', label: 'Ill', leaves_out: true },
+  { key: 'company', label: 'Someone else in the bed', leaves_out: true },
+  { key: 'caffeine', label: 'Late caffeine', leaves_out: false },
+  { key: 'late_meal', label: 'Late meal', leaves_out: false },
+  { key: 'exercise', label: 'Exercise', leaves_out: false },
+  { key: 'stressed', label: 'Stressed', leaves_out: false },
+]
+
+function mockNote(wakeOn: string): NightNote {
+  return {
+    wake_on: wakeOn,
+    rating: null,
+    felt: null,
+    tags: [],
+    left_out: [],
+    choices: {
+      ratings: ['Rough', 'Groggy', 'OK', 'Good', 'Great'].map((label, i) => ({ value: i + 1, label })),
+      felt: [
+        { value: 'too_cold', label: 'Too cold' },
+        { value: 'right', label: 'Right' },
+        { value: 'too_warm', label: 'Too warm' },
+      ],
+      tags: MOCK_TAGS,
+    },
+  }
+}
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -144,6 +176,27 @@ export class MockApiClient implements ApiClient {
     } else if (activity === 'unknown') {
       set({ power: 'unknown', assumed_mode: null, assumed_target_c: null, observed_power_w: null, inferred_activity: 'unknown', observed_flow_c: null, observed_return_c: null })
     }
+  }
+
+  private notes = new Map<string, NightNote>()
+
+  async getNote(wakeOn: string): Promise<NightNote> {
+    return this.notes.get(wakeOn) ?? mockNote(wakeOn)
+  }
+
+  async saveNote(wakeOn: string, patch: NightNotePatch): Promise<NightNote> {
+    await sleep(120)
+    const was = await this.getNote(wakeOn)
+    const tags = patch.tags ?? was.tags
+    const note: NightNote = {
+      ...was,
+      rating: patch.rating !== undefined ? patch.rating : was.rating,
+      felt: patch.felt !== undefined ? patch.felt : was.felt,
+      tags: MOCK_TAGS.map((t) => t.key).filter((k) => tags.includes(k)),
+      left_out: MOCK_TAGS.filter((t) => t.leaves_out && tags.includes(t.key)).map((t) => t.label),
+    }
+    this.notes.set(wakeOn, note)
+    return note
   }
 
   // No password in the seed build: there is nothing behind it to protect.

@@ -11,6 +11,8 @@
  */
 
 import type {
+  NightNote,
+  NightNotePatch,
   AuthState,
   AutopilotNight,
   AutopilotSwitch,
@@ -73,6 +75,10 @@ export interface ApiClient {
   signOut(): Promise<AuthState>
   /** Every device, this one included. For a phone that has gone missing. */
   signOutEverywhere(): Promise<AuthState>
+
+  /** How a night felt, keyed by the morning it ended. See notes.py. */
+  getNote(wakeOn: string): Promise<NightNote>
+  saveNote(wakeOn: string, patch: NightNotePatch): Promise<NightNote>
 
   /**
    * What is different about this one night, and which controls make sense now.

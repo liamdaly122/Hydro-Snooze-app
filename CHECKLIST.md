@@ -587,6 +587,11 @@ API rather than read. Read that before writing any of it.
       time, and Sleep timing measures every night from its own lights out, weekends included
 - [ ] If a weekend wake time goes past 09:00, move the Shelly's daily off to match. The
       Schedule screen says so when it does
+- [x] How the night felt, on the Health Report: how waking up felt (Rough to Great), whether
+      the bed felt too cold, right or too warm, and tags. The rating scores Wake on the
+      scoreboard, which nothing the mat measures could. Alcohol, Ill and Someone else in the
+      bed leave a night out of the scoreboard, and say so; the other tags are recorded only
+- [ ] Rate a fortnight of mornings, so Wake has something to compare
 - [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration

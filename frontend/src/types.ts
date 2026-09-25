@@ -358,6 +358,8 @@ export interface AutopilotTest {
   needs: number
   verdict: ScorePart['verdict']
   leader_c: number | null
+  /** Tags on the night that left it out of the scoreboard. Absent from older builds. */
+  left_out?: string[]
 }
 
 export interface AutopilotNight {
@@ -646,14 +648,26 @@ export interface ScoreSetting {
   /** The two halves of a Deep or REM score, so a trade between them shows. */
   deep_s: number | null
   rem_s: number | null
+  /**
+   * How the bed felt on these nights, when the morning said: over the whole
+   * night, so it goes with the setting rather than being caused by it. Absent
+   * from builds before the morning note.
+   */
+  felt?: { answered: number; too_warm: number; too_cold: number }
 }
 
 export interface ScorePart {
-  part: 'deep' | 'rem' | 'drift'
+  part: 'deep' | 'rem' | 'drift' | 'wake'
   label: string
   /** What the part is scored on: deep sleep, REM, or time to fall asleep. */
   measure: string
   more_is_better: boolean
+  /**
+   * What mean_s, gap_s and the rest are counted in. Seconds for what the mat
+   * measures; a rating, one to five, for Wake, which is scored on how waking up
+   * felt. Absent from older builds, which only had seconds.
+   */
+  unit?: 'seconds' | 'rating'
   settings: ScoreSetting[]
   /**
    * empty: nothing yet. one_setting: only one temperature tried. not_sure: the
@@ -677,6 +691,35 @@ export interface Scoreboard {
   tests: number
   setting_needs: number
   parts: ScorePart[]
+  /**
+   * Nights tagged Alcohol, Ill, or Someone else in the bed, left out of every
+   * part, and how many of each. Absent from older builds.
+   */
+  left_out?: { nights: number; by_tag: Record<string, number> }
+}
+
+/** How a night felt, from the morning rather than the mat. See notes.py. */
+export interface NightNote {
+  wake_on: string
+  /** How waking up felt, 1 (Rough) to 5 (Great). */
+  rating: number | null
+  felt: 'too_cold' | 'right' | 'too_warm' | null
+  /** Tag keys, from choices.tags. */
+  tags: string[]
+  /** The labels of the tags on it that leave the night out of the scoreboard. */
+  left_out: string[]
+  choices: {
+    ratings: { value: number; label: string }[]
+    felt: { value: 'too_cold' | 'right' | 'too_warm'; label: string }[]
+    tags: { key: string; label: string; leaves_out: boolean }[]
+  }
+}
+
+/** Only what is sent changes. A null rating or felt clears it. */
+export interface NightNotePatch {
+  rating?: number | null
+  felt?: NightNote['felt']
+  tags?: string[]
 }
 
 /**

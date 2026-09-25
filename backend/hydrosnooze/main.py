@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .access import COOKIE
-from .api import dev, routes, signin
+from .api import dev, notes, routes, signin
 from .api import withings as withings_routes
 from .api.schemas import health_json, state_json
 from .config import get_settings
@@ -137,6 +137,7 @@ app.include_router(signin.router)
 app.include_router(routes.router)
 app.include_router(dev.router)
 app.include_router(withings_routes.router)
+app.include_router(notes.router)
 
 
 @app.middleware("http")
