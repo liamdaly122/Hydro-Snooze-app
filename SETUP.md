@@ -631,8 +631,19 @@ mode, and does the unit really get switched off at the end. That is the thing I 
 unattended, and it is the one thing neither the simulator nor the tests can answer, because the part
 that has never run is the infrared arriving at a unit that is actually there.
 
-So the app can run tonight's whole night compressed. Open the schedule behind the chevron on the
-Wake card and press **Run a test night**.
+So the service can run tonight's whole night compressed. The button for it has gone from the app,
+so it is started from the Mac's terminal, against whichever machine is running the service:
+
+```sh
+curl -X POST http://hydrosnooze.local:8000/api/rehearsal \
+  -H 'content-type: application/json' -d '{"seconds": 300}'
+```
+
+And stopped early, which also switches the unit off:
+
+```sh
+curl -X DELETE http://hydrosnooze.local:8000/api/rehearsal
+```
 
 It is not a demo and it is not a separate code path. It builds a night with short stages and hands it
 to the same scheduler, so what runs is the same `due()`, the same fired marks, the same power checks
@@ -866,8 +877,8 @@ and the heartbeat are set, and amber naming the missing half when only one is.
 
 ### Prove it, then trust it
 
-Reading the log is not proof. **Run a test night from the Pi**, from the Test run card behind the
-chevron on the Wake card. That is the acceptance test for the whole move: same five steps, same
+Reading the log is not proof. **Run a test night from the Pi**, with the `curl` command under
+"Then rehearse a whole night" in step 6. That is the acceptance test for the whole move: same five steps, same
 order, wattage following the modes. If it passes, the Pi is doing exactly what the Mac was.
 
 ### Notifications, so a bad night does not wait until morning
