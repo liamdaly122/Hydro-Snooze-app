@@ -11,6 +11,7 @@
  */
 
 import type {
+  AuthState,
   AutopilotNight,
   AutopilotSwitch,
   HoldName,
@@ -56,7 +57,23 @@ export interface LiveUpdate {
   connected?: boolean
 }
 
+/**
+ * Sent on the window whenever the service answers 401: the session ran out, or
+ * every device was signed out from another one. The sign-in screen takes over.
+ */
+export const SIGNED_OUT_EVENT = 'hydrosnooze:signed-out'
+
 export interface ApiClient {
+  /**
+   * Whether to show the sign-in, asked before anything else. The only calls that
+   * answer without being signed in are these four. See access.py.
+   */
+  getAuth(): Promise<AuthState>
+  signIn(password: string): Promise<AuthState>
+  signOut(): Promise<AuthState>
+  /** Every device, this one included. For a phone that has gone missing. */
+  signOutEverywhere(): Promise<AuthState>
+
   /**
    * What is different about this one night, and which controls make sense now.
    *
@@ -219,8 +236,12 @@ export interface ApiClient {
 
 /** Thrown when the service refuses a command, e.g. above the safety cap. */
 export class ApiError extends Error {
-  constructor(message: string) {
+  /** The HTTP status, when there was one. 401 means sign in. */
+  status?: number
+
+  constructor(message: string, status?: number) {
     super(message)
     this.name = 'ApiError'
+    this.status = status
   }
 }

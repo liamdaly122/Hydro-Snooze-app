@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card } from './Card'
+import { homeNow } from '../domain'
 import { STAGE_LABEL, type DeviceState, type Schedule } from '../types'
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
 const SECONDS = 300
 
 function remaining(endsAt: string): number {
-  return Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 1000))
+  return Math.max(0, Math.round((new Date(endsAt).getTime() - homeNow().getTime()) / 1000))
 }
 
 function mmss(seconds: number): string {

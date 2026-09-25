@@ -13,6 +13,7 @@
 
 import { ApiError, type ApiClient, type LiveUpdate } from './client'
 import type {
+  AuthState,
   AutopilotNight,
   AutopilotSwitch,
   AutopilotTest,
@@ -139,6 +140,23 @@ export class MockApiClient implements ApiClient {
     } else if (activity === 'unknown') {
       set({ power: 'unknown', assumed_mode: null, assumed_target_c: null, observed_power_w: null, inferred_activity: 'unknown', observed_flow_c: null, observed_return_c: null })
     }
+  }
+
+  // No password in the seed build: there is nothing behind it to protect.
+  async getAuth(): Promise<AuthState> {
+    return { required: false, signed_in: true, via: 'home', refused: null }
+  }
+
+  async signIn(): Promise<AuthState> {
+    return this.getAuth()
+  }
+
+  async signOut(): Promise<AuthState> {
+    return this.getAuth()
+  }
+
+  async signOutEverywhere(): Promise<AuthState> {
+    return this.getAuth()
   }
 
   async info(): Promise<ServiceInfo> {

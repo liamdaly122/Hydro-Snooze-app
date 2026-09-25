@@ -17,6 +17,37 @@ import {
 
 const MINUTE = 60_000
 
+// --- The bed's clock -----------------------------------------------------------
+//
+// Every time the service sends is the bed's own local time with no zone on it,
+// "2026-09-25T03:30:00", and a phone reads that as its own local time. At home
+// the two are the same thing, which is why this never mattered. In New York
+// they are five hours apart, and a nudge ending at 03:30 in Leeds was read as
+// 03:30 in New York: the countdown was out by five hours, and so was every
+// "has tonight started yet".
+//
+// So the app keeps one clock shifted onto the bed's: a Date whose hours and
+// minutes are what the clock on the bedroom wall says. Compared against the
+// service's times, which are read as the phone's, the two line up wherever the
+// phone is. The shift is nought at home.
+
+let homeShift = 0
+
+/** Called with /api/info's offset, the moment the app has one. */
+export function setHomeOffset(utcOffsetMinutes: number): void {
+  homeShift = (utcOffsetMinutes + new Date().getTimezoneOffset()) * MINUTE
+}
+
+/** Now, by the clock on the bedroom wall. Use this, never `new Date()`. */
+export function homeNow(): Date {
+  return new Date(Date.now() + homeShift)
+}
+
+/** Whether the phone is keeping a different time from the bed. */
+export function awayFromHome(): boolean {
+  return homeShift !== 0
+}
+
 /** Monday is 0, matching the backend. JS getDay() puts Sunday first. */
 export function mondayFirstDay(d: Date): number {
   return (d.getDay() + 6) % 7
@@ -95,7 +126,7 @@ export function planForWake(wakeOn: Date, schedule: Schedule): NightPlan {
  */
 export function nextPlan(
   schedule: Schedule,
-  now: Date = new Date(),
+  now: Date = homeNow(),
   holiday: Holiday | null = null,
 ): NightPlan | null {
   if (!schedule.enabled || schedule.days_of_week.length === 0) return null
@@ -163,7 +194,7 @@ export function formatDay(d: Date): string {
  * A weekday on its own is only an answer while there is one of each ahead. Two
  * weeks away and "Mon" could be either of two Mondays.
  */
-export function formatWhen(d: Date, now: Date = new Date()): string {
+export function formatWhen(d: Date, now: Date = homeNow()): string {
   const far = d.getTime() - now.getTime() > 6 * 86_400_000
   return far ? `${formatDay(d)} ${formatTime(d)}` : formatDayTime(d)
 }

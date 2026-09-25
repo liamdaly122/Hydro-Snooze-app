@@ -57,16 +57,24 @@ def write(env: Path, key: str, value: str | None) -> None:
     env.write_text("\n".join(lines) + "\n")
 
 
-def ask_the_service(port: int = 8000) -> bool:
+def ask_the_service(env: Path, port: int = 8000) -> bool:
     """Have the running service send it, rather than sending it ourselves.
 
     Better than a direct send for two reasons. It is plain HTTP to localhost, so
     it sidesteps TLS entirely. And it proves the thing that actually matters:
     that the service picked the topic up out of .env. Sending from here would
     only ever prove that this terminal can reach ntfy.
+
+    With the key from .env, once there is a password. A request from this
+    machine is not trusted for coming from this machine, because through
+    Tailscale everything does. See backend/hydrosnooze/access.py.
     """
+    key = read(env, "HS_API_KEY")
     request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/notify/test", data=b"", method="POST"
+        f"http://127.0.0.1:{port}/api/notify/test",
+        data=b"",
+        method="POST",
+        headers={"Authorization": f"Bearer {key}"} if key else {},
     )
     try:
         with urllib.request.urlopen(request, timeout=8) as response:
@@ -168,7 +176,7 @@ def main() -> int:
     if args.test:
         print()
         # The running service first. It proves more and needs no TLS.
-        if ask_the_service():
+        if ask_the_service(env):
             print(f"{GREEN}Sent by the service.{RESET} It should arrive within a second or two.")
             print(f"{DIM}That also confirms the service read the topic out of .env.{RESET}")
         else:

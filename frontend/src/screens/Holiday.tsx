@@ -6,6 +6,7 @@ import {
   firstNightBack,
   formatDay,
   formatTime,
+  homeNow,
   isoDay,
   parseDay,
   scheduledNightsAway,
@@ -36,7 +37,7 @@ function nightsOff(n: number): string {
  * off once you are home.
  */
 export function Holiday({ client, schedule, holiday, onChanged }: Props) {
-  const today = isoDay(new Date())
+  const today = isoDay(homeNow())
   const [leaves, setLeaves] = useState<string | null>(holiday?.leaves_on ?? null)
   const [back, setBack] = useState<string | null>(holiday?.back_on ?? null)
   const [busy, setBusy] = useState(false)

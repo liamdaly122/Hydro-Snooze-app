@@ -501,6 +501,24 @@ to power. [docs/buttons.md](docs/buttons.md) is the wiring and the reasoning.
 
 ---
 
+## Reaching it from anywhere, with Tailscale
+
+A password on the app, then Tailscale on the Pi and the phone. Nothing is put on the
+internet: only my own devices can find the address. [docs/tailscale.md](docs/tailscale.md)
+is every step with its reasons, and has its own boxes; these are the milestones.
+
+- [x] The app has a password, signed in once per device, and fails shut: with no
+      password, nothing that arrives through Tailscale gets in
+- [x] From outside the house the power button asks the plug before pressing, and every
+      time on the phone is the bed's own
+- [ ] Password set on the Pi, and the phone signed in at home
+- [ ] Tailscale on the Pi, key expiry off, `tailscale serve` giving an https address
+- [ ] `HS_TUNNEL` and `HS_PUBLIC_URL` in the Pi's `.env`
+- [ ] The phone on Tailscale, the new icon on the Home Screen, and step 7 of the guide
+      proved on mobile data
+
+---
+
 ## Next: the Withings Sleep Analyzer
 
 Everything above measures the machine. Nothing measures the sleeper, so the schedule still runs on

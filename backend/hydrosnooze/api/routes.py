@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from ..models import (
     MIN_STAGE_MINUTES,
     NUDGE_MINUTES,
     Mode,
+    Power,
     SleepStage,
     Stage,
     minutes_between,
@@ -36,6 +37,11 @@ router = APIRouter(prefix="/api")
 
 def _service(request: Request) -> Service:
     return request.app.state.service
+
+
+def _via(request: Request) -> str:
+    """Home or Tailscale, as the sign-in check in main.py found it."""
+    return getattr(request.state, "via", "home")
 
 
 # --- Bodies -------------------------------------------------------------------
@@ -92,6 +98,12 @@ class NewProfile(BaseModel):
 @router.get("/info")
 async def get_info(request: Request) -> dict[str, object]:
     service = _service(request)
+    # The Pi's own clock, not the phone's. Every time the service sends is the
+    # bed's local time with no zone on it, which the phone reads as its own, so
+    # a phone in another country needs to know how far apart the two are to
+    # count down to anything. See homeNow in the app's domain.ts.
+    here = datetime.now().astimezone()
+    offset = here.utcoffset()
     return {
         "fake_transmitter": service.settings.transmitter == "fake",
         "fake_power_monitor": service.settings.power_monitor == "fake",
@@ -101,6 +113,9 @@ async def get_info(request: Request) -> dict[str, object]:
         # reloads itself rather than carrying on with the code it loaded days
         # ago against a service that has moved on.
         "build": getattr(request.app.state, "build", "dev"),
+        "utc_offset_minutes": int(offset.total_seconds() // 60) if offset is not None else 0,
+        "timezone": here.tzname() or "",
+        "via": _via(request),
     }
 
 
@@ -457,6 +472,22 @@ async def post_power_press(request: Request) -> dict[str, object]:
     someone standing in front of the bed who can see the answer for themselves.
     """
     service = _service(request)
+    if _via(request) == "tailscale":
+        # From outside the house nobody can see the answer, and one press on a
+        # unit that is already off switches it on with nobody in the room. So
+        # the tap asks the plug which way the unit is and sends the command
+        # that is checked against it, the same one the schedule uses.
+        if service.state.power is Power.ON:
+            await service.power_off()
+        elif service.state.power is Power.OFF:
+            await service.power_on()
+        else:
+            raise HTTPException(
+                409,
+                "The plug has not said whether the unit is on, so from outside the house "
+                "the app will not press power blind. Try again once the plug answers.",
+            )
+        return state_json(service.state)
     await service.press_power()
     return state_json(service.state)
 

@@ -76,6 +76,20 @@ class Sample(NamedTuple):
     target_c: int | None = None
 
 
+class StoredSession(NamedTuple):
+    """One signed-in device, as stored. See access.py."""
+
+    token_hash: str
+    #: A mark of the password it signed in with, not the password or its hash.
+    password: str
+    created_at: datetime
+    seen_at: datetime
+    #: "home" or "tailscale": which way it came in when it signed in.
+    via: str
+    #: Which browser, roughly, so a list of them means something to a person.
+    label: str
+
+
 class Decided(NamedTuple):
     """What was decided about one evening's suggestion."""
 
@@ -420,6 +434,19 @@ CREATE TABLE IF NOT EXISTS suggest_limits (
     part     TEXT    PRIMARY KEY,
     centre_c INTEGER NOT NULL,
     reach    INTEGER NOT NULL
+);
+
+-- Each device signed in (access.py). The token itself is never stored, only a
+-- hash of it, so a copy of this file signs nobody in. `password` is a mark of
+-- the password the device signed in with: change the password and every row
+-- stops matching, which is what makes changing it sign everything out.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    password   TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    seen_at    TEXT NOT NULL,
+    via        TEXT NOT NULL,
+    label      TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -1631,6 +1658,56 @@ class Database:
             )
             for r in rows
         ]
+
+    # --- Signed-in devices (access.py) ---------------------------------------------
+
+    def add_session(self, session: StoredSession) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO sessions (token_hash, password, created_at, seen_at, via, label) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                session.token_hash,
+                session.password,
+                session.created_at.isoformat(),
+                session.seen_at.isoformat(),
+                session.via,
+                session.label,
+            ),
+        )
+        self._db.commit()
+
+    def session(self, token_hash: str) -> StoredSession | None:
+        row = self._db.execute(
+            "SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)
+        ).fetchone()
+        if row is None:
+            return None
+        return StoredSession(
+            token_hash=row["token_hash"],
+            password=row["password"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            seen_at=datetime.fromisoformat(row["seen_at"]),
+            via=row["via"],
+            label=row["label"],
+        )
+
+    def session_seen(self, token_hash: str, at: datetime) -> None:
+        self._db.execute(
+            "UPDATE sessions SET seen_at = ? WHERE token_hash = ?", (at.isoformat(), token_hash)
+        )
+        self._db.commit()
+
+    def end_session(self, token_hash: str) -> None:
+        self._db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+        self._db.commit()
+
+    def end_every_session(self) -> int:
+        count = self._db.execute("DELETE FROM sessions").rowcount
+        self._db.commit()
+        return count
+
+    def session_count(self) -> int:
+        return self._db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
 
 
 def _night_run(row: sqlite3.Row) -> NightRun:

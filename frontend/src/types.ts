@@ -189,6 +189,29 @@ export interface ServiceInfo {
    * started with and reloads itself when the service reports a different one.
    */
   build: string
+  /**
+   * How far the bed's clock is from UTC, in minutes, and what its zone is
+   * called. The service sends every time without a zone, in the bed's own local
+   * time, and the phone reads them as its own. Abroad those differ, and this is
+   * what lets the app count down in the bed's time rather than the phone's.
+   * Missing from builds before Tailscale, and from the seed data.
+   */
+  utc_offset_minutes?: number
+  timezone?: string
+  via?: Via
+}
+
+/** Which way the phone reached the service. See backend/hydrosnooze/access.py. */
+export type Via = 'home' | 'tailscale'
+
+/** Whether to show the sign-in, asked before anything else. */
+export interface AuthState {
+  /** A password is set. Without one the app answers at home and nowhere else. */
+  required: boolean
+  signed_in: boolean
+  via: Via
+  /** Why signing in would not help from here: no password set, through Tailscale. */
+  refused: string | null
 }
 
 /**

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Card } from './Card'
 import { Toggle } from './Toggle'
 import { Clock, Flame, Snowflake, Waves } from './Icons'
-import { formatDays, formatDuration, formatTime, formatWhen, nextPlan, tint } from '../domain'
+import { formatDays, formatDuration, formatTime, formatWhen, homeNow, nextPlan, tint } from '../domain'
 import type { Holiday, Schedule } from '../types'
 
 interface Props {
@@ -26,7 +26,7 @@ interface Props {
  * when does it wake me, is it on, and when does the unit switch itself on.
  */
 export function WakeCard({ draft, usual, holiday = null, onDraftChange, onOpen, children }: Props) {
-  const plan = nextPlan(draft, new Date(), holiday)
+  const plan = nextPlan(draft, homeNow(), holiday)
   const firstTemp = draft.stages[0]?.temp_c ?? 20
   const warming = draft.preconditioning.mode === 'warming'
 

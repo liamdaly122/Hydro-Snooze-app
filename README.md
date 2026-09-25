@@ -30,6 +30,11 @@ against the mattress temperature, so for the first time the project can ask whet
 the temperature it chose was any good. See [docs/withings.md](docs/withings.md) for
 what the API actually does, established against the live API rather than read.
 
+**It can be reached from anywhere, privately.** A password on the app and Tailscale
+on the Pi and the phone, so the bed can be checked or changed from outside the house
+without anything being put on the internet. [docs/tailscale.md](docs/tailscale.md) is
+the setup, step by step, with the reasons.
+
 **[CHECKLIST.md](CHECKLIST.md) is the thing to work down.** `ROADMAP.md` has the
 reasoning behind it and `SETUP.md` has the detail for each hardware step.
 
@@ -114,6 +119,7 @@ backend/hydrosnooze/
   report.py            the morning summary
   events.py            the log the app reads
   notify.py            push, when something needs saying
+  access.py            the password, signed-in devices, and what came through Tailscale
   watchdog.py          the last line of defence
   pi.py                temperature, throttling, disk, uptime
   ircodes.py           the eight captured codes
@@ -146,6 +152,8 @@ scripts/dev.sh         run the whole thing on this machine
 scripts/deploy.sh      copy the working tree to the Pi
 scripts/install.sh     set the Pi up from nothing
 docs/withings.md       what the Withings API actually does
+docs/tailscale.md      reaching the bed from anywhere, safely
+scripts/password.py    set the app's password
 docs/temperature-probes.md  the three probes, from parts to readings
 ```
 

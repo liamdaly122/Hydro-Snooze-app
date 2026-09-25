@@ -5,6 +5,7 @@ import { formatDay, formatDays, formatWatts, parseDay } from '../domain'
 import type { ApiClient } from '../api/client'
 import {
   MODE_LABEL,
+  type AuthState,
   type AutopilotNight,
   type DeviceHealth,
   type DeviceState,
@@ -28,6 +29,9 @@ interface Props {
   schedule: Schedule | null
   tonight: TonightState | null
   holiday: Holiday | null
+  auth: AuthState
+  onSignOut: () => Promise<void>
+  onSignOutEverywhere: () => Promise<void>
 }
 
 /**
@@ -54,6 +58,9 @@ export function SideMenu({
   schedule,
   tonight,
   holiday,
+  auth,
+  onSignOut,
+  onSignOutEverywhere,
 }: Props) {
   const first = useRef<HTMLButtonElement>(null)
   const [night, setNight] = useState<AutopilotNight | null>(null)
@@ -123,6 +130,10 @@ export function SideMenu({
           />
         ) : (
           <p className="drawer__waiting">Waiting for the service to answer.</p>
+        )}
+
+        {auth.required && (
+          <SignedIn via={auth.via} onSignOut={onSignOut} onSignOutEverywhere={onSignOutEverywhere} />
         )}
       </nav>
     </div>
@@ -194,6 +205,61 @@ function Items({
         onClick={() => onOpen('holiday')}
       />
     </>
+  )
+}
+
+/**
+ * Which way this phone is in, and the two ways out.
+ *
+ * At the bottom and quiet, because nobody signs out of their own bed. It is
+ * here for the day a phone goes missing: Sign out every device, from any other
+ * one, and the missing phone needs the password again.
+ */
+function SignedIn({
+  via,
+  onSignOut,
+  onSignOutEverywhere,
+}: {
+  via: AuthState['via']
+  onSignOut: () => Promise<void>
+  onSignOutEverywhere: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function run(work: () => Promise<void>) {
+    setBusy(true)
+    setError(null)
+    void work()
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="drawer__foot">
+      <p className="drawer__foot-line">
+        Signed in {via === 'tailscale' ? 'through Tailscale' : 'on the home network'}
+      </p>
+      <div className="drawer__foot-actions">
+        <button type="button" className="pill" disabled={busy} onClick={() => run(onSignOut)}>
+          Sign out
+        </button>
+        <button
+          type="button"
+          className="pill"
+          disabled={busy}
+          onClick={() => {
+            const sure = window.confirm(
+              'Sign out every device, this one included? Each will need the password again.',
+            )
+            if (sure) run(onSignOutEverywhere)
+          }}
+        >
+          Every device
+        </button>
+      </div>
+      {error && <p className="footnote footnote--error">{error}</p>}
+    </div>
   )
 }
 

@@ -2,7 +2,15 @@ import { Card } from '../components/Card'
 import { RehearsalCard } from '../components/RehearsalCard'
 import { Toggle } from '../components/Toggle'
 import { Flame, Snowflake } from '../components/Icons'
-import { DAY_INITIALS, formatDays, formatDuration, formatTime, formatWhen, nextPlan } from '../domain'
+import {
+  DAY_INITIALS,
+  formatDays,
+  formatDuration,
+  formatTime,
+  formatWhen,
+  homeNow,
+  nextPlan,
+} from '../domain'
 import {
   MIN_STAGE_MINUTES,
   STAGE_LABEL,
@@ -60,7 +68,7 @@ export function Schedule({
   onStopRehearsal,
   holiday,
 }: Props) {
-  const plan = nextPlan(draft, new Date(), holiday)
+  const plan = nextPlan(draft, homeNow(), holiday)
   const pre = draft.preconditioning
   const bedMinutes = toMinutes(draft.bed_time)
 

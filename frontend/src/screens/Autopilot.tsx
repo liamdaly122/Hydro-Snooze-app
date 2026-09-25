@@ -8,6 +8,7 @@ import { SuggestionFold } from '../components/Suggestion'
 import { AutopilotSwitchCard } from '../components/AutopilotSwitchCard'
 import { TestResultCard } from '../components/TestResultCard'
 import { SleepTimingCard } from '../components/SleepTimingCard'
+import { homeNow } from '../domain'
 import type { ApiClient } from '../api/client'
 import type {
   AutopilotNight,
@@ -62,7 +63,7 @@ function nightLabel(startsAt: string, wakeAt: string): string {
   }
   const span = `${part(startsAt)} to ${part(wakeAt, true)}`
 
-  const midnight = new Date()
+  const midnight = homeNow()
   midnight.setHours(0, 0, 0, 0)
   return new Date(wakeAt) >= midnight ? `Last night · ${span}` : span
 }

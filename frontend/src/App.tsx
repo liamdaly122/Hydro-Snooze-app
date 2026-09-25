@@ -16,10 +16,12 @@ import { CoolingSpeed } from './screens/CoolingSpeed'
 import { Status } from './screens/Status'
 import { Dev } from './screens/Dev'
 import { useService } from './useService'
+import { awayFromHome } from './domain'
 import { useTonight } from './useTonight'
 import type { ApiClient } from './api/client'
 import {
   MAX_TEMPERATURE_C,
+  type AuthState,
   type Holiday as HolidayType,
   type Schedule as ScheduleType,
 } from './types'
@@ -57,7 +59,14 @@ function firstScreen(): Screen {
   return 'report'
 }
 
-export function App({ client }: { client: ApiClient }) {
+interface Props {
+  client: ApiClient
+  /** Whether a password is set and which way this phone came in. See Gate. */
+  auth: AuthState
+  onAuth: (auth: AuthState) => void
+}
+
+export function App({ client, auth, onAuth }: Props) {
   const [screen, setScreen] = useState<Screen>(firstScreen)
   // What is pushed over the home screen, innermost last. A stack rather than a
   // flag per screen, because the schedule is two deep now, under Alarm, and
@@ -175,6 +184,17 @@ export function App({ client }: { client: ApiClient }) {
         </p>
       )}
 
+      {/*
+        Only when the phone is keeping a different time from the bed, which is
+        abroad. Every time on every screen is the bed's own, and at home there is
+        nothing to say about that.
+      */}
+      {info?.utc_offset_minutes !== undefined && awayFromHome() && (
+        <p className="app__away">
+          Times are the bed's own{info.timezone ? `, ${info.timezone}` : ''}.
+        </p>
+      )}
+
       <main className="app__scroll">
         {!ready ? (
           <p className="empty">Connecting…</p>
@@ -269,6 +289,9 @@ export function App({ client }: { client: ApiClient }) {
         schedule={schedule}
         tonight={tonight}
         holiday={holiday}
+        auth={auth}
+        onSignOut={() => client.signOut().then(onAuth)}
+        onSignOutEverywhere={() => client.signOutEverywhere().then(onAuth)}
       />
 
     </div>

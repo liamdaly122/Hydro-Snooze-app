@@ -8,8 +8,9 @@
  * Pi itself or by the Vite dev server proxying to a laptop.
  */
 
-import { ApiError, type ApiClient, type LiveUpdate } from './client'
+import { ApiError, SIGNED_OUT_EVENT, type ApiClient, type LiveUpdate } from './client'
 import type {
+  AuthState,
   AutopilotNight,
   AutopilotSwitch,
   HoldName,
@@ -47,7 +48,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* keep the status line */
     }
-    throw new ApiError(message)
+    // Signed out underneath the app: the session ran out, or every device was
+    // signed out from another one. Said once, to whoever is listening, rather
+    // than as an error on whichever card happened to ask.
+    if (response.status === 401 && !path.startsWith('/api/auth')) {
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
+    }
+    throw new ApiError(message, response.status)
   }
   return (await response.json()) as T
 }
@@ -57,6 +64,12 @@ export class HttpApiClient implements ApiClient {
   private listeners = new Set<(u: LiveUpdate) => void>()
   private reconnect: ReturnType<typeof setTimeout> | undefined
   private closed = false
+
+  getAuth = () => request<AuthState>('/api/auth')
+  signIn = (password: string) =>
+    request<AuthState>('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
+  signOut = () => request<AuthState>('/api/auth/logout', { method: 'POST' })
+  signOutEverywhere = () => request<AuthState>('/api/auth/logout-everywhere', { method: 'POST' })
 
   info = () => request<ServiceInfo>('/api/info')
   getState = () => request<DeviceState>('/api/state')

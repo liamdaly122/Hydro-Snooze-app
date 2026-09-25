@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from './api/client'
+import { setHomeOffset } from './domain'
 import type {
   DeviceEvent,
   DeviceHealth,
@@ -104,6 +105,8 @@ export function useService(client: ApiClient) {
       client.getHealth(),
     ]).then(([i, s, sch, ev, pw, hp]) => {
       if (!live) return
+      // Before anything is drawn against the clock. See homeNow in domain.ts.
+      if (i.utc_offset_minutes !== undefined) setHomeOffset(i.utc_offset_minutes)
       setInfo(i)
       // The build this page is running, for the reconnect check above.
       if (loadedBuild === null) loadedBuild = i.build

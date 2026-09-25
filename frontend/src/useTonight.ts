@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ApiClient } from './api/client'
+import { homeNow } from './domain'
 import type { Schedule, TonightState } from './types'
 
 /**
@@ -17,7 +18,7 @@ import type { Schedule, TonightState } from './types'
  */
 export function useTonight(client: ApiClient, schedule: Schedule | null) {
   const [tonight, setTonight] = useState<TonightState | null>(null)
-  const [now, setNow] = useState(() => new Date())
+  const [now, setNow] = useState(() => homeNow())
 
   useEffect(() => {
     let live = true
@@ -29,7 +30,7 @@ export function useTonight(client: ApiClient, schedule: Schedule | null) {
     load()
     const tick = setInterval(() => {
       if (!live) return
-      setNow(new Date())
+      setNow(homeNow())
       load()
     }, 60_000)
     return () => {

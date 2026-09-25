@@ -47,8 +47,16 @@ async def get_withings(request: Request) -> dict[str, object]:
 @router.get("/withings/connect")
 async def connect(request: Request) -> Response:
     """A link, not a button's fetch: the browser has to go to Withings itself."""
+    service = _service(request)
+    # Through Tailscale the way back is the Tailscale address, which has to be
+    # registered with Withings like the other two. See docs/tailscale.md.
+    public = getattr(request.state, "via", "home") == "tailscale"
     try:
-        url = _service(request).withings.begin_connect(request.headers.get("host", ""))
+        url = service.withings.begin_connect(
+            request.headers.get("host", ""),
+            public_url=service.settings.public_url if public else None,
+            outside=public,
+        )
     except ConnectProblem as exc:
         return PlainTextResponse(str(exc), status_code=400)
     return RedirectResponse(url, status_code=302)

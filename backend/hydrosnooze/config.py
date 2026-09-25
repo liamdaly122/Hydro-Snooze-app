@@ -61,6 +61,28 @@ class Settings(BaseSettings):
     withings_client_id: str = ""
     withings_client_secret: str = ""
 
+    # --- Reaching it from outside the house -----------------------------------
+    #: The password, hashed. Empty means no password, and then the app answers
+    #: on the home network exactly as it always has and refuses everything that
+    #: arrives through Tailscale. Set by scripts/password.py, never by hand: the
+    #: script is what turns a password into this.
+    password_hash: str = ""
+
+    #: What the scripts on the Pi sign in with, because they cannot type a
+    #: password. Written by scripts/password.py next to the hash.
+    api_key: str = ""
+
+    #: Which way in from outside the house there is. Empty for none, which is
+    #: every machine but the Pi. "tailscale" once `tailscale serve` is set up:
+    #: from then on anything arriving from the Pi itself without the scripts'
+    #: key came through Tailscale, and is treated as coming from outside.
+    tunnel: Literal["", "tailscale"] = ""
+
+    #: The address the app is reached at from outside, as the phone sees it:
+    #: https://hydrosnooze.<your tailnet>.ts.net. Used for the way back from
+    #: signing in to Withings, and for the link on a notification.
+    public_url: str = ""
+
     # --- Power thresholds, measured ------------------------------------------
     #
     # Taken off a King HS1001 through a Shelly Plug S Gen3, walking the unit

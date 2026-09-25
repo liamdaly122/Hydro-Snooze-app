@@ -30,6 +30,7 @@ from .adapters.probes import (
     STALE_AFTER,
     Probes,
 )
+from .access import Access
 from .clock import Clock, RealClock, SimClock, VirtualClock
 from .config import Settings
 from .db import Database, Decided
@@ -353,7 +354,12 @@ class Service:
         self._button_power = False
         self._button_until: datetime | None = None
         self._button_task: asyncio.Task[None] | None = None
-        self.notifier = Notifier(self.clock, settings.ntfy_topic, settings.ntfy_server)
+        self.notifier = Notifier(
+            self.clock, settings.ntfy_topic, settings.ntfy_server, click=settings.public_url
+        )
+        # Who may drive the bed from a phone. See access.py: nothing the bed
+        # does at night goes through it.
+        self.access = Access(settings, self.db, self.events, self.notifier)
         self.heartbeat = Heartbeat(self.clock, settings.heartbeat_url)
         # The sleeper rather than the machine. Its own loop, its own lock, and
         # nothing the bed does waits for it. See withings/sync.py.
