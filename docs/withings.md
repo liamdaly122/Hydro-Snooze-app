@@ -621,9 +621,13 @@ The two decisions it needed, and what they became:
   time to fall asleep do not get worse. A leader that costs more than ten
   minutes of either against the usual is not followed
 - **Limits:** two degrees either side of the usual Deep and REM to begin with,
-  widened to three on the Autopilot screen. Set around the schedule when first
-  needed or when changed, then left there: moving the usual later does not move
-  them, so a run of suggestions can never walk the bed somewhere nobody chose
+  widened to three on the Autopilot screen. They follow the schedule: change the
+  usual Deep and Deep's limits move with it. Only the reach is kept. Nothing
+  Autopilot does changes the usual, so a run of suggestions still cannot walk the
+  bed somewhere nobody chose. At first the limits stayed where they were set, but
+  with Full Autopilot choosing by itself that held a part a degree or more away
+  from a usual that had just been changed, every night, until the limits were
+  set again
 
 Most nights it suggests the best so far, which is the usual until the scoreboard
 calls something clearly ahead. About one night in three is a test: one part, one

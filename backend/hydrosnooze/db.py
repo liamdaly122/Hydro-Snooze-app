@@ -439,7 +439,8 @@ CREATE TABLE IF NOT EXISTS suggestions (
 );
 
 -- How far the suggestions may take each part: `reach` degrees either side of
--- `centre_c`, which is where the part was when the limits were set.
+-- the usual. `centre_c` is the usual when the reach was picked, kept as a
+-- record only: the limits follow the schedule, centred on the usual as it is.
 CREATE TABLE IF NOT EXISTS suggest_limits (
     part     TEXT    PRIMARY KEY,
     centre_c INTEGER NOT NULL,
