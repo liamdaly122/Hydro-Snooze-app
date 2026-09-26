@@ -679,6 +679,8 @@ export interface SuggestionPart {
 /** Tonight's suggested Deep and REM, from the scoreboard. */
 export interface Suggestion {
   state: SuggestionState
+  /** Taken by Autopilot itself in the evening, rather than by a tap. */
+  auto: boolean
   wake_on: string | null
   parts: SuggestionPart[]
   test: { part: 'deep' | 'rem'; offset_c: number } | null

@@ -23,6 +23,7 @@ from itertools import pairwise
 
 from .db import Sample
 from .events import Event, Level
+from .hold import TRIM_KIND
 from .models import QUIET_KIND, NightPlan
 
 #: Sampling interval, for turning watts into energy. Not read from settings on
@@ -209,6 +210,10 @@ def build(
 
     if swaps:
         lines.append(f"Swapped mode {_times(swaps)} to keep it quiet.")
+
+    trims = len([e for e in events if e.kind == TRIM_KIND])
+    if trims:
+        lines.append(f"Trimmed the setting {_times(trims)} to hold the number.")
 
     energy = kwh(samples)
     if energy:

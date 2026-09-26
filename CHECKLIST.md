@@ -563,7 +563,9 @@ API rather than read. Read that before writing any of it.
       default) and a night-time trim that moves the setting a degree after half an hour off it.
       **Built and tested against a simulated bed.** The first real night at Balanced is the next
       thing to look at: the on-target figure on the Autopilot screen says how it went
-- [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
+- [x] Step three: Full Autopilot. With Autopilot on, tonight's Deep and REM are chosen and set in
+      the evening without asking, tests included; Back to usual undoes a night and the switch turns
+      it off. The morning message says how a test night went
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

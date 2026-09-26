@@ -60,7 +60,7 @@ export function TonightBanner({
           {suggested
             ? suggested.test
               ? 'Autopilot test tonight'
-              : "Autopilot's suggestion tonight"
+              : "Autopilot's choice tonight"
             : 'Tonight only'}
         </span>
         <span className="tonight__sub">{parts.join(' · ') || 'changed'}</span>

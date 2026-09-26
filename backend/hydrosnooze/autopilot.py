@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 from .db import PreconditionRow, Sample
 from .events import Event
+from .hold import TRIM_KIND
 from .models import QUIET_KIND, NightPlan, StageStep
 from .report import FALLBACK_SAMPLE_S, kwh
 
@@ -72,6 +73,9 @@ REASONS = {
     PHASE_KIND: "Phase & mode change",
     AMBIENT_KIND: "Getting the bed ready",
     RESPONSE_KIND: "Drift response",
+    # The night-time trim (hold.py): a degree more or less sent because the bed
+    # sat off the number for half an hour.
+    TRIM_KIND: "Holding the number",
 }
 
 #: Nobody-asked-for-it, i.e. somebody did. See _marks.
