@@ -6,7 +6,7 @@ being obvious here.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 
 from ..models import (
@@ -18,6 +18,7 @@ from ..models import (
     Preconditioning,
     Profile,
     Schedule,
+    minutes_between,
     modes_for,
 )
 
@@ -95,7 +96,21 @@ def schedule_json(
             "reason": pre.reason,
         },
         "updated_at": _iso(schedule.updated_at),
+        # The weekend's own times, and how long that night is, so the app never
+        # has to work out which side of midnight it starts on either.
+        "other_days": schedule.other_days,
+        "other_bed_time": _hhmm(schedule.other_bed_time),
+        "other_wake_time": _hhmm(schedule.other_wake_time),
+        "other_night_minutes": (
+            minutes_between(schedule.other_bed_time, schedule.other_wake_time)
+            if schedule.other_bed_time and schedule.other_wake_time
+            else None
+        ),
     }
+
+
+def _hhmm(value: time | None) -> str | None:
+    return value.strftime("%H:%M") if value is not None else None
 
 
 def health_json(devices: list[DeviceHealth]) -> list[dict[str, Any]]:
@@ -220,6 +235,10 @@ def autopilot_json(night) -> dict[str, object]:
                 "target_c": night.ready.target_c,
                 "start_c": night.ready.start_c,
                 "end_c": night.ready.end_c,
+                # Which sensor called it, so the screen can say. The morning
+                # message always has; the screen said "on the hoses" for runs
+                # the plug timed with no probes reporting at all.
+                "decided_by": night.ready.decided_by,
             }
         ),
         "energy_kwh": night.energy_kwh,
@@ -228,7 +247,12 @@ def autopilot_json(night) -> dict[str, object]:
 
 
 def tonight_json(
-    schedule, tonight, phase: str = "none", *, running: dict[str, Any] | None = None
+    schedule,
+    tonight,
+    phase: str = "none",
+    *,
+    running: dict[str, Any] | None = None,
+    usual_times: tuple[time, time] | None = None,
 ) -> dict[str, object]:
     """What is different about this one night, and what it adds up to.
 
@@ -252,6 +276,11 @@ def tonight_json(
         "nudge_until": (
             tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None
         ),
+        # This night's own times before anything tonight changed them: the
+        # weekend's, on a weekend. What "usually" means under a changed alarm,
+        # so a Saturday's 08:30 is never shown as a one-off change to 06:30.
+        "usual_bed_time": _hhmm((usual_times or (schedule.bed_time, schedule.wake_time))[0]),
+        "usual_wake_time": _hhmm((usual_times or (schedule.bed_time, schedule.wake_time))[1]),
     }
 
 
@@ -285,6 +314,14 @@ def learning_json(learning: dict[str, Any]) -> dict[str, Any]:
     from ..db import MIN_LEARNABLE_GAP_C
 
     on = bool(learning["on"])
+    # Why nothing is being corrected, when nothing is. Autopilot first: it is
+    # the switch over this one, and saying learning is off when it is on would
+    # send somebody to the wrong toggle.
+    why_not = (
+        "Autopilot is off"
+        if not learning.get("autopilot_on", True)
+        else None if on else "learning is switched off"
+    )
     gap = f"{MIN_LEARNABLE_GAP_C:g}"
     modes: list[dict[str, Any]] = []
 
@@ -312,7 +349,7 @@ def learning_json(learning: dict[str, Any]) -> dict[str, Any]:
                 "Where your bed settles",
                 runs=int(row["settle_runs"]),
                 needed=needed,
-                detail=_settles(row, target_c, on),
+                detail=_settles(row, target_c, why_not),
             ),
         ]
         modes.append(
@@ -341,16 +378,19 @@ def _skill(key: str, title: str, *, runs: int, needed: int, detail: str) -> dict
     }
 
 
-def _settles(row: dict[str, Any], target_c: int, on: bool) -> str:
-    """The one line that can describe something the unit is actually being sent."""
+def _settles(row: dict[str, Any], target_c: int, why_not: str | None) -> str:
+    """The one line that can describe something the unit is actually being sent.
+
+    `why_not` is why nothing is being corrected, or None when it is.
+    """
     drift = row["settle_c"]
     if drift is None:
         return "Until then the number you ask for is the number that gets sent."
 
     way = "below" if drift < 0 else "above"
     lands = f"Lands {abs(drift):.1f}° {way} the setting"
-    if not on:
-        return f"{lands}. Not being corrected, because learning is switched off."
+    if why_not is not None:
+        return f"{lands}. Not being corrected, because {why_not}."
 
     sends = int(row["sends_c"])
     if sends == target_c:

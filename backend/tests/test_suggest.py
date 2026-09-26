@@ -136,6 +136,15 @@ def test_a_usual_moved_outside_the_limits_is_brought_back_inside_them():
     assert c.best["deep"] == 19
 
 
+def test_bringing_it_back_inside_says_so_rather_than_calling_it_the_usual():
+    """It is a change from the usual, so it cannot be explained as the usual."""
+    c = next(c for c in (choose(usual={"deep": 21, "rem": 20}, on=d) for d in DATES)
+             if c.test_part is None)
+    assert c.changes_anything
+    assert "runs your usual" not in c.why
+    assert "Deep at 19°" in c.why
+
+
 # --- Offered, taken and marked ---------------------------------------------------------
 
 

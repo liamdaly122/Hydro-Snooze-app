@@ -1076,45 +1076,9 @@ button:disabled {
   padding-right: 4px;
 }
 
-/* --- Test run ---------------------------------------------------------------- */
-
-.rehearsal__intro {
-  margin-top: 14px;
-}
-
-.rehearsal__steps {
-  margin: 14px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rehearsal__steps li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--divider);
-  font-size: 14px;
-}
-
-.rehearsal__steps li:last-child {
-  border-bottom: 0;
-}
-
-.rehearsal__step {
-  color: var(--text-label);
-}
-
-.rehearsal__detail {
-  color: var(--text-dim);
-}
-
-.rehearsal__now {
-  margin: 14px 0 0;
-  font-size: 17px;
-  color: var(--green);
-  font-variant-numeric: tabular-nums;
-}
+/* --- Wide button --------------------------------------------------------------- */
+/* Named for the Test run card it was made for, which has gone. The Holiday
+   screen's save button still wears it. */
 
 .rehearsal__btn {
   width: 100%;
@@ -1130,12 +1094,6 @@ button:disabled {
 
 .rehearsal__btn:disabled {
   color: var(--text-faint);
-}
-
-/* Stopping is the safe action, so it is not styled as a danger. */
-.rehearsal__btn--stop {
-  background: rgb(255 179 64 / 0.14);
-  color: var(--amber);
 }
 
 /* --- Device bar -------------------------------------------------------------- */
@@ -3657,4 +3615,493 @@ a.pill {
 
 .ap-hold--off .ap-hold__title {
   color: var(--text-dim);
+}
+
+/* --- Signing in ---------------------------------------------------------------
+ *
+ * Seen once per device, so it borrows everything it can from the rest of the
+ * app rather than being designed as a front door.
+ */
+
+.signin {
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.signin__title {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-mid);
+}
+
+.signin__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.signin__label {
+  font-size: var(--label-size);
+  font-weight: 600;
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+
+/* 16px, not less: iOS zooms the whole page into any field set smaller. */
+.signin__input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--control);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.signin__input:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.signin__go:not(:disabled) {
+  background: var(--blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+.signin__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-mid);
+}
+
+/* For the password manager, which will not save a password with no name. */
+.signin__hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Abroad, under the header: every time in the app is the bed's. */
+.app__away {
+  margin: 0 var(--gutter) 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Who is signed in, at the bottom of the menu. See SideMenu's SignedIn. */
+.drawer__foot {
+  margin-top: auto;
+  padding: 14px 10px 0;
+  border-top: 1px solid var(--divider);
+}
+
+.drawer__foot-line {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.drawer__foot-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* --- How the night felt ----------------------------------------------------------
+ *
+ * Three rows of taps on the Health Report. The picks are pills; the tags wrap,
+ * because "Someone else in the bed" is a long way from "Ill".
+ */
+
+.note__label {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.note__label:first-of-type {
+  margin-top: 4px;
+}
+
+.note__row {
+  display: flex;
+  gap: 6px;
+}
+
+.note__pick {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--control);
+  color: var(--text-label);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.note__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.note__tag {
+  padding: 8px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-mid);
+  font-size: 12px;
+}
+
+.note__pick[aria-pressed='true'],
+.note__tag[aria-pressed='true'] {
+  background: rgb(10 132 255 / 0.22);
+  border-color: rgb(10 132 255 / 0.6);
+  color: var(--text);
+}
+
+.note .footnote {
+  margin: 12px 0 0;
+}
+
+/* --- Trends ----------------------------------------------------------------------
+ *
+ * Small charts, one measure each, sharing one picked night. Thin lines, hairline
+ * edges and the numbers in text colours; the lines carry the colour.
+ */
+
+.trends__ranges {
+  display: flex;
+  gap: 6px;
+}
+
+.trends__range {
+  flex: 1;
+  padding: 9px 4px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--control);
+  color: var(--text-mid);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.trends__range[aria-pressed='true'] {
+  background: var(--control-active);
+  color: var(--text);
+}
+
+/* The last render held while the next stretch loads: no flash, no jump. */
+.trends {
+  transition: opacity 0.2s var(--ease);
+}
+
+.trends--loading {
+  opacity: 0.45;
+}
+
+.trends__none {
+  margin: 18px 0 4px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.trends__tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.trends__tile {
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--control);
+}
+
+.trends__tile-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.trends__tile-value {
+  margin: 4px 0 2px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.trends__tile-change {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+.trends__tile-change--better { color: var(--green); }
+.trends__tile-change--worse { color: var(--red); }
+
+.trends__tariff-link {
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.trends__tariff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.trends__tariff-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* 16px so iOS does not zoom the page into the field. */
+.trends__tariff-input {
+  width: 90px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--control);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.trends__tariff .pill {
+  flex: none;
+  padding: 9px 16px;
+}
+
+.trends__readout {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.trends__readout-date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.trends__flag {
+  padding: 1px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-mid);
+}
+
+.trends__readout-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.trends__readout-values b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.trends__charts {
+  margin-top: 6px;
+  outline-offset: 4px;
+  touch-action: pan-y;
+}
+
+.trends__small {
+  margin-top: 14px;
+}
+
+.trends__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-label);
+}
+
+.trends__key {
+  display: inline-flex;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.trends__key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+}
+
+.trends__swatch {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.trends__swatch--dashed {
+  height: 0;
+  border-top: 2px dashed;
+}
+
+.trends__chart {
+  position: relative;
+  padding-right: 44px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.trends__svg {
+  display: block;
+  width: 100%;
+  height: 84px;
+  overflow: visible;
+}
+
+/* The picked night on each line: a mark with a ring of the card around it. */
+.trends__dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--card);
+  pointer-events: none;
+}
+
+.trends__scale {
+  position: absolute;
+  right: 0;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.trends__scale--high { top: -2px; }
+.trends__scale--low { bottom: 2px; }
+
+.trends__table-wrap {
+  overflow-x: auto;
+}
+
+.trends__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.trends__table th,
+.trends__table td {
+  padding: 6px 8px 6px 0;
+  text-align: right;
+  border-bottom: 1px solid var(--divider);
+  color: var(--text-mid);
+}
+
+.trends__table th[scope='row'],
+.trends__table thead th:first-child {
+  text-align: left;
+  color: var(--text-label);
+  font-weight: 500;
+}
+
+.trends__table thead th {
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.trends__plot {
+  position: relative;
+}
+
+/* Under the plot, not the gutter, so the last date sits under the last night. */
+.trends__axis {
+  padding-right: 44px;
+}
+
+/* The Submit button, and the one line the note folds down to once it is used. */
+.note__submit {
+  margin-top: 16px;
+}
+
+.note__submit:not(:disabled) {
+  background: var(--blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+.note-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.note-done__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-mid);
+}
+
+.note-done__label {
+  color: var(--text-dim);
+}
+
+.note-done__aside {
+  color: var(--text-faint);
+}
+
+.note-done__edit {
+  flex: none;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font-size: 13px;
+}
+
+/* A chart opening a fold: the fold's own rule and gap are the space above it. */
+.fold__body > .chart:first-child,
+.fold__body > .log:first-child {
+  margin-top: 0;
 }

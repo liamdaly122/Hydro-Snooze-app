@@ -14,7 +14,12 @@ is where on that clock my deep sleep falls. A night I went to bed late is a nigh
 the Deep part started before I was asleep, and that belongs in the answer.
 
 Only nights ending on a morning the schedule runs, because the others are a
-different routine, and only the last TIMING_NIGHTS of those within TIMING_DAYS,
+different routine. Each is measured from its own lights out, so a weekend with
+its own times counts like any other night: what is being measured is how long
+after lights out I fall asleep and my deep sleep is mostly done, and that does
+not move with the alarm. It is also why a longer night, with Autopilot on, keeps
+Drift and Deep exactly where this card puts them and gives the extra time to
+REM (models.laid_out_like). And only the last TIMING_NIGHTS within TIMING_DAYS,
 because a routine moves with the seasons. And only nights after a Start again,
 which is for a routine that has changed: a new job, a new baby, a move. The
 nights before it are kept; they stop counting here. Nights under MIN_ASLEEP_S are left out:
@@ -192,7 +197,10 @@ def _asleep_s(db: Database, n: StoredNight) -> int:
 
 def _measure(db: Database, night: StoredNight, schedule: Schedule, width: int) -> _Night:
     tz = _zone(night.timezone)
-    lights_out = _lights_out(night, schedule, tz)
+    # That morning's own times: a Saturday is measured from Saturday's lights
+    # out, not Monday's.
+    own = schedule.for_morning(date.fromisoformat(night.wake_on))
+    lights_out = _lights_out(night, own, tz)
 
     bins = {state: [0] * width for state in (AWAKE, LIGHT, DEEP, REM)}
     deep: list[int] = []
@@ -201,7 +209,9 @@ def _measure(db: Database, night: StoredNight, schedule: Schedule, width: int) -
         if m.state == DEEP:
             deep.append(offset)
         i = offset // BIN_MIN
-        if 0 <= offset < schedule.night_minutes and m.state in bins:
+        # The pattern is drawn over the usual night, so a longer one adds what
+        # fits and the rest of it runs off the end of the chart.
+        if 0 <= offset < own.night_minutes and i < width and m.state in bins:
             bins[m.state][i] += 1
 
     onset, _ = _onset_and_wake(night, db.sleep_stages(night.id))

@@ -269,6 +269,18 @@ def test_switched_off_the_card_says_the_correction_is_not_happening(service):
     assert "sends" not in settle["detail"]
 
 
+def test_with_autopilot_off_the_card_does_not_call_the_drift_close_enough(service):
+    """Autopilot off gates the correction too, and then the target is what goes
+    out. The card saw target and sent agree and called a 2.1° droop "close
+    enough to leave alone", under a banner saying none of it was being used."""
+    measured(service)
+    service.db.set_autopilot_on(False)
+    settle = learning_json(service.learning())["modes"][0]["skills"][1]
+    assert "Lands 2.1° below" in settle["detail"]
+    assert "because Autopilot is off" in settle["detail"]
+    assert "close enough" not in settle["detail"]
+
+
 def test_the_dots_never_count_past_what_was_needed(service):
     """Six nights in, the card should not be drawing six dots out of three."""
     for _ in range(6):

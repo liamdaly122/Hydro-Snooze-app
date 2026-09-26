@@ -16,11 +16,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import dev, routes
+from .access import COOKIE
+from .api import dev, notes, routes, signin
 from .api import withings as withings_routes
 from .api.schemas import health_json, state_json
 from .config import get_settings
@@ -132,15 +133,54 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="HydroSnooze", lifespan=lifespan)
+app.include_router(signin.router)
 app.include_router(routes.router)
 app.include_router(dev.router)
 app.include_router(withings_routes.router)
+app.include_router(notes.router)
+
+
+@app.middleware("http")
+async def signed_in_only(request: Request, call_next):
+    """Every /api request, checked before it reaches a route. See access.py.
+
+    Here rather than on each route, because a route that forgot to ask would be
+    a way in, and there are sixty of them. The app shell and its files are not
+    checked: they hold no data, and the sign-in screen is part of them.
+    """
+    path = request.url.path
+    service = getattr(request.app.state, "service", None)
+    if service is not None and (path == "/api" or path.startswith("/api/")):
+        verdict = signin.verdict_for(request)
+        if path not in signin.OPEN and not verdict.allowed:
+            return JSONResponse({"detail": verdict.reason}, status_code=verdict.status)
+        # Which way it came in, for the few routes that behave differently
+        # from outside the house.
+        request.state.via = verdict.via
+    return await call_next(request)
 
 
 @app.websocket("/api/live")
 async def live(websocket: WebSocket) -> None:
     """Push state changes so the app is never stale."""
     service: Service = websocket.app.state.service
+    # The same check as every other request, and one more: a browser says which
+    # page opened a socket, and only the app's own page may read the live feed.
+    # Refused before accepting, which the phone sees as the socket failing to
+    # open. It keeps trying, and the sign-in screen takes over from there.
+    verdict = service.access.admit(
+        client_host=websocket.client.host if websocket.client else None,
+        authorization=websocket.headers.get("authorization"),
+        cookie=websocket.cookies.get(COOKIE),
+    )
+    same = service.access.same_origin(
+        websocket.headers.get("origin"),
+        websocket.headers.get("host"),
+        websocket.headers.get("x-forwarded-host"),
+    )
+    if not verdict.allowed or not same:
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     queue = service.subscribe()
     try:

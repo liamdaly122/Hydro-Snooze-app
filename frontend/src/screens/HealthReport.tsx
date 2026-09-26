@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { BedByStage } from '../components/BedByStage'
 import { Hypnogram, STAGE_COLOUR, STAGE_LABEL, STAGE_ORDER } from '../components/Hypnogram'
+import { NightNoteCard } from '../components/NightNoteCard'
 import { Bed, ChevronRight, Clock, Moon, Sparkle } from '../components/Icons'
 import { ScoreGauge } from '../components/ScoreGauge'
 import { VerdictPill } from '../components/VerdictPill'
@@ -235,6 +236,13 @@ export function HealthReport({
         onPreviousWeek={() => stepWeek(-1)}
         onNextWeek={() => stepWeek(1)}
       />
+
+      {/*
+        Straight under the week, above the score. It is the one thing on this
+        screen that asks something of you, it takes three taps, and in the
+        morning nobody scrolls past a hypnogram to find it.
+      */}
+      {shownDate && <NightNoteCard key={shownDate} client={client} wakeOn={shownDate} />}
 
       {night ? (
         <Night night={night} />

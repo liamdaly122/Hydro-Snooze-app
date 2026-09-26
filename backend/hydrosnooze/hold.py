@@ -78,14 +78,6 @@ HOLDS: dict[str, Hold] = {
 
 DEFAULT_HOLD = "balanced"
 
-#: What a trim is logged as. Its own kind, so the Autopilot screen counts it as
-#: holding the number rather than as a mode swap, and so does the morning report.
-TRIM_KIND = "trim"
-
-#: And the one line a part gets when the trim has gone as far as it may. Not a
-#: reason for any command, so kept apart from TRIM_KIND.
-TRIM_LIMIT_KIND = "trim_limit"
-
 #: How long the bed has to sit off the target before the trim moves, and so the
 #: least time between one trim and the next.
 TRIM_WINDOW = timedelta(minutes=30)

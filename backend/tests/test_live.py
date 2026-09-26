@@ -107,6 +107,13 @@ async def test_the_socket_closes_when_its_subscriber_has_been_dropped(service):
     closed = asyncio.Event()
 
     class FakeSocket:
+        # What every real socket carries and the sign-in check reads. No
+        # address, no origin and no cookie is the home network with no
+        # password, which is what this service has.
+        client = None
+        headers: dict[str, str] = {}
+        cookies: dict[str, str] = {}
+
         def __init__(self):
             self.app = type("A", (), {"state": type("S", (), {"service": service})()})()
 
@@ -121,7 +128,7 @@ async def test_the_socket_closes_when_its_subscriber_has_been_dropped(service):
                 for n in range(80):
                     service._broadcast({"n": n})
 
-        async def close(self):
+        async def close(self, code: int = 1000):
             closed.set()
 
     await asyncio.wait_for(live(FakeSocket()), timeout=2)

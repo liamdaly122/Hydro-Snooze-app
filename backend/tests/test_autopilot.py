@@ -23,7 +23,8 @@ from hydrosnooze import autopilot
 from hydrosnooze.autopilot import BY_HAND, PHASE_KIND, READY_KIND, RESPONSE_KIND
 from hydrosnooze.db import Sample
 from hydrosnooze.events import Event
-from hydrosnooze.models import Schedule, SleepStage, Stage
+from hydrosnooze.models import TRIM_KIND, Schedule, SleepStage, Stage
+from hydrosnooze.service import HOLD_KIND
 
 WAKE = date(2026, 9, 12)
 
@@ -125,6 +126,29 @@ def test_a_reason_explains_the_commands_before_it_too(plan):
         ev(at + timedelta(seconds=5), RESPONSE_KIND, "The bed is at 25.5C against a 26C stage"),
     ])
     assert [m.kind for m in night.marks] == [RESPONSE_KIND, RESPONSE_KIND]
+
+
+def test_a_trim_is_a_drift_response_under_a_kind_of_its_own(plan):
+    """The trim presses and then explains itself, like a mode correction, and
+    it is filed with them. Its own kind is for the morning report, not this."""
+    at = plan.steps[2].starts_at + timedelta(minutes=40)
+    night = build(plan, [
+        ev(at, "temperature", "Railed to 25C then up to 33C"),
+        ev(at + timedelta(seconds=5), TRIM_KIND, "The bed has sat at 30.6C against a 32C part"),
+    ])
+    assert [m.kind for m in night.marks] == [RESPONSE_KIND]
+
+
+def test_picking_a_hold_level_does_not_claim_a_change_made_by_hand(plan):
+    """Setting the Hold level sends nothing. It was logged under the drift
+    response's kind, so the temperature somebody set a minute later was filed
+    as Autopilot's and left out of the scoreboard's by-hand check."""
+    at = plan.steps[1].starts_at + timedelta(hours=1)
+    night = build(plan, [
+        ev(at, HOLD_KIND, "Holding warm parts: Close."),
+        ev(at + timedelta(minutes=1), "temperature", "Railed to 15C then up to 24C"),
+    ])
+    assert [m.kind for m in night.marks] == [BY_HAND]
 
 
 def test_a_command_with_no_reason_near_it_was_somebody_pressing_a_button(plan):

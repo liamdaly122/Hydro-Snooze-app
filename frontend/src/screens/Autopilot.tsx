@@ -8,6 +8,7 @@ import { SuggestionFold } from '../components/Suggestion'
 import { AutopilotSwitchCard } from '../components/AutopilotSwitchCard'
 import { TestResultCard } from '../components/TestResultCard'
 import { SleepTimingCard } from '../components/SleepTimingCard'
+import { homeNow } from '../domain'
 import type { ApiClient } from '../api/client'
 import type {
   AutopilotNight,
@@ -62,9 +63,15 @@ function nightLabel(startsAt: string, wakeAt: string): string {
   }
   const span = `${part(startsAt)} to ${part(wakeAt, true)}`
 
-  const midnight = new Date()
+  const midnight = homeNow()
   midnight.setHours(0, 0, 0, 0)
   return new Date(wakeAt) >= midnight ? `Last night · ${span}` : span
+}
+
+/** Which sensor said the bed was ready, in the morning message's own words. */
+const HOW_READY: Record<string, string> = {
+  probes: 'measured on the hoses',
+  plug: 'measured off the plug',
 }
 
 /** "Perfect", or how far off it typically sat. Never a bare number with no verdict. */
@@ -461,7 +468,7 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
                   night.ready.start_c !== null && night.ready.end_c !== null
                     ? `, ${night.ready.start_c.toFixed(1)} to ${night.ready.end_c.toFixed(1)}°`
                     : ''
-                }, measured on the hoses.`
+                }, ${HOW_READY[night.ready.decided_by ?? ''] ?? 'measured'}.`
               : `Getting ready ran ${night.ready.minutes}m without settling at ${night.ready.target_c}°.`}
           </p>
         )}

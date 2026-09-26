@@ -17,7 +17,7 @@ from hydrosnooze import hold
 from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.db import Database
-from hydrosnooze.models import Mode, Power, Schedule, SleepStage, Stage, quieter_mode
+from hydrosnooze.models import TRIM_KIND, Mode, Power, Schedule, SleepStage, Stage, quieter_mode
 from hydrosnooze.sequences import CommandFailed
 from hydrosnooze.service import Service
 
@@ -146,8 +146,8 @@ def test_a_bed_sat_low_for_half_an_hour_is_sent_a_degree_more(service):
     assert service.sent == []
     run_for(service, 2, start=T0 + timedelta(minutes=29.5))
     assert service.sent == [33]
-    said = [e for e in service.events.recent() if e.kind == hold.TRIM_KIND]
-    assert said and "a degree more" in said[-1].message, "filed as holding the number"
+    said = [e for e in service.events.recent() if e.kind == TRIM_KIND]
+    assert said and "a degree more" in said[-1].message, "filed as a drift response"
 
 
 def test_one_degree_at_a_time_and_a_full_window_between(service):
@@ -263,25 +263,9 @@ def test_a_database_from_before_the_choice_is_balanced(tmp_path):
         db.close()
 
 
-def test_a_trim_is_filed_as_holding_the_number_and_not_as_a_hand(service):
-    """The command a trim sends is Autopilot's. Filed as a hand on the controls,
-    it would take the part out of the scoreboard."""
-    from hydrosnooze import autopilot
-    from hydrosnooze.events import Event
-
-    plan = service.schedule.plan_for(date(2026, 9, 25))
-    at = rem(service).starts_at + timedelta(hours=1)
-    events = [
-        Event(0, rem(service).starts_at, "info", autopilot.PHASE_KIND, "REM"),
-        Event(0, rem(service).starts_at, "info", "temperature", "Set 32C"),
-        Event(0, at, "info", "temperature", "Set 33C"),
-        Event(0, at + timedelta(seconds=1), "info", hold.TRIM_KIND, "a degree more"),
-    ]
-    night = autopilot.build(plan, [], events, set())
-    assert [m.kind for m in night.marks] == [autopilot.PHASE_KIND, hold.TRIM_KIND]
-
-
 def test_the_morning_report_counts_trims_apart_from_mode_swaps():
+    """And only the trims that went through. One that failed is an error, and
+    the report already says so under what went wrong."""
     from hydrosnooze import report
     from hydrosnooze.events import Event
     from hydrosnooze.models import QUIET_KIND
@@ -290,8 +274,9 @@ def test_the_morning_report_counts_trims_apart_from_mode_swaps():
     at = plan.steps[1].starts_at + timedelta(hours=1)
     events = [
         Event(0, at, "info", QUIET_KIND, "switched to quiet"),
-        Event(0, at, "info", hold.TRIM_KIND, "a degree more"),
-        Event(0, at, "info", hold.TRIM_KIND, "a degree more"),
+        Event(0, at, "info", TRIM_KIND, "a degree more"),
+        Event(0, at, "info", TRIM_KIND, "a degree more"),
+        Event(0, at, "error", TRIM_KIND, "Could not send temp_up"),
     ]
     body = report.build(plan, [], events, set(), None).body
     assert "Swapped mode once to keep it quiet." in body

@@ -28,6 +28,8 @@ from .models import (
     default_stages,
     with_all_stages,
 )
+from .notes import NightNote
+
 # Renamed on the way in. `Stage` here already means Drift, Deep, REM and Wake:
 # what the bed is asked for. This is what the sleeper was measured doing.
 from .trials import NightRun, PartRun
@@ -74,6 +76,20 @@ class Sample(NamedTuple):
     return_c: float | None = None
     room_c: float | None = None
     target_c: int | None = None
+
+
+class StoredSession(NamedTuple):
+    """One signed-in device, as stored. See access.py."""
+
+    token_hash: str
+    #: A mark of the password it signed in with, not the password or its hash.
+    password: str
+    created_at: datetime
+    seen_at: datetime
+    #: "home" or "tailscale": which way it came in when it signed in.
+    via: str
+    #: Which browser, roughly, so a list of them means something to a person.
+    label: str
 
 
 class Decided(NamedTuple):
@@ -148,7 +164,10 @@ CREATE TABLE IF NOT EXISTS schedule (
     bed_time             TEXT    NOT NULL,
     stages               TEXT    NOT NULL,
     cooling_speed        TEXT    NOT NULL,
-    updated_at           TEXT
+    updated_at           TEXT,
+    other_days           TEXT    NOT NULL DEFAULT '[]',
+    other_bed_time       TEXT    NOT NULL DEFAULT '',
+    other_wake_time      TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -297,7 +316,8 @@ CREATE TABLE IF NOT EXISTS preferences (
     learning_on  INTEGER NOT NULL DEFAULT 1,
     timing_since TEXT,
     autopilot_on INTEGER NOT NULL DEFAULT 1,
-    hold         TEXT    NOT NULL DEFAULT 'balanced'
+    hold         TEXT    NOT NULL DEFAULT 'balanced',
+    tariff_p     REAL
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -400,7 +420,8 @@ CREATE TABLE IF NOT EXISTS night_runs (
     test_part     TEXT,
     test_offset_c INTEGER,
     rebuilt       INTEGER NOT NULL DEFAULT 0,
-    written_at    TEXT    NOT NULL
+    written_at    TEXT    NOT NULL,
+    kwh           REAL
 );
 
 -- What was decided about each evening's suggestion (suggest.py), one row per
@@ -424,6 +445,30 @@ CREATE TABLE IF NOT EXISTS suggest_limits (
     centre_c INTEGER NOT NULL,
     reach    INTEGER NOT NULL
 );
+
+-- How a night felt, from me rather than the mat (notes.py). One row a morning,
+-- keyed like every other night. `tags` is a JSON list of notes.TAGS keys.
+CREATE TABLE IF NOT EXISTS night_notes (
+    wake_on    TEXT PRIMARY KEY,
+    rating     INTEGER,
+    felt       TEXT,
+    tags       TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL,
+    submitted  INTEGER NOT NULL DEFAULT 0
+);
+
+-- Each device signed in (access.py). The token itself is never stored, only a
+-- hash of it, so a copy of this file signs nobody in. `password` is a mark of
+-- the password the device signed in with: change the password and every row
+-- stops matching, which is what makes changing it sign everything out.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    password   TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    seen_at    TEXT NOT NULL,
+    via        TEXT NOT NULL,
+    label      TEXT NOT NULL DEFAULT ''
+);
 """
 
 #: Every column the schedule table has now, in the order SCHEMA declares them.
@@ -439,6 +484,9 @@ SCHEDULE_COLUMNS = (
     "stages",
     "cooling_speed",
     "updated_at",
+    "other_days",
+    "other_bed_time",
+    "other_wake_time",
 )
 
 #: How long the unit's own three phases lasted, in minutes. Fixed in the hardware,
@@ -573,6 +621,23 @@ class Database:
             self._db.execute(
                 "ALTER TABLE preferences ADD COLUMN hold TEXT NOT NULL DEFAULT 'balanced'"
             )
+        # What electricity costs, for Trends. NULL until it is set.
+        if "tariff_p" not in prefs:
+            self._db.execute("ALTER TABLE preferences ADD COLUMN tariff_p REAL")
+
+        # Whether a night's note was submitted and put away. Not on any row
+        # written before there was a Submit button, which is what nought says.
+        notes = {r["name"] for r in self._db.execute("PRAGMA table_info(night_notes)")}
+        if "submitted" not in notes:
+            self._db.execute(
+                "ALTER TABLE night_notes ADD COLUMN submitted INTEGER NOT NULL DEFAULT 0"
+            )
+
+        # What each night used. NULL on rows from before, filled in from the
+        # plug's readings by Service.record_missing.
+        runs = {r["name"] for r in self._db.execute("PRAGMA table_info(night_runs)")}
+        if "kwh" not in runs:
+            self._db.execute("ALTER TABLE night_runs ADD COLUMN kwh REAL")
 
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(schedule)")}
         added = [
@@ -582,6 +647,11 @@ class Database:
             ("bed_time", "TEXT NOT NULL DEFAULT ''"),
             ("stages", "TEXT NOT NULL DEFAULT '[]'"),
             ("cooling_speed", "TEXT NOT NULL DEFAULT 'quiet'"),
+            # The weekend's own times. None, which is what every night before
+            # there were two sets of times ran on.
+            ("other_days", "TEXT NOT NULL DEFAULT '[]'"),
+            ("other_bed_time", "TEXT NOT NULL DEFAULT ''"),
+            ("other_wake_time", "TEXT NOT NULL DEFAULT ''"),
         ]
         for name, definition in added:
             if name not in columns:
@@ -803,14 +873,18 @@ class Database:
         self._db.execute(
             """
             INSERT INTO schedule (id, name, enabled, days_of_week, wake_time,
-                                  bed_time, stages, cooling_speed, updated_at)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  bed_time, stages, cooling_speed, updated_at,
+                                  other_days, other_bed_time, other_wake_time)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, enabled=excluded.enabled,
                 days_of_week=excluded.days_of_week, wake_time=excluded.wake_time,
                 bed_time=excluded.bed_time,
                 stages=excluded.stages, cooling_speed=excluded.cooling_speed,
-                updated_at=excluded.updated_at
+                updated_at=excluded.updated_at,
+                other_days=excluded.other_days,
+                other_bed_time=excluded.other_bed_time,
+                other_wake_time=excluded.other_wake_time
             """,
             (
                 schedule.name,
@@ -826,6 +900,9 @@ class Database:
                 ),
                 schedule.cooling_speed.value,
                 _iso(schedule.updated_at),
+                json.dumps(schedule.other_days),
+                schedule.other_bed_time.strftime("%H:%M") if schedule.other_bed_time else "",
+                schedule.other_wake_time.strftime("%H:%M") if schedule.other_wake_time else "",
             ),
         )
         self._db.commit()
@@ -1555,13 +1632,14 @@ class Database:
         ])
         self._db.execute(
             "INSERT INTO night_runs (wake_on, bedtime_at, wake_at, parts, room_c, test_part, "
-            "test_offset_c, rebuilt, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "test_offset_c, rebuilt, written_at, kwh) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(wake_on) DO UPDATE SET "
             "bedtime_at = excluded.bedtime_at, wake_at = excluded.wake_at, "
             "parts = excluded.parts, room_c = excluded.room_c, "
             "test_part = COALESCE(excluded.test_part, night_runs.test_part), "
             "test_offset_c = COALESCE(excluded.test_offset_c, night_runs.test_offset_c), "
-            "rebuilt = excluded.rebuilt, written_at = excluded.written_at "
+            "rebuilt = excluded.rebuilt, written_at = excluded.written_at, "
+            "kwh = COALESCE(excluded.kwh, night_runs.kwh) "
             "WHERE excluded.rebuilt = 0 OR night_runs.rebuilt = 1",
             (
                 run.wake_on,
@@ -1573,7 +1651,26 @@ class Database:
                 run.test_offset_c,
                 int(run.rebuilt),
                 written_at.isoformat(),
+                run.kwh,
             ),
+        )
+        self._db.commit()
+
+    def set_night_kwh(self, wake_on: str, kwh: float) -> None:
+        """Fill in what an earlier night used, on a row written before it was kept."""
+        self._db.execute("UPDATE night_runs SET kwh = ? WHERE wake_on = ?", (kwh, wake_on))
+        self._db.commit()
+
+    def tariff_p(self) -> float | None:
+        """What a kWh costs, in pence, or None until it has been set."""
+        row = self._db.execute("SELECT tariff_p FROM preferences WHERE id = 1").fetchone()
+        return None if row is None else row["tariff_p"]
+
+    def set_tariff_p(self, pence: float | None) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, tariff_p) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET tariff_p = excluded.tariff_p",
+            (pence,),
         )
         self._db.commit()
 
@@ -1649,6 +1746,98 @@ class Database:
             for r in rows
         ]
 
+    # --- How nights felt (notes.py) ------------------------------------------------
+
+    def night_note(self, wake_on: str) -> NightNote | None:
+        row = self._db.execute(
+            "SELECT * FROM night_notes WHERE wake_on = ?", (wake_on,)
+        ).fetchone()
+        return _night_note(row) if row is not None else None
+
+    def night_notes(self, first: str, last: str) -> dict[str, NightNote]:
+        rows = self._db.execute(
+            "SELECT * FROM night_notes WHERE wake_on BETWEEN ? AND ?", (first, last)
+        ).fetchall()
+        return {r["wake_on"]: _night_note(r) for r in rows}
+
+    def save_night_note(self, note: NightNote, at: datetime) -> None:
+        self._db.execute(
+            "INSERT INTO night_notes (wake_on, rating, felt, tags, updated_at, submitted) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(wake_on) DO UPDATE SET rating = excluded.rating, "
+            "felt = excluded.felt, tags = excluded.tags, updated_at = excluded.updated_at, "
+            "submitted = excluded.submitted",
+            (
+                note.wake_on,
+                note.rating,
+                note.felt,
+                json.dumps(list(note.tags)),
+                at.isoformat(),
+                int(note.submitted),
+            ),
+        )
+        self._db.commit()
+
+    # --- Signed-in devices (access.py) ---------------------------------------------
+
+    def add_session(self, session: StoredSession) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO sessions (token_hash, password, created_at, seen_at, via, label) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                session.token_hash,
+                session.password,
+                session.created_at.isoformat(),
+                session.seen_at.isoformat(),
+                session.via,
+                session.label,
+            ),
+        )
+        self._db.commit()
+
+    def session(self, token_hash: str) -> StoredSession | None:
+        row = self._db.execute(
+            "SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)
+        ).fetchone()
+        if row is None:
+            return None
+        return StoredSession(
+            token_hash=row["token_hash"],
+            password=row["password"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            seen_at=datetime.fromisoformat(row["seen_at"]),
+            via=row["via"],
+            label=row["label"],
+        )
+
+    def session_seen(self, token_hash: str, at: datetime) -> None:
+        self._db.execute(
+            "UPDATE sessions SET seen_at = ? WHERE token_hash = ?", (at.isoformat(), token_hash)
+        )
+        self._db.commit()
+
+    def end_session(self, token_hash: str) -> None:
+        self._db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+        self._db.commit()
+
+    def end_every_session(self) -> int:
+        count = self._db.execute("DELETE FROM sessions").rowcount
+        self._db.commit()
+        return count
+
+    def session_count(self) -> int:
+        return self._db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+
+def _night_note(row: sqlite3.Row) -> NightNote:
+    return NightNote(
+        wake_on=row["wake_on"],
+        rating=row["rating"],
+        felt=row["felt"],
+        tags=tuple(json.loads(row["tags"] or "[]")),
+        submitted=bool(row["submitted"]),
+    )
+
 
 def _night_run(row: sqlite3.Row) -> NightRun:
     return NightRun(
@@ -1671,6 +1860,7 @@ def _night_run(row: sqlite3.Row) -> NightRun:
         test_part=row["test_part"],
         test_offset_c=row["test_offset_c"],
         rebuilt=bool(row["rebuilt"]),
+        kwh=row["kwh"],
     )
 
 
@@ -1707,6 +1897,9 @@ def _schedule_from(row: sqlite3.Row) -> Schedule:
         stages=stages,
         cooling_speed=_cooling_speed_from(row),
         updated_at=_parse(row["updated_at"]),
+        other_days=json.loads(row["other_days"]) if row["other_days"] else [],
+        other_bed_time=_time_from(row["other_bed_time"]) if row["other_bed_time"] else None,
+        other_wake_time=_time_from(row["other_wake_time"]) if row["other_wake_time"] else None,
     )
 
 

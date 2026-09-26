@@ -23,8 +23,7 @@ from itertools import pairwise
 
 from .db import Sample
 from .events import Event, Level
-from .hold import TRIM_KIND
-from .models import QUIET_KIND, NightPlan
+from .models import QUIET_KIND, TRIM_KIND, NightPlan
 
 #: Sampling interval, for turning watts into energy. Not read from settings on
 #: purpose: this works off what was recorded, and the gap between two rows is the
@@ -197,8 +196,9 @@ def build(
     bad = [e for e in events if e.level in ("warning", "error")]
     # Deliberately not "mode". That kind covers every set_mode there is: stage
     # boundaries, getting the bed ready, anything pressed by hand. Only the
-    # corrections belong in this count.
-    swaps = len([e for e in events if e.kind == QUIET_KIND])
+    # corrections belong in this count, and only the ones that happened: a
+    # correction that failed is an error, and it is already in `bad` below.
+    swaps = len([e for e in events if e.kind == QUIET_KIND and e.level == "info"])
 
     lines: list[str] = []
 
@@ -211,7 +211,8 @@ def build(
     if swaps:
         lines.append(f"Swapped mode {_times(swaps)} to keep it quiet.")
 
-    trims = len([e for e in events if e.kind == TRIM_KIND])
+    # The same rule for the trim: a trim that failed is an error, counted in `bad`.
+    trims = len([e for e in events if e.kind == TRIM_KIND and e.level == "info"])
     if trims:
         lines.append(f"Trimmed the setting {_times(trims)} to hold the number.")
 

@@ -8,8 +8,13 @@
  * Pi itself or by the Vite dev server proxying to a laptop.
  */
 
-import { ApiError, type ApiClient, type LiveUpdate } from './client'
+import { ApiError, SIGNED_OUT_EVENT, type ApiClient, type LiveUpdate } from './client'
 import type {
+  TrendRange,
+  Trends,
+  NightNote,
+  NightNotePatch,
+  AuthState,
   AutopilotNight,
   AutopilotSwitch,
   HoldName,
@@ -47,7 +52,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* keep the status line */
     }
-    throw new ApiError(message)
+    // Signed out underneath the app: the session ran out, or every device was
+    // signed out from another one. Said once, to whoever is listening, rather
+    // than as an error on whichever card happened to ask.
+    if (response.status === 401 && !path.startsWith('/api/auth')) {
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
+    }
+    throw new ApiError(message, response.status)
   }
   return (await response.json()) as T
 }
@@ -57,6 +68,23 @@ export class HttpApiClient implements ApiClient {
   private listeners = new Set<(u: LiveUpdate) => void>()
   private reconnect: ReturnType<typeof setTimeout> | undefined
   private closed = false
+
+  getAuth = () => request<AuthState>('/api/auth')
+  signIn = (password: string) =>
+    request<AuthState>('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
+  signOut = () => request<AuthState>('/api/auth/logout', { method: 'POST' })
+  signOutEverywhere = () => request<AuthState>('/api/auth/logout-everywhere', { method: 'POST' })
+
+  getTrends = (days: TrendRange) => request<Trends>(`/api/trends?days=${days}`)
+  setTariff = (pencePerKwh: number | null) =>
+    request<{ tariff_p: number | null }>('/api/trends/tariff', {
+      method: 'PUT',
+      body: JSON.stringify({ pence_per_kwh: pencePerKwh }),
+    })
+
+  getNote = (wakeOn: string) => request<NightNote>(`/api/notes?date=${wakeOn}`)
+  saveNote = (wakeOn: string, patch: NightNotePatch) =>
+    request<NightNote>(`/api/notes/${wakeOn}`, { method: 'PUT', body: JSON.stringify(patch) })
 
   info = () => request<ServiceInfo>('/api/info')
   getState = () => request<DeviceState>('/api/state')
@@ -79,17 +107,6 @@ export class HttpApiClient implements ApiClient {
 
   powerOff = async () => {
     await request<DeviceState>('/api/power/off', { method: 'POST' })
-  }
-
-  startRehearsal = async (seconds: number) => {
-    await request<unknown>('/api/rehearsal', {
-      method: 'POST',
-      body: JSON.stringify({ seconds }),
-    })
-  }
-
-  stopRehearsal = async () => {
-    await request<DeviceState>('/api/rehearsal', { method: 'DELETE' })
   }
 
   setTemperature = async (targetC: number) => {

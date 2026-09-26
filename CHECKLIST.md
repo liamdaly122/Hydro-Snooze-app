@@ -273,8 +273,8 @@ the one that counts now.
 
 ### Then rehearse a whole night before trusting it to run one
 
-Four presses proves the blaster. It does not prove the night. Open the schedule behind the chevron on
-the Wake card and press **Run a test night**: tonight's own stages, in order, at their own
+Four presses proves the blaster. It does not prove the night. Start a test night with the `curl`
+command in SETUP.md (the button has gone from the app): tonight's own stages, in order, at their own
 temperatures and modes, compressed into about six minutes on the real unit.
 
 - [x] Get ready, Deep, REM, Wake, off. All five land, in order
@@ -501,6 +501,24 @@ to power. [docs/buttons.md](docs/buttons.md) is the wiring and the reasoning.
 
 ---
 
+## Reaching it from anywhere, with Tailscale
+
+A password on the app, then Tailscale on the Pi and the phone. Nothing is put on the
+internet: only my own devices can find the address. [docs/tailscale.md](docs/tailscale.md)
+is every step with its reasons, and has its own boxes; these are the milestones.
+
+- [x] The app has a password, signed in once per device, and fails shut: with no
+      password, nothing that arrives through Tailscale gets in
+- [x] From outside the house the power button asks the plug before pressing, and every
+      time on the phone is the bed's own
+- [ ] Password set on the Pi, and the phone signed in at home
+- [ ] Tailscale on the Pi, key expiry off, `tailscale serve` giving an https address
+- [ ] `HS_TUNNEL` and `HS_PUBLIC_URL` in the Pi's `.env`
+- [ ] The phone on Tailscale, the new icon on the Home Screen, and step 7 of the guide
+      proved on mobile data
+
+---
+
 ## Next: the Withings Sleep Analyzer
 
 Everything above measures the machine. Nothing measures the sleeper, so the schedule still runs on
@@ -563,6 +581,23 @@ API rather than read. Read that before writing any of it.
       default) and a night-time trim that moves the setting a degree after half an hour off it.
       **Built and tested against a simulated bed.** The first real night at Balanced is the next
       thing to look at: the on-target figure on the Autopilot screen says how it went
+- [x] Different times on some days: a weekend lie-in, keyed to the morning like the days.
+      Only the times; the parts and temperatures are shared. With Autopilot on, a longer
+      night keeps Drift, Deep and Wake where Sleep timing has them and gives REM the extra
+      time, and Sleep timing measures every night from its own lights out, weekends included
+- [ ] If a weekend wake time goes past 09:00, move the Shelly's daily off to match. The
+      Schedule screen says so when it does
+- [x] How the night felt, on the Health Report: how waking up felt (Rough to Great), whether
+      the bed felt too cold, right or too warm, and tags. The rating scores Wake on the
+      scoreboard, which nothing the mat measures could. Alcohol, Ill and Someone else in the
+      bed leave a night out of the scoreboard, and say so; the other tags are recorded only
+- [ ] Rate a fortnight of mornings, so Wake has something to compare
+- [x] Trends, at the top of History: 30 days, 90 days or a year of nights, the sleep
+      score, deep and REM, time to fall asleep, the bed against the room, and the energy,
+      each as a seven-night average over the nights themselves, set against the same
+      stretch before. Every night kWh is written down with the morning's record, the same
+      figure the morning report gives, and older nights are filled in from the plug
+- [ ] Set the electricity rate on the Trends card, so it shows the cost
 - [x] Step three: Full Autopilot. With Autopilot on, tonight's Deep and REM are chosen and set in
       the evening without asking, tests included; Back to usual undoes a night and the switch turns
       it off. The morning message says how a test night went

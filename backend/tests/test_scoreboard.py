@@ -82,7 +82,8 @@ SWING = [-10, 10, -5, 5, 0, -10, 10, -5, 5, 0]
 def test_nothing_recorded_is_said_plainly(db):
     built = scoreboard.scoreboard(db, TODAY)
     assert built["recorded"] == built["nights"] == built["tests"] == 0
-    assert [p["part"] for p in built["parts"]] == ["deep", "rem", "drift"]
+    # Wake too, scored on the morning's rating rather than on anything the mat says.
+    assert [p["part"] for p in built["parts"]] == ["deep", "rem", "drift", "wake"]
     assert all(p["verdict"] == "empty" and p["settings"] == [] for p in built["parts"])
 
 
