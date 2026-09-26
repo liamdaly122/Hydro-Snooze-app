@@ -303,8 +303,16 @@ the setpoint for a whole half hour, and is not still heading towards it, the set
 degree the other way. Then another full half hour before it may move again, never more than 4°C from
 what was asked for counting the learned correction, and never past the safety cap. It starts again
 at every part, pauses while a nudge is moving the bed on purpose, and is part of Autopilot, so the
-switch turns it off. Each trim is logged as a drift response, which is what it is, so the Autopilot
-screen files it as Autopilot's and the scoreboard never mistakes it for a hand on the controls.
+switch turns it off. Each trim is logged under a kind of its own and filed on the Autopilot screen
+as a drift response, so it counts as Autopilot's, the scoreboard never mistakes it for a hand on the
+controls, and the morning message counts trims apart from mode swaps.
+
+The first night on Balanced held the target half the night, up from a quarter, and still made a
+sawtooth about two degrees deep. The half hour that has to pass between one mode swap and the next
+is the reason: once a warm part goes quiet at the setpoint, warming may not come back for thirty
+minutes, and on a cold night the bed falls past one degree below in that time. Close keeps warm parts
+warming, which is also what lets the trim work, because it only acts on a whole half hour in one
+mode, and a sawtooth resets that every time it swaps.
 
 ---
 

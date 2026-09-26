@@ -37,7 +37,7 @@ export function AutopilotSwitchCard({
           <h2 className="card__label">Autopilot</h2>
           <p className="ap-switch__state">
             {state.on
-              ? "On. It learns your bed, holds it at the number and suggests tonight's Deep and REM."
+              ? "On. It learns your bed, holds it at the number and picks tonight's Deep and REM."
               : 'Off. The bed runs exactly the temperatures you set, at the times you set.'}
           </p>
         </div>
@@ -51,12 +51,14 @@ export function AutopilotSwitchCard({
           </p>
           <p>
             It hands warm parts to the silent cooling mode when your body heat can hold them, as
-            Hold below sets out. And it suggests tonight&apos;s Deep and REM each evening.
+            Hold below sets out. And each evening it picks tonight&apos;s Deep and REM and sets
+            them itself, now and then trying a degree either side to learn what suits you. Back to
+            usual on the home screen undoes one night.
           </p>
           <p>
             Off, none of that happens. The bed gets exactly the temperatures you set, at the times
             you set, and still gets ready before lights out on the standard estimate. If tonight
-            was running a suggestion, it goes back to your usual.
+            was running Autopilot&apos;s choice, it goes back to your usual.
           </p>
           <p>
             Every night is still written down either way, so the Health Report, Sleep timing and

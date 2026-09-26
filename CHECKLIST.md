@@ -598,7 +598,9 @@ API rather than read. Read that before writing any of it.
       stretch before. Every night kWh is written down with the morning's record, the same
       figure the morning report gives, and older nights are filled in from the plug
 - [ ] Set the electricity rate on the Trends card, so it shows the cost
-- [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
+- [x] Step three: Full Autopilot. With Autopilot on, tonight's Deep and REM are chosen and set in
+      the evening without asking, tests included; Back to usual undoes a night and the switch turns
+      it off. The morning message says how a test night went
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

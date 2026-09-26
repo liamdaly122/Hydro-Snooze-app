@@ -102,6 +102,13 @@ REBOOT_AFTER_FAILURES = 2
 #: change you made for one night from the routine changing.
 TONIGHT_KIND = "tonight"
 
+#: Autopilot's own settings changing: the switch, and how closely it holds.
+AUTOPILOT_KIND = "autopilot"
+
+#: How often, in the evening, Autopilot looks at whether tonight's temperatures
+#: still need choosing. Cheap to ask, but it builds the scoreboard to answer.
+AUTO_EVERY = timedelta(minutes=10)
+
 #: Holiday mode going on and off, and anything it does to a night on its way.
 HOLIDAY_KIND = "holiday"
 
@@ -449,6 +456,8 @@ class Service:
         self._trim_mode: Mode | None = None
         self._trim_readings: list[tuple[datetime, float]] = []
         self._trim_limit_told: tuple[datetime, int] | None = None
+        # When Autopilot last looked at whether tonight still needs choosing.
+        self._auto_checked_at: datetime | None = None
         #: When the running temperature was last re-asserted off the plan. Keeps
         #: a blaster that has gone away from being retried on every sample.
         self._followed_at: datetime | None = None
@@ -1156,6 +1165,7 @@ class Service:
         if trusted:
             await self._correct_mode(step, power, now)
             await self._trim(step, power, now)
+            await self._choose_tonight(now)
             await self._follow_the_plan(step, power, now)
         # Not written down either while the clock is unconfirmed. A sample filed
         # an hour early lands in the wrong stage of the report, and a gap in the
@@ -1975,17 +1985,40 @@ class Service:
             log.exception("could not build the morning report")
             return True
 
-        self.events.add(summary.level, "report", summary.body)
-        self.notifier.push(summary.title, summary.body, tag="sleeping_accommodation")
-
-        # And what the night ran, for the scoreboard. After the message and
-        # never in its way: a record that could not be written is a line in the
-        # log, and the hourly pass fills it in from the same readings later.
+        # What the night ran, for the scoreboard, and before the message so the
+        # message can say how a test night went. Never in its way: a record that
+        # could not be written is a line in the log, and the hourly pass fills it
+        # in from the same readings later.
         try:
             self.record_night(plan)
         except Exception:  # noqa: BLE001
             log.exception("could not write down what the night ran")
+
+        body = summary.body
+        try:
+            tested = self._test_line(plan)
+        except Exception:  # noqa: BLE001
+            log.exception("could not say how the test night went")
+            tested = None
+        if tested:
+            body = f"{body}\n{tested}"
+        self.events.add(summary.level, "report", body)
+        self.notifier.push(summary.title, body, tag="sleeping_accommodation")
         return True
+
+    def _test_line(self, plan: NightPlan) -> str | None:
+        """One line for the morning message when the night was a test."""
+        t = self.test_result(plan)
+        if t is None or t["counted"] is False:
+            return None
+        which = "cooler" if t["offset_c"] < 0 else "warmer"
+        line = f"Autopilot tested {t['label']} at {t['set_c']}C, a degree {which} than usual."
+        if t["together_s"] is not None and t["usual_mean_s"] is not None:
+            line += (
+                f" Deep sleep and REM {_hm(t['together_s'])}, against {_hm(t['usual_mean_s'])}"
+                f" at {t['usual_c']}C."
+            )
+        return line
 
     # --- What each night ran, for the scoreboard --------------------------------
 
@@ -2199,16 +2232,24 @@ class Service:
         """
         self.db.set_autopilot_on(on)
         if on:
+            # Look at tonight straight away rather than in ten minutes.
+            self._auto_checked_at = None
             self.events.info(
                 LEARNING_KIND,
-                "Autopilot on: learned timings and corrections, the drift response and the "
-                "evening suggestion are back.",
+                "Autopilot on: learned timings and corrections, the trim, the drift response "
+                "and choosing tonight's temperatures are back.",
             )
             return self.autopilot_state()
 
         undone = self.tonight_suggested() is not None
         if undone:
             self._change_tonight(stages=None)
+        # Autopilot's own choice for tonight is forgotten, so turning it back on
+        # chooses again. One somebody tapped is theirs, and stays answered.
+        wake_on = self._tonight_date()
+        decided = self.db.decision_for(wake_on.isoformat()) if wake_on else None
+        if decided is not None and decided.auto:
+            self.db.forget_decision(decided.wake_on)
         self.events.info(
             LEARNING_KIND,
             "Autopilot off: the bed runs exactly the temperatures you set, at the times you "
@@ -2292,6 +2333,8 @@ class Service:
         }
         out: dict[str, Any] = {
             "state": "closed",
+            # Taken by Autopilot itself rather than by a tap.
+            "auto": False,
             "wake_on": None,
             "parts": [],
             "test": None,
@@ -2323,6 +2366,7 @@ class Service:
                 state = "undone"
             out.update(
                 state=state,
+                auto=decided.auto,
                 parts=self._suggestion_parts(usual, decided.temps, limits, decided.test_part),
                 test=None if not decided.test_part
                 else {"part": decided.test_part, "offset_c": decided.test_offset_c},
@@ -2374,8 +2418,34 @@ class Service:
             if part in usual and part in limits
         ]
 
-    async def accept_suggestion(self) -> dict[str, Any]:
-        """Use tonight's suggestion for tonight. The routine is untouched."""
+    async def _choose_tonight(self, now: datetime) -> None:
+        """Step three: tonight's Deep and REM, chosen and set without asking.
+
+        With Autopilot on, the evening's suggestion is taken by Autopilot itself
+        as soon as there is one, so nobody has to open the app before bed. Only
+        what a tap would have taken: not without the Sleep Analyzer, not on a
+        skipped night, not over a change made by hand, and never a second time
+        once tonight has been answered, so Back to usual stays back to usual.
+        Checked every AUTO_EVERY rather than every beat, because answering means
+        building the scoreboard.
+        """
+        if not self.db.autopilot_on():
+            return
+        if self._auto_checked_at is not None and now - self._auto_checked_at < AUTO_EVERY:
+            return
+        self._auto_checked_at = now
+        try:
+            if self.suggestion()["state"] == "ready":
+                await self.accept_suggestion(auto=True)
+        except Exception:  # noqa: BLE001
+            log.exception("could not choose tonight's temperatures")
+
+    async def accept_suggestion(self, *, auto: bool = False) -> dict[str, Any]:
+        """Use tonight's suggestion for tonight. The routine is untouched.
+
+        `auto` when Autopilot takes it itself in the evening (_choose_tonight),
+        rather than somebody tapping Use for tonight.
+        """
         offered = self.suggestion()
         if offered["state"] != "ready":
             raise CommandFailed("There is no suggestion to take for tonight.")
@@ -2393,6 +2463,7 @@ class Service:
                 temps=temps,
                 test_part=test["part"] if test else None,
                 test_offset_c=test["offset_c"] if test else None,
+                auto=auto,
             ),
             self.clock.now(),
         )
@@ -2402,7 +2473,10 @@ class Service:
         )
         self.events.info(
             TONIGHT_KIND,
-            f"Using Autopilot's suggestion tonight: {said}. Your usual is untouched.",
+            f"Autopilot chose tonight's temperatures: {said}. Your usual is untouched, and "
+            "Back to usual on the home screen undoes it for tonight."
+            if auto
+            else f"Using Autopilot's suggestion tonight: {said}. Your usual is untouched.",
         )
         self._followed_at = None
         await self._follow_the_plan(loud=True)
@@ -3407,3 +3481,9 @@ class Service:
 
 
 _ = Activity
+
+
+def _hm(seconds: int) -> str:
+    """3h 20m, for a line in the morning message."""
+    minutes = round(seconds / 60)
+    return f"{minutes // 60}h {minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"

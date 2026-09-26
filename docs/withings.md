@@ -669,8 +669,24 @@ any change made by hand alone. Every night is still written down either way, so
 the reports carry on and turning it back on loses nothing. Kept as
 `preferences.autopilot_on`, served at `GET` and `POST /api/autopilot/switch`.
 
-Step three, not built: the same choice made without asking, inside the same
-limits, under the same switch.
+### Step three: Full Autopilot
+
+With Autopilot on, the evening's choice is made and set by Autopilot itself, so
+nothing has to be opened before bed (`Service._choose_tonight`). Every ten
+minutes once the evening opens, if tonight has not been answered, it takes what
+a tap would have taken: never without the Sleep Analyzer, never on a skipped
+night, never over a change made by hand, and never a second time, so Back to
+usual on Home stays back to usual for that night. The decision is kept with
+`auto` set, and the card on the Autopilot screen is now **Tonight's
+temperatures**: "Chosen: Deep 16°, a test".
+
+Turning Autopilot off puts tonight back to usual if it was running
+Autopilot's choice, and forgets that choice, so turning it back on chooses
+again. A suggestion somebody tapped stays answered.
+
+The morning message says how a test night went, in one line: "Autopilot tested
+Deep at 16C, a degree cooler than usual. Deep sleep and REM 3h 20m, against 3h
+12m at 17C." The night's record is written before the message now, so it can.
 
 To connect: put `HS_WITHINGS_CLIENT_ID` and `HS_WITHINGS_CLIENT_SECRET` in `.env`,
 restart, open the app at `http://hydrosnooze.local:8000`, open the Health Report

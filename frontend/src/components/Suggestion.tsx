@@ -4,11 +4,13 @@ import { Sparkle } from './Icons'
 import { InfoButton } from './InfoButton'
 
 /**
- * Tonight's suggested Deep and REM, from the scoreboard (suggest.py).
+ * Tonight's Deep and REM, from the scoreboard (suggest.py).
  *
- * Two places. On Home, in the evening, a card to take it or leave it: that is
- * where somebody is at ten at night. On the Autopilot screen, a folded card with
- * where tonight's is up to and how far the suggestions may go.
+ * With Autopilot on they are chosen and set by Autopilot itself in the evening,
+ * so there is nothing to answer and Home shows only the Tonight line with Back
+ * to usual. The card on Home is for the moment before that, if the app is open
+ * when the evening opens. On the Autopilot screen, a folded card with what was
+ * chosen for tonight and how far it may go.
  *
  * Taking one changes tonight only, through the same tonight-only change as the
  * temperature card, so the Tonight only line above the bed says what moved and
@@ -87,13 +89,17 @@ function summary(s: Suggestion): { text: string; ready: boolean } {
       return { text: 'Ready for tonight', ready: true }
     case 'accepted':
       return {
-        text: test ? `Tonight: ${test.label} ${test.tonight_c}°, a test` : 'Tonight: using it',
+        text: test
+          ? `${s.auto ? 'Chosen: ' : 'Tonight: '}${test.label} ${test.tonight_c}°, a test`
+          : s.auto
+            ? "Chosen: Autopilot's best so far"
+            : 'Tonight: using it',
         ready: false,
       }
     case 'declined':
       return { text: 'Not tonight', ready: false }
     case 'undone':
-      return { text: 'Taken, then back to usual', ready: false }
+      return { text: 'You put tonight back to usual', ready: false }
     case 'usual':
       return { text: 'Tonight runs your usual', ready: false }
     case 'by_hand':
@@ -103,7 +109,7 @@ function summary(s: Suggestion): { text: string; ready: boolean } {
     case 'no_mat':
       return { text: 'Needs the Sleep Analyzer', ready: false }
     case 'closed':
-      return { text: 'Opens in the evening', ready: false }
+      return { text: 'Chosen in the evening', ready: false }
   }
 }
 
@@ -127,23 +133,30 @@ export function SuggestionFold({
   return (
     <Fold
       id="suggestions"
-      label="Evening suggestion"
+      label="Tonight's temperatures"
       summary={<span className={said.ready ? 'fold__summary--ready' : undefined}>{said.text}</span>}
       info={
-        <InfoButton title="Evening suggestion">
+        <InfoButton title="Tonight's temperatures">
           <p>
-            Each evening Autopilot suggests tonight&apos;s Deep and REM from your scoreboard. It
-            pushes for deep sleep and REM together, as long as time awake and time to fall asleep
-            do not get worse.
+            Each evening, with Autopilot on, it chooses tonight&apos;s Deep and REM from your
+            scoreboard and sets them itself, so there is nothing to check before bed. It pushes
+            for deep sleep and REM together, as long as time awake and time to fall asleep do not
+            get worse.
           </p>
           <p>
-            Most nights it suggests the best so far, which is your usual until the scoreboard
-            shows something clearly better. About one night in {s.test_every} is a test: one part,
-            one degree either side, to find out what that does.
+            Most nights it runs the best so far, which is your usual until the scoreboard shows
+            something clearly better. About one night in {s.test_every} is a test: one part, one
+            degree either side, to find out what that does. The morning message says how a test
+            night went.
           </p>
           <p>
-            Using a suggestion changes tonight only. Your usual is never touched, and Back to
-            usual on the home screen undoes it.
+            It changes tonight only. Your usual is never touched, and Back to usual on the home
+            screen puts one night back without it choosing again. Turning Autopilot off stops it
+            altogether.
+          </p>
+          <p>
+            It does not choose without the Sleep Analyzer connected, on a skipped night, or once
+            you have changed tonight yourself.
           </p>
           <p>
             It never goes outside the limits below. They are set around your usual Deep and REM

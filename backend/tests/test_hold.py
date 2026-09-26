@@ -261,3 +261,23 @@ def test_a_database_from_before_the_choice_is_balanced(tmp_path):
         assert db.hold() == "balanced"
     finally:
         db.close()
+
+
+def test_the_morning_report_counts_trims_apart_from_mode_swaps():
+    """And only the trims that went through. One that failed is an error, and
+    the report already says so under what went wrong."""
+    from hydrosnooze import report
+    from hydrosnooze.events import Event
+    from hydrosnooze.models import QUIET_KIND
+
+    plan = Schedule(days_of_week=list(range(7))).plan_for(date(2026, 9, 25))
+    at = plan.steps[1].starts_at + timedelta(hours=1)
+    events = [
+        Event(0, at, "info", QUIET_KIND, "switched to quiet"),
+        Event(0, at, "info", TRIM_KIND, "a degree more"),
+        Event(0, at, "info", TRIM_KIND, "a degree more"),
+        Event(0, at, "error", TRIM_KIND, "Could not send temp_up"),
+    ]
+    body = report.build(plan, [], events, set(), None).body
+    assert "Swapped mode once to keep it quiet." in body
+    assert "Trimmed the setting twice to hold the number." in body

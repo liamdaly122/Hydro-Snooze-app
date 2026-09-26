@@ -101,6 +101,8 @@ class Decided(NamedTuple):
     temps: dict[str, int]
     test_part: str | None
     test_offset_c: int | None
+    #: Taken by Autopilot itself in the evening, rather than by a tap.
+    auto: bool = False
 
 
 class PreconditionRow(NamedTuple):
@@ -432,7 +434,8 @@ CREATE TABLE IF NOT EXISTS suggestions (
     rem_c         INTEGER,
     test_part     TEXT,
     test_offset_c INTEGER,
-    decided_at    TEXT    NOT NULL
+    decided_at    TEXT    NOT NULL,
+    auto          INTEGER NOT NULL DEFAULT 0
 );
 
 -- How far the suggestions may take each part: `reach` degrees either side of
@@ -604,6 +607,14 @@ class Database:
             self._db.execute(
                 "ALTER TABLE preferences ADD COLUMN autopilot_on INTEGER NOT NULL DEFAULT 1"
             )
+        # Whether a night's suggestion was taken by Autopilot itself rather than
+        # by a tap. No on every row from before it could be.
+        taken = {r["name"] for r in self._db.execute("PRAGMA table_info(suggestions)")}
+        if "auto" not in taken:
+            self._db.execute(
+                "ALTER TABLE suggestions ADD COLUMN auto INTEGER NOT NULL DEFAULT 0"
+            )
+
         # How closely warm parts are held (hold.py). Balanced, which is the
         # default from the day there was a choice, on every database before it.
         if "hold" not in prefs:
@@ -1678,7 +1689,7 @@ class Database:
     def save_decision(self, decided: Decided, at: datetime) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO suggestions (wake_on, decision, deep_c, rem_c, test_part, "
-            "test_offset_c, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "test_offset_c, decided_at, auto) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 decided.wake_on,
                 decided.decision,
@@ -1687,8 +1698,13 @@ class Database:
                 decided.test_part,
                 decided.test_offset_c,
                 at.isoformat(),
+                int(decided.auto),
             ),
         )
+        self._db.commit()
+
+    def forget_decision(self, wake_on: str) -> None:
+        self._db.execute("DELETE FROM suggestions WHERE wake_on = ?", (wake_on,))
         self._db.commit()
 
     def decision_for(self, wake_on: str) -> Decided | None:
@@ -1703,6 +1719,7 @@ class Database:
             temps={k: row[f"{k}_c"] for k in ("deep", "rem") if row[f"{k}_c"] is not None},
             test_part=row["test_part"],
             test_offset_c=row["test_offset_c"],
+            auto=bool(row["auto"]),
         )
 
     def suggest_limits(self) -> dict[str, tuple[int, int]]:
