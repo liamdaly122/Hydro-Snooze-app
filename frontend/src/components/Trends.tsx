@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import { Card } from './Card'
 import { Fold } from './Fold'
 import { addDays, daysBetween, formatDay, parseDay } from '../domain'
 import type { ApiClient } from '../api/client'
@@ -53,6 +52,16 @@ const H = 110
 function minutes(seconds: number): string {
   const m = Math.round(seconds / 60)
   return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`
+}
+
+/** The line beside the title, so a folded card still says how it is going. */
+function headline(data: TrendsData): string {
+  const now = data.summary.now
+  if (now.nights === 0) return 'Nothing yet'
+  const bits: string[] = []
+  if (now.score !== null) bits.push(`Score ${now.score}`)
+  if (now.deep_rem_s !== null) bits.push(`${minutes(now.deep_rem_s)} deep and REM`)
+  return bits.length ? bits.join(' · ') : `${now.nights} nights`
 }
 
 function money(pence: number): string {
@@ -457,7 +466,7 @@ export function Trends({ client }: { client: ApiClient }) {
 
   return (
     <>
-    <Card label="Trends">
+    <Fold id="trends" label="Trends" summary={headline(data)} defaultOpen>
       <div className="trends__ranges" role="group" aria-label="How far back">
         {RANGES.map((r) => (
           <button
@@ -562,7 +571,7 @@ export function Trends({ client }: { client: ApiClient }) {
         {data.tariff_p !== null ? 'cost' : 'energy'} in all, set against the same stretch before.
         Tagged nights stay in here; only the scoreboard leaves some out.
       </p>
-    </Card>
+    </Fold>
 
       {/* Every value on the charts, readable without touching them. */}
       {nights.length > 0 && (

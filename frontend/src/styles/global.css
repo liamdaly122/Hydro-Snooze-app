@@ -3783,7 +3783,6 @@ a.pill {
 .trends__ranges {
   display: flex;
   gap: 6px;
-  margin-top: 14px;
 }
 
 .trends__range {
@@ -4099,4 +4098,10 @@ a.pill {
   background: none;
   color: var(--blue);
   font-size: 13px;
+}
+
+/* A chart opening a fold: the fold's own rule and gap are the space above it. */
+.fold__body > .chart:first-child,
+.fold__body > .log:first-child {
+  margin-top: 0;
 }
