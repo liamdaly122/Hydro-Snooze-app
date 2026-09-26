@@ -855,17 +855,16 @@ export class MockApiClient implements ApiClient {
     auto: false,
     decision: null as 'accepted' | 'declined' | null,
     reach: 2,
-    centre: null as { deep: number; rem: number } | null,
   }
 
   private suggestionJson(ignoreSwitch = false): Suggestion {
     const usualOf = (part: 'deep' | 'rem') =>
       this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
     const usual = { deep: usualOf('deep'), rem: usualOf('rem') }
-    this.suggested.centre ??= { ...usual }
-    const { reach, centre } = this.suggested
-    const low = (part: 'deep' | 'rem') => centre![part] - reach
-    const high = (part: 'deep' | 'rem') => centre![part] + reach
+    // Centred on the usual as it is now: the limits follow the schedule.
+    const { reach } = this.suggested
+    const low = (part: 'deep' | 'rem') => usual[part] - reach
+    const high = (part: 'deep' | 'rem') => usual[part] + reach
     const deep = usual.deep - 1 >= low('deep') ? usual.deep - 1 : usual.deep + 1
     const tonight = { deep, rem: usual.rem }
     const running = (this.tonightState.stages ?? this.schedule.stages)
@@ -931,10 +930,7 @@ export class MockApiClient implements ApiClient {
   async setSuggestionReach(reach: number): Promise<Suggestion> {
     await sleep(100)
     if (reach < 1 || reach > 3) throw new ApiError('Suggestions can go 1 to 3 degrees either side.')
-    const usualOf = (part: 'deep' | 'rem') =>
-      this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
     this.suggested.reach = reach
-    this.suggested.centre = { deep: usualOf('deep'), rem: usualOf('rem') }
     return this.suggestionJson()
   }
 

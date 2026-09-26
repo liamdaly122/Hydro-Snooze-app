@@ -159,8 +159,8 @@ export function SuggestionFold({
             you have changed tonight yourself.
           </p>
           <p>
-            It never goes outside the limits below. They are set around your usual Deep and REM
-            when you choose them, and stay put if you change your usual later.
+            It never goes outside the limits below. They sit either side of your usual Deep and
+            REM, and move with it when you change your usual.
           </p>
           <p>Drift and Wake stay yours: they are about falling asleep and waking up.</p>
         </InfoButton>

@@ -2297,18 +2297,20 @@ class Service:
         return self.withings.configured and self.db.withings_account() is not None
 
     def _suggest_limits(self) -> dict[str, suggest.Limit]:
-        """Each part's limits, set around the schedule the first time they are
-        needed and left there after, so they never follow the schedule about."""
+        """Each part's limits: the reach either side of the usual as it is now.
+
+        They follow the schedule. Move the usual Deep and Deep's limits move
+        with it, so Autopilot never holds a part away from a usual somebody
+        has just changed. Only the reach is a setting (set_suggestion_reach).
+        """
         held = self.db.suggest_limits()
         out = {}
         for part in suggest.PARTS:
-            if part not in held:
-                usual = self.schedule.stage(Stage(part))
-                if usual is None:
-                    continue
-                held[part] = (usual.temp_c, suggest.REACH_DEFAULT)
-                self.db.set_suggest_limit(part, *held[part])
-            out[part] = suggest.Limit(*held[part])
+            usual = self.schedule.stage(Stage(part))
+            if usual is None:
+                continue
+            reach = held[part][1] if part in held else suggest.REACH_DEFAULT
+            out[part] = suggest.Limit(usual.temp_c, reach)
         return out
 
     def suggestion(self) -> dict[str, Any]:
@@ -2494,7 +2496,7 @@ class Service:
         return self.suggestion()
 
     def set_suggestion_reach(self, reach: int) -> dict[str, Any]:
-        """How far the suggestions may go, set around the schedule as it is now."""
+        """How far the suggestions may go either side of the usual."""
         if not 1 <= reach <= suggest.REACH_MAX:
             raise CommandFailed(
                 f"Suggestions can go 1 to {suggest.REACH_MAX} degrees either side, not {reach}."
