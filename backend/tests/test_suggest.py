@@ -131,18 +131,17 @@ def test_a_leader_that_costs_time_falling_asleep_is_not_followed():
     assert choose(b).best["deep"] == 17
 
 
-def test_a_usual_moved_outside_the_limits_is_brought_back_inside_them():
-    c = choose(usual={"deep": 21, "rem": 20})
-    assert c.best["deep"] == 19
+def test_a_usual_past_the_safety_cap_is_brought_back_under_it():
+    c = choose(highest=19)
+    assert c.best["rem"] == 19
 
 
-def test_bringing_it_back_inside_says_so_rather_than_calling_it_the_usual():
+def test_bringing_it_back_says_so_rather_than_calling_it_the_usual():
     """It is a change from the usual, so it cannot be explained as the usual."""
-    c = next(c for c in (choose(usual={"deep": 21, "rem": 20}, on=d) for d in DATES)
-             if c.test_part is None)
+    c = next(c for c in (choose(highest=19, on=d) for d in DATES) if c.test_part is None)
     assert c.changes_anything
     assert "runs your usual" not in c.why
-    assert "Deep at 19°" in c.why
+    assert "REM at 19°" in c.why
 
 
 # --- Offered, taken and marked ---------------------------------------------------------
@@ -246,21 +245,44 @@ def test_a_test_that_did_not_run_is_not_marked(service, always_a_test):
     assert run.test_part is None
 
 
-def test_the_limits_are_set_once_and_do_not_follow_the_schedule(service):
-    first = {x["part"]: (x["low_c"], x["high_c"]) for x in service.suggestion()["limits"]}
-    deep = usual(service, "deep")
-    assert first["deep"] == (deep - 2, deep + 2)
+def limits_of(offered) -> dict[str, tuple[int, int]]:
+    return {x["part"]: (x["low_c"], x["high_c"]) for x in offered["limits"]}
 
-    service.schedule = replace(service.schedule, stages=[
-        replace(s, temp_c=s.temp_c + 2) if s.stage is Stage.DEEP else s
-        for s in service.schedule.stages
+
+def move_usual(svc: Service, part: Stage, by: int) -> None:
+    svc.schedule = replace(svc.schedule, stages=[
+        replace(s, temp_c=s.temp_c + by) if s.stage is part else s
+        for s in svc.schedule.stages
     ])
-    again = {x["part"]: (x["low_c"], x["high_c"]) for x in service.suggestion()["limits"]}
-    assert again == first
 
+
+def test_the_limits_follow_the_schedule(service):
+    deep, rem = usual(service, "deep"), usual(service, "rem")
+    assert limits_of(service.suggestion())["deep"] == (deep - 2, deep + 2)
+
+    move_usual(service, Stage.DEEP, -3)
+    moved = limits_of(service.suggestion())
+    assert moved["deep"] == (deep - 5, deep - 1), "centred on the new usual"
+    assert moved["rem"] == (rem - 2, rem + 2), "REM's usual did not move, so nor did REM's"
+
+
+def test_the_reach_is_kept_when_the_usual_moves(service):
+    deep = usual(service, "deep")
     widened = service.set_suggestion_reach(3)
-    now = {x["part"]: (x["low_c"], x["high_c"]) for x in widened["limits"]}
-    assert now["deep"] == (deep + 2 - 3, deep + 2 + 3) and widened["reach"] == 3
+    assert widened["reach"] == 3 and limits_of(widened)["deep"] == (deep - 3, deep + 3)
+
+    move_usual(service, Stage.DEEP, 2)
+    offered = service.suggestion()
+    assert offered["reach"] == 3
+    assert limits_of(offered)["deep"] == (deep + 2 - 3, deep + 2 + 3)
+
+
+def test_limits_saved_around_an_old_usual_are_centred_on_the_usual_now(service):
+    """Limits used to stay where they were set. A database from then holds that
+    old centre, and it is not what they are centred on any more."""
+    deep = usual(service, "deep")
+    service.db.set_suggest_limit("deep", deep + 6, 3)
+    assert limits_of(service.suggestion())["deep"] == (deep - 3, deep + 3)
 
 
 def test_the_reach_is_one_to_three(service):

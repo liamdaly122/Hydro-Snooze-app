@@ -21,11 +21,11 @@ far and the side with fewer nights at it, so the gaps in the scoreboard fill in
 evenly. The dice are seeded with the night's date, so opening the app twice in
 one evening shows the same suggestion.
 
-**Limits:** each part stays within `reach` degrees of where it was when the
-limits were set, REACH_DEFAULT to begin with and REACH_MAX at most. They do not
-follow the schedule about: move the usual Deep and the limits stay where they
-were until they are set again, so a run of suggestions can never walk the bed
-somewhere nobody chose.
+**Limits:** each part stays within `reach` degrees of its usual, REACH_DEFAULT
+to begin with and REACH_MAX at most. They follow the schedule: move the usual
+Deep and Deep's limits move with it. Nothing here ever changes the usual, so a
+run of suggestions still cannot walk the bed somewhere nobody chose; only the
+person moving the usual moves the limits.
 """
 
 from __future__ import annotations
@@ -154,18 +154,16 @@ def _best(
 ) -> tuple[int, str | None]:
     """The best so far for one part, and why, when it is not the usual."""
     if not allowed(usual_c):
-        # The usual itself moved outside the limits since they were set. Stay
-        # as near it as they allow rather than suggest what nobody chose.
+        # The limits are centred on the usual, so this is the usual past what
+        # the unit can do under the safety cap. Stay as near it as is allowed
+        # rather than suggest what nobody chose.
         near = min((c for c in range(usual_c - 10, usual_c + 11) if allowed(c)),
                    key=lambda c: abs(c - usual_c), default=usual_c)
         # Said, because it is a change. With no reason given, the card offered
         # a different temperature under "tonight runs your usual".
         if near == usual_c:
             return near, None
-        return near, (
-            f"{label} at {near}°, as near your usual {usual_c}° as the limits allow. "
-            "Pick How far it may go again to centre them on your usual."
-        )
+        return near, f"{label} at {near}°, as near your usual {usual_c}° as it may go."
     if part is None or part["verdict"] != "clear" or part["leader_c"] is None:
         return usual_c, None
     leader = part["leader_c"]

@@ -571,7 +571,8 @@ API rather than read. Read that before writing any of it.
       saying not sure yet until a gap is bigger than the swing between ordinary nights
 - [x] Step two, the evening suggestion: tonight's Deep and REM from the scoreboard, a degree
       either side in one part about one night in three, marked as a test. **Pushes for deep sleep
-      and REM together; limits two degrees either side, widenable to three.** Seen against invented
+      and REM together; limits two degrees either side of the usual, widenable to three, and they
+      move when the usual does.** Seen against invented
       nights; the first real test night is the next thing to look at
 - [x] One switch over all of Autopilot. Off runs exactly the temperatures set, and puts tonight
       back to usual if it was running a suggestion. Home names a taken suggestion as Autopilot's
@@ -598,7 +599,9 @@ API rather than read. Read that before writing any of it.
       stretch before. Every night kWh is written down with the morning's record, the same
       figure the morning report gives, and older nights are filled in from the plug
 - [ ] Set the electricity rate on the Trends card, so it shows the cost
-- [ ] Step three: Full Autopilot, the same thing applied by itself inside those limits
+- [x] Step three: Full Autopilot. With Autopilot on, tonight's Deep and REM are chosen and set in
+      the evening without asking, tests included; Back to usual undoes a night and the switch turns
+      it off. The morning message says how a test night went
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

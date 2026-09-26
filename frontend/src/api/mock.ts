@@ -538,6 +538,7 @@ export class MockApiClient implements ApiClient {
 
   async getTonight(): Promise<TonightState> {
     await sleep(80)
+    this.autoChoose()
     return this.tonightJson()
   }
 
@@ -803,6 +804,11 @@ export class MockApiClient implements ApiClient {
       // As the service does after any change to tonight, so Home re-reads it.
       this.emit({ schedule: { ...this.schedule } })
     }
+    // Autopilot's own choice is forgotten, so turning it back on chooses again.
+    if (!on && this.suggested.auto) {
+      this.suggested.decision = null
+      this.suggested.auto = false
+    }
     return this.switchJson()
   }
 
@@ -827,20 +833,38 @@ export class MockApiClient implements ApiClient {
     return this.suggestionJson(true).parts
   }
 
+  /**
+   * Full Autopilot, for the seed site: with Autopilot on and nothing decided,
+   * tonight is chosen and set the first time anything asks about tonight, the
+   * way the service does it in the evening.
+   */
+  private autoChoose(): void {
+    if (!this.autopilotOn || this.suggested.decision !== null) return
+    const offered = this.suggestionJson(true)
+    if (offered.state !== 'ready') return
+    const base = this.tonightState.stages ?? this.schedule.stages
+    this.tonightState.stages = base.map((st) => {
+      const p = offered.parts.find((x) => x.part === st.stage)
+      return p ? { ...st, temp_c: p.tonight_c } : { ...st }
+    })
+    this.suggested.decision = 'accepted'
+    this.suggested.auto = true
+  }
+
   private suggested = {
+    auto: false,
     decision: null as 'accepted' | 'declined' | null,
     reach: 2,
-    centre: null as { deep: number; rem: number } | null,
   }
 
   private suggestionJson(ignoreSwitch = false): Suggestion {
     const usualOf = (part: 'deep' | 'rem') =>
       this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
     const usual = { deep: usualOf('deep'), rem: usualOf('rem') }
-    this.suggested.centre ??= { ...usual }
-    const { reach, centre } = this.suggested
-    const low = (part: 'deep' | 'rem') => centre![part] - reach
-    const high = (part: 'deep' | 'rem') => centre![part] + reach
+    // Centred on the usual as it is now: the limits follow the schedule.
+    const { reach } = this.suggested
+    const low = (part: 'deep' | 'rem') => usual[part] - reach
+    const high = (part: 'deep' | 'rem') => usual[part] + reach
     const deep = usual.deep - 1 >= low('deep') ? usual.deep - 1 : usual.deep + 1
     const tonight = { deep, rem: usual.rem }
     const running = (this.tonightState.stages ?? this.schedule.stages)
@@ -848,6 +872,7 @@ export class MockApiClient implements ApiClient {
       this.suggested.decision === 'accepted' &&
       running.find((st) => st.stage === 'deep')?.temp_c !== tonight.deep
     return {
+      auto: this.suggested.auto,
       state:
         !this.autopilotOn && !ignoreSwitch
           ? 'off'
@@ -880,6 +905,7 @@ export class MockApiClient implements ApiClient {
 
   async getSuggestion(): Promise<Suggestion> {
     await sleep(100)
+    this.autoChoose()
     const s = this.suggestionJson()
     // Off, the service sends the limits and nothing about tonight.
     return s.state === 'off' ? { ...s, parts: [], test: null, why: null } : s
@@ -904,10 +930,7 @@ export class MockApiClient implements ApiClient {
   async setSuggestionReach(reach: number): Promise<Suggestion> {
     await sleep(100)
     if (reach < 1 || reach > 3) throw new ApiError('Suggestions can go 1 to 3 degrees either side.')
-    const usualOf = (part: 'deep' | 'rem') =>
-      this.schedule.stages.find((st) => st.stage === part)?.temp_c ?? 20
     this.suggested.reach = reach
-    this.suggested.centre = { deep: usualOf('deep'), rem: usualOf('rem') }
     return this.suggestionJson()
   }
 
