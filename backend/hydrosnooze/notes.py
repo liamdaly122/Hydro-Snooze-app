@@ -58,6 +58,10 @@ class NightNote:
     rating: int | None = None
     felt: str | None = None
     tags: tuple[str, ...] = ()
+    #: Answered and put away. The Health Report folds the card down to one line
+    #: once this is set, because a full card on every night made the page long.
+    #: The answers themselves count whether or not it was ever submitted.
+    submitted: bool = False
 
     def left_out_by(self) -> list[str]:
         """The labels of the tags that leave this night out, in list order."""
@@ -73,6 +77,7 @@ def note_json(note: NightNote | None, wake_on: str) -> dict[str, object]:
         "felt": note.felt,
         "tags": list(note.tags),
         "left_out": note.left_out_by(),
+        "submitted": note.submitted,
         "choices": {
             "ratings": [{"value": k, "label": v} for k, v in RATINGS.items()],
             "felt": [{"value": k, "label": v} for k, v in FELT.items()],

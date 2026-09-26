@@ -710,6 +710,8 @@ export interface NightNote {
   tags: string[]
   /** The labels of the tags on it that leave the night out of the scoreboard. */
   left_out: string[]
+  /** Submitted and put away: the Health Report shows it as one line. */
+  submitted: boolean
   choices: {
     ratings: { value: number; label: string }[]
     felt: { value: 'too_cold' | 'right' | 'too_warm'; label: string }[]
@@ -722,6 +724,7 @@ export interface NightNotePatch {
   rating?: number | null
   felt?: NightNote['felt']
   tags?: string[]
+  submitted?: boolean
 }
 
 /**
