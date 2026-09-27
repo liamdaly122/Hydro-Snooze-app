@@ -147,7 +147,9 @@ tailscale serve status
 does the opposite of what this guide is for: it puts the address on the public
 internet for anyone to load.
 
-- [ ] `tailscale funnel status` says there is no funnel
+- [ ] `tailscale funnel status` shows the address marked **(tailnet only)**. That is
+      Funnel off. If it ever says **Funnel on**, or that the address is available on
+      the internet, stop and turn it off before going any further
 
 ---
 
