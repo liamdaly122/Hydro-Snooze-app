@@ -14,7 +14,6 @@ import type {
   AutopilotNight,
   AutopilotSleep,
   AutopilotSwitch,
-  HoldName,
   Learning,
   Mode,
   Schedule,
@@ -218,17 +217,17 @@ export function Autopilot({ client, schedule }: { client: ApiClient; schedule: S
       .finally(() => setSwitching(false))
   }
 
-  const holdAt = (hold: HoldName) => {
+  const stay = (on: boolean) => {
     setSwitching(true)
     void client
-      .setHold(hold)
+      .setStayOnTarget(on)
       .then(setAutopilot)
       .catch(() => undefined)
       .finally(() => setSwitching(false))
   }
 
   const switchCard = autopilot !== null && (
-    <AutopilotSwitchCard state={autopilot} onSwitch={flip} onHold={holdAt} busy={switching} />
+    <AutopilotSwitchCard state={autopilot} onSwitch={flip} onStay={stay} busy={switching} />
   )
 
   const suggestCard = suggestion && (

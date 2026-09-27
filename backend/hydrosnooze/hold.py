@@ -1,22 +1,28 @@
-"""Holding the bed at the number: how quietly, and the trim.
+"""Holding the bed at the number: Stay on target, and the trim.
 
 Two things decide how close the bed stays to what a part asks for.
 
-**The Hold level.** Warming mode on this unit sounds like a geiger counter and
-cooling is silent, and between 25 and 35C both can be set to the same number. So
-a warm part is handed to the quiet cooling mode once the bed has arrived, and
-body heat holds it; warming comes back only once the bed has genuinely fallen
-away. Where "arrived" and "fallen" sit is the trade between silence and
-accuracy, and it is a setting because it is a judgement, not a fact:
+**Stay on target.** Warming mode on this unit sounds like a geiger counter and
+cooling is silent, and between 25 and 35C both can be set to the same number.
+Each part starts in the mode its direction calls for: a part that steps the
+temperature up warms, one that steps it down cools (models.mode_for_target).
+The question is whether it stays there.
 
-    Quiet     quiet at 0.5 below the target, warming again at 2 below
-    Balanced  quiet once at the target, warming again at 1 below
-    Close     warming holds the target; quiet only a degree over it,
-              warming again at 0.5 below
+    Off   a warm part is handed to the quiet cooling mode once the bed reaches
+          the number, and warms again once it has fallen a degree below. Quieter,
+          and the bed swings about a degree under the number
+    On    every part stays in the mode it started in, all night. No swaps, so
+          the bed stays at the number, and warm parts are as loud as warming is.
+          A nudge or a bedside press part way through moves it the way the
+          number moved, and it stays in that (Service._stay_mode)
 
-Quiet was the only behaviour until 26 September, and a 32C REM part spent the
-small hours at 30: warming to 31.5, quiet, a slow fall to 30 in a cold room,
-warming again. On target a quarter of the night. Balanced is the default now.
+Off is what the Balanced level did, the default from 26 September. There used to
+be three levels, Quiet, Balanced and Close, and testing them on the real bed
+they did not change much (27 September). All three still swapped, and every
+swap starts the trim's half hour again, so the trim rarely got a full window to
+act on. Staying in one mode is what lets it finish the window and hold the
+number. A database set to Close reads as on, being the level that already kept
+warm parts warming; the other two read as off.
 
 **The trim.** What the bed settles at in a mode is learned before bedtime, with
 nobody in it, and applied once at the start of each part. At three in the
@@ -34,49 +40,14 @@ window of half an hour keeps it to a handful a night at most.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+#: With Stay on target off, a warm part goes quiet once the bed is at least
+#: target + QUIET_AT_C...
+QUIET_AT_C = 0.0
 
-@dataclass(frozen=True)
-class Hold:
-    name: str
-    label: str
-    #: A warm part goes quiet once the bed is at least target + arrived_c.
-    arrived_c: float
-    #: And warms again once the bed is at or below target - fallen_c.
-    fallen_c: float
-    describe: str
-
-
-HOLDS: dict[str, Hold] = {
-    "quiet": Hold(
-        "quiet",
-        "Quiet",
-        -0.5,
-        2.0,
-        "Quietest. The bed goes quiet half a degree short of a warm target and warms "
-        "again at 2° below, so it can sit up to 2° under.",
-    ),
-    "balanced": Hold(
-        "balanced",
-        "Balanced",
-        0.0,
-        1.0,
-        "Quiet once the bed reaches the target, warming again at 1° below. Within about "
-        "a degree, with more warming time.",
-    ),
-    "close": Hold(
-        "close",
-        "Close",
-        1.0,
-        0.5,
-        "Warm parts keep warming unless your body heat pushes the bed a degree over. "
-        "Closest to the target, and the noisiest.",
-    ),
-}
-
-DEFAULT_HOLD = "balanced"
+#: ...and warms again once it is at or below target - WARM_AGAIN_C.
+WARM_AGAIN_C = 1.0
 
 #: How long the bed has to sit off the target before the trim moves, and so the
 #: least time between one trim and the next.

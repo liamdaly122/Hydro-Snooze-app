@@ -314,6 +314,31 @@ minutes, and on a cold night the bed falls past one degree below in that time. C
 warming, which is also what lets the trim work, because it only acts on a whole half hour in one
 mode, and a sawtooth resets that every time it swaps.
 
+## Stay on target, instead of three Hold levels
+
+Testing Quiet, Balanced and Close on the real bed, they did not change much. All three still
+swapped mode part way through a warm part, and every swap started the trim's half hour again. So the
+three levels are gone, and in their place is one switch on the Autopilot screen, **Stay on target**:
+
+| Stay on target | What a part does |
+|---|---|
+| Off (the default) | Starts in the mode its direction calls for. A warm part goes quiet once the bed reaches the number, and warms again a degree below. What Balanced did |
+| On | Starts in the same mode and stays in it all night. No swaps either way, so the bed holds the number and warm parts are as loud as warming is |
+
+The direction is the one `mode_for_target` has always used: a part warmer than the one before it
+warms, and a part cooler than the one before it cools. A nudge or a press on the bedside part way
+through is a direction too: Cooler at 3am in a warm part switches it to cooling, because warming
+asked for less only stops heating, and it stays cooling until the number goes up again. With it on,
+the trim is what holds the
+number inside the mode, and it finally gets its whole half hour. Turning it on mid-night puts a part
+that has already gone quiet back to warming within half a minute. It is part of Autopilot, so
+Autopilot off turns it off too. A database set to Close carries over as on; Quiet and Balanced carry
+over as off (`backend/hydrosnooze/hold.py`).
+
+The one thing it cannot do: a mode only pushes one way. Warming cannot take body heat out of a warm
+part, and cooling cannot put heat back into a cool one. If the bed sits over a warm part's number
+with it on, the trim turns the setting down, but only the room and the hoses take the heat away.
+
 ---
 
 ## The morning report

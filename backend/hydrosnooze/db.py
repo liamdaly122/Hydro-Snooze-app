@@ -311,6 +311,9 @@ CREATE TABLE IF NOT EXISTS holiday (
 -- `autopilot_on` is the switch over all of Autopilot: learned timings and
 -- corrections, the drift response and the evening suggestion. Off, the bed runs
 -- exactly the temperatures set, at the times set.
+--
+-- `hold` is Stay on target (hold.py): 'target' on, 'balanced' off. It held one
+-- of three levels, quiet, balanced or close, until they became one switch.
 CREATE TABLE IF NOT EXISTS preferences (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     learning_on  INTEGER NOT NULL DEFAULT 1,
@@ -622,6 +625,12 @@ class Database:
             self._db.execute(
                 "ALTER TABLE preferences ADD COLUMN hold TEXT NOT NULL DEFAULT 'balanced'"
             )
+        # The three levels became Stay on target. Close already kept warm parts
+        # warming, so it is on; Quiet and Balanced both swapped, so they are off.
+        self._db.execute("UPDATE preferences SET hold = 'target' WHERE hold = 'close'")
+        self._db.execute(
+            "UPDATE preferences SET hold = 'balanced' WHERE hold NOT IN ('target', 'balanced')"
+        )
         # What electricity costs, for Trends. NULL until it is set.
         if "tariff_p" not in prefs:
             self._db.execute("ALTER TABLE preferences ADD COLUMN tariff_p REAL")
@@ -1331,15 +1340,16 @@ class Database:
         )
         self._db.commit()
 
-    def hold(self) -> str:
+    def stay_on_target(self) -> bool:
+        """Stay on target (hold.py). Off until it is turned on."""
         row = self._db.execute("SELECT hold FROM preferences WHERE id = 1").fetchone()
-        return "balanced" if row is None else row["hold"]
+        return row is not None and row["hold"] == "target"
 
-    def set_hold(self, hold: str) -> None:
+    def set_stay_on_target(self, on: bool) -> None:
         self._db.execute(
             "INSERT INTO preferences (id, hold) VALUES (1, ?) "
             "ON CONFLICT(id) DO UPDATE SET hold = excluded.hold",
-            (hold,),
+            ("target" if on else "balanced",),
         )
         self._db.commit()
 

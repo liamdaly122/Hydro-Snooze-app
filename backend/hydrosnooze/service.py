@@ -102,7 +102,7 @@ REBOOT_AFTER_FAILURES = 2
 #: change you made for one night from the routine changing.
 TONIGHT_KIND = "tonight"
 
-#: Autopilot's own settings changing: the switch, and how closely it holds.
+#: Autopilot's own settings changing: the switch, and Stay on target.
 AUTOPILOT_KIND = "autopilot"
 
 #: How often, in the evening, Autopilot looks at whether tonight's temperatures
@@ -119,11 +119,11 @@ LEARNING_KIND = "learning"
 #: What the three buttons on the bedside are logged under.
 BUTTON_KIND = "buttons"
 
-#: The Hold level changing, and the trim saying it has gone as far as it may.
-#: Neither sends anything to the unit, so neither may be QUIET_KIND or TRIM_KIND:
-#: the Autopilot screen treats those as the reason for whatever temperature was
-#: set beside them, and a change made by hand a minute after picking a Hold
-#: level was being credited to Autopilot as a drift response.
+#: Stay on target going on or off, and the trim saying it has gone as far as it
+#: may. Neither sends anything to the unit, so neither may be QUIET_KIND or
+#: TRIM_KIND: the Autopilot screen treats those as the reason for whatever
+#: temperature was set beside them, and a change made by hand a minute after
+#: picking a Hold level was being credited to Autopilot as a drift response.
 HOLD_KIND = "hold"
 
 #: Below this the probe board is shouting hard enough to expect dropouts.
@@ -461,6 +461,9 @@ class Service:
         #: When the running temperature was last re-asserted off the plan. Keeps
         #: a blaster that has gone away from being retried on every sample.
         self._followed_at: datetime | None = None
+        # With Stay on target: the part, the number it was last asked for and the
+        # mode it stays in. See _stay_mode.
+        self._stay_held: tuple[datetime, int, Mode] | None = None
 
         # Whether the clock has been confirmed against the network yet, and when
         # this started waiting. A Pi has no clock of its own at boot; see
@@ -1440,13 +1443,20 @@ class Service:
         # too. Keeping the running mode preserves whatever _correct_mode swapped
         # to for quiet; keeping it when it cannot express the target means a legal
         # request fails, because cooling stops at 35 and warming starts at 25.
-        mode = step.mode
+        #
+        # With Stay on target there is nothing to preserve: the part runs in the
+        # mode its direction calls for (_stay_mode), and a unit found in the other
+        # one, because the switch went on after a swap, is put back.
+        stay = self._stays_on_target()
+        mode = self._stay_mode(step) if stay else step.mode
         was = self.state.assumed_mode
-        if was is not None:
+        if was is not None and not stay:
             low, high = range_for(was)
             if low <= step.temp_c <= high:
                 mode = was
-        if self._nudged(step.temp_c, mode) == self.state.assumed_target_c:
+        if self._nudged(step.temp_c, mode) == self.state.assumed_target_c and (
+            not stay or mode is was
+        ):
             return
         # Never queue behind something else, and never hammer a blaster that has
         # gone away: same reasoning as _correct_mode, one floor below.
@@ -1474,7 +1484,8 @@ class Service:
         """Swap the running mode for the quieter one when the bed allows it.
 
         Part of Autopilot, and off with it: the stage stays in the mode the
-        schedule gave it.
+        schedule gave it. Off with Stay on target too, which is that same rule
+        with Autopilot's trim still working inside it (hold.py).
 
         The mode on the schedule card was decided at plan time from the stage
         before it. That is a prediction about a bed with nobody in it, and it is
@@ -1488,6 +1499,8 @@ class Service:
         """
         if step is None or power is not Power.ON or not self.db.autopilot_on():
             return
+        if self.db.stay_on_target():
+            return
         running = self.state.assumed_mode
         if running is None:
             return
@@ -1495,7 +1508,6 @@ class Service:
             return
 
         bed = self.probes.bed_c
-        level = self._hold()
         wanted = quieter_mode(
             step.temp_c,
             running,
@@ -1504,8 +1516,8 @@ class Service:
             # usual one put a Turbo night back on Quiet at its first correction.
             self.tonight_now().cooling_speed,
             cap_c=self.settings.max_temperature_c,
-            arrived_c=level.arrived_c,
-            fallen_c=level.fallen_c,
+            arrived_c=hold.QUIET_AT_C,
+            fallen_c=hold.WARM_AGAIN_C,
         )
         if wanted is None or wanted is running or bed is None:
             return
@@ -2104,17 +2116,63 @@ class Service:
 
     # --- Holding the bed at the number (hold.py) ---------------------------------
 
-    def _hold(self) -> hold.Hold:
-        return hold.HOLDS.get(self.db.hold(), hold.HOLDS[hold.DEFAULT_HOLD])
+    def _stays_on_target(self) -> bool:
+        """Stay on target, and Autopilot with it: off, nothing of Autopilot's runs."""
+        return self.db.autopilot_on() and self.db.stay_on_target()
 
-    def set_hold(self, name: str) -> dict[str, Any]:
-        if name not in hold.HOLDS:
-            raise CommandFailed(
-                f"Hold is one of {', '.join(hold.HOLDS)}, not {name}."
+    def _stay_mode(self, step: StageStep) -> Mode:
+        """The mode a part stays in with Stay on target on.
+
+        The plan's, which is the direction from the part before: warmer warms,
+        cooler cools. Until the number itself moves part way, by a nudge or a
+        press on the bedside: then the direction of that move, and it stays in
+        that. A press of Cooler at three in the morning is the number going down,
+        and a unit left warming only stops heating when asked for less. It cannot
+        take heat out.
+        """
+        target = self._nudged(step.temp_c, step.mode)
+        held = self._stay_held
+        if held is None or held[0] != step.starts_at:
+            held = (step.starts_at, target, step.mode)
+        elif target != held[1]:
+            held = (
+                step.starts_at,
+                target,
+                mode_for_target(
+                    target,
+                    self.tonight_now().cooling_speed,
+                    coming_from_c=held[1],
+                    coming_from_mode=held[2],
+                ),
             )
-        self.db.set_hold(name)
-        level = hold.HOLDS[name]
-        self.events.info(HOLD_KIND, f"Holding warm parts: {level.label}. {level.describe}")
+        self._stay_held = held
+        return held[2]
+
+    def set_stay_on_target(self, on: bool) -> dict[str, Any]:
+        """Keep every part in the mode it started in, or let warm parts go quiet.
+
+        Acted on at the next sample rather than the next swap or the next part:
+        both waits are cleared, so turning it on puts a part that went quiet back
+        to warming within half a minute, and turning it off lets a part at the
+        number go quiet as soon.
+        """
+        self.db.set_stay_on_target(on)
+        self._followed_at = None
+        self._mode_changed_at = None
+        self._stay_held = None
+        if on:
+            self.events.info(
+                HOLD_KIND,
+                "Stay on target on. Each part stays in the mode it starts in, warming or "
+                "cooling, and never goes quiet part way, so the bed holds the number and "
+                "warm parts are louder.",
+            )
+        else:
+            self.events.info(
+                HOLD_KIND,
+                "Stay on target off. Warm parts go quiet once the bed reaches the number "
+                "and warm again a degree below it.",
+            )
         return self.autopilot_state()
 
     def _reset_trim(self) -> None:
@@ -2213,11 +2271,7 @@ class Service:
     def autopilot_state(self) -> dict[str, Any]:
         return {
             "on": self.db.autopilot_on(),
-            "hold": self._hold().name,
-            "holds": [
-                {"name": h.name, "label": h.label, "describe": h.describe}
-                for h in hold.HOLDS.values()
-            ],
+            "stay_on_target": self.db.stay_on_target(),
         }
 
     async def set_autopilot(self, on: bool) -> dict[str, Any]:

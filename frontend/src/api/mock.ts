@@ -23,7 +23,6 @@ import type {
   AutopilotNight,
   AutopilotSwitch,
   AutopilotTest,
-  HoldName,
   AutopilotSleep,
   DeviceEvent,
   DeviceHealth,
@@ -755,33 +754,10 @@ export class MockApiClient implements ApiClient {
    * usual behave as they do on the Pi.
    */
   private autopilotOn = true
-  private holdName: HoldName = 'balanced'
+  private stayOnTarget = false
 
   private switchJson(): AutopilotSwitch {
-    return {
-      on: this.autopilotOn,
-      hold: this.holdName,
-      holds: [
-        {
-          name: 'quiet',
-          label: 'Quiet',
-          describe:
-            'Quietest. The bed goes quiet half a degree short of a warm target and warms again at 2° below, so it can sit up to 2° under.',
-        },
-        {
-          name: 'balanced',
-          label: 'Balanced',
-          describe:
-            'Quiet once the bed reaches the target, warming again at 1° below. Within about a degree, with more warming time.',
-        },
-        {
-          name: 'close',
-          label: 'Close',
-          describe:
-            'Warm parts keep warming unless your body heat pushes the bed a degree over. Closest to the target, and the noisiest.',
-        },
-      ],
-    }
+    return { on: this.autopilotOn, stay_on_target: this.stayOnTarget }
   }
 
   async getAutopilotSwitch(): Promise<AutopilotSwitch> {
@@ -789,9 +765,9 @@ export class MockApiClient implements ApiClient {
     return this.switchJson()
   }
 
-  async setHold(hold: HoldName): Promise<AutopilotSwitch> {
+  async setStayOnTarget(on: boolean): Promise<AutopilotSwitch> {
     await sleep(100)
-    this.holdName = hold
+    this.stayOnTarget = on
     return this.switchJson()
   }
 

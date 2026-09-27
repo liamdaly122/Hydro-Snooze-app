@@ -582,6 +582,11 @@ API rather than read. Read that before writing any of it.
       default) and a night-time trim that moves the setting a degree after half an hour off it.
       **Built and tested against a simulated bed.** The first real night at Balanced is the next
       thing to look at: the on-target figure on the Autopilot screen says how it went
+- [x] Stay on target, in place of the three Hold levels, which did not change much on the real bed.
+      On, every part stays in the mode it starts in all night, warming or cooling, and the trim
+      holds the number inside it. Off is what Balanced did. **Built and tested against a simulated
+      bed.** The first real night with it on is the next thing to look at, on the Bed chart and the
+      on-target figure
 - [x] Different times on some days: a weekend lie-in, keyed to the morning like the days.
       Only the times; the parts and temperatures are shared. With Autopilot on, a longer
       night keeps Drift, Deep and Wake where Sleep timing has them and gives REM the extra

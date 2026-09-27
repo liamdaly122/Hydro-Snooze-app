@@ -131,7 +131,7 @@ def test_a_trim_a_hold_level_or_a_failed_swap_is_not_a_swap(plan):
     at = plan.bedtime_at + timedelta(hours=3)
     other = [
         Event(1, at, "info", TRIM_KIND, "The bed has sat at 30.6C ... a degree more."),
-        Event(2, at, "info", HOLD_KIND, "Holding warm parts: Close."),
+        Event(2, at, "info", HOLD_KIND, "Stay on target on."),
         Event(3, at, "error", QUIET_KIND, "Could not send temp_down"),
     ]
     made = report.build(plan, night(plan), other, all_stages(plan))

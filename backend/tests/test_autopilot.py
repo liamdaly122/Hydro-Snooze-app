@@ -145,7 +145,7 @@ def test_picking_a_hold_level_does_not_claim_a_change_made_by_hand(plan):
     as Autopilot's and left out of the scoreboard's by-hand check."""
     at = plan.steps[1].starts_at + timedelta(hours=1)
     night = build(plan, [
-        ev(at, HOLD_KIND, "Holding warm parts: Close."),
+        ev(at, HOLD_KIND, "Stay on target on."),
         ev(at + timedelta(minutes=1), "temperature", "Railed to 15C then up to 24C"),
     ])
     assert [m.kind for m in night.marks] == [BY_HAND]
