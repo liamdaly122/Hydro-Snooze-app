@@ -10,6 +10,7 @@ import { WITHINGS_CONNECT_URL, type ApiClient } from '../api/client'
 import type {
   AutopilotNight,
   HealthAgainst,
+  HealthDay,
   HealthNight,
   HealthReport as Report,
   HealthVital,
@@ -28,13 +29,6 @@ import type {
  * The bed never waits for any of this. If Withings is unreachable the report
  * says so in a line at the bottom and the rest of the app carries on.
  */
-
-const DAY_MS = 24 * 60 * 60 * 1000
-
-function shiftDate(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00`)
-  return new Date(d.getTime() + days * DAY_MS).toISOString().slice(0, 10)
-}
 
 function longDate(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', {
@@ -100,6 +94,9 @@ export function HealthReport({
 }) {
   const [date, setDate] = useState<string | undefined>(undefined)
   const [report, setReport] = useState<Report | null>(null)
+  // Every week, for the strip along the top. Asked for again only when a new
+  // night arrives, which is when the latest night changes.
+  const [days, setDays] = useState<HealthDay[] | null>(null)
   const [nothingYet, setNothingYet] = useState(false)
   const [status, setStatus] = useState<WithingsStatus | null>(null)
   const [recap, setRecap] = useState<AutopilotNight | null>(null)
@@ -168,20 +165,24 @@ export function HealthReport({
     }
   }, [client])
 
-  /** A week earlier or later, landing on its latest night if it has one. */
-  const stepWeek = (by: -1 | 1) => {
-    if (!report) return
-    const edge = by < 0 ? shiftDate(report.week[0]!.date, -1) : shiftDate(report.week[6]!.date, 7)
-    const target = report.latest && edge > report.latest ? report.latest : edge
-    if (report.earliest && target < report.earliest) return
+  const latest = report?.latest ?? null
+  useEffect(() => {
+    if (latest === null) return
+    let live = true
     void client
-      .getHealthReport(target)
-      .then((r) => {
-        const nights = r.week.filter((d) => d.has_night)
-        const pick = r.night ? target : nights[nights.length - 1]?.date
-        setDate(pick ?? target)
-      })
+      .getHealthDays()
+      .then((d) => live && setDays(d))
       .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [client, latest])
+
+  /** Came to rest on another week: its latest night, if it has one. */
+  const restOn = (week: HealthDay[]) => {
+    const nights = week.filter((d) => d.has_night)
+    const last = nights[nights.length - 1]
+    if (last) setDate(last.date)
   }
 
   const fetchNow = () => {
@@ -229,12 +230,14 @@ export function HealthReport({
         <p className="hr-head__date">{longDate(shownDate)}</p>
       </header>
 
+      {/* The report's own week until every week has arrived, so the strip is
+          there from the first frame. */}
       <WeekStrip
-        days={report.week}
+        days={days?.length ? days : report.week}
         selected={night?.wake_on ?? null}
+        around={shownDate}
         onPick={setDate}
-        onPreviousWeek={() => stepWeek(-1)}
-        onNextWeek={() => stepWeek(1)}
+        onWeek={restOn}
       />
 
       {/*

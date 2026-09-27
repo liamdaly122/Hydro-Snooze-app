@@ -681,6 +681,23 @@ export class MockApiClient implements ApiClient {
     return { week: emptyWeek(on), earliest: seed.earliest, latest: seed.latest, night: null }
   }
 
+  /** Every week from the seed's first night to its latest, from the weeks its reports hold. */
+  async getHealthDays(): Promise<HealthDay[]> {
+    const seed = await this.health()
+    await sleep(120)
+    const known = new Map<string, HealthDay>()
+    for (const r of Object.values(seed.reports)) for (const d of r.week) known.set(d.date, d)
+    const first = emptyWeek(seed.earliest)[0]!.date
+    const last = emptyWeek(seed.latest)[6]!.date
+    const days: HealthDay[] = []
+    for (let at = new Date(`${first}T12:00:00`); ; at = new Date(at.getTime() + 86_400_000)) {
+      const date = at.toISOString().slice(0, 10)
+      days.push(known.get(date) ?? { date, score: null, has_night: false })
+      if (date >= last) break
+    }
+    return days
+  }
+
   /**
    * The seed's Sleep timing, measured by the real timing.py against the seed
    * site's starting schedule, with the parts and suggestions re-read from the

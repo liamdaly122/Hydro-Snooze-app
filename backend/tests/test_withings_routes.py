@@ -121,6 +121,7 @@ def test_a_callback_nobody_started_is_refused(client, service):
 
 def test_fetching_now_then_the_health_report(client):
     assert client.get("/api/health-report").status_code == 404
+    assert client.get("/api/health-report/days").json() == []
     connect(client)
     fetched = client.post("/api/withings/sync").json()
     assert fetched["asked"] is True and fetched["latest_night"] == "2026-10-25"
@@ -133,6 +134,8 @@ def test_fetching_now_then_the_health_report(client):
     assert picked["night"]["wake_on"] == "2026-10-23"
     assert client.get("/api/health-report", params={"date": "23/10/2026"}).status_code == 422
     assert client.get("/api/health-report", params={"date": "2026-13-45"}).status_code == 422
+    days = client.get("/api/health-report/days").json()
+    assert days[0]["date"] == "2026-10-18" and len(days) % 7 == 0
 
 
 def test_sleep_timing_answers_before_there_is_any_sleep(client, service):
