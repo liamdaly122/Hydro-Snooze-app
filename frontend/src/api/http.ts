@@ -20,6 +20,7 @@ import type {
   DeviceEvent,
   DeviceHealth,
   DeviceState,
+  HealthDay,
   HealthReport,
   Holiday,
   Learning,
@@ -164,6 +165,7 @@ export class HttpApiClient implements ApiClient {
 
   getHealthReport = (date?: string) =>
     request<HealthReport>(`/api/health-report${date ? `?date=${date}` : ''}`)
+  getHealthDays = () => request<HealthDay[]>('/api/health-report/days')
   getSleepTiming = () => request<SleepTiming>('/api/sleep-timing')
   forgetSleepTiming = () =>
     request<SleepTiming>('/api/sleep-timing/forget', { method: 'POST' })

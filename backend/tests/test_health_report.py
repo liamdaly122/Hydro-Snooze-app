@@ -87,6 +87,22 @@ def test_a_morning_with_no_night_still_has_its_week(week):
     assert len(built["week"]) == 7
 
 
+def test_every_day_in_whole_weeks_for_the_strip(week):
+    """From the Sunday before the first night to the Saturday after the latest,
+    each day the same as the week along the top has it."""
+    days = health.days(week)
+    assert days[0]["date"] == "2026-10-18" and days[-1]["date"] == "2026-10-31"
+    assert len(days) == 14
+    by = {d["date"]: d for d in days}
+    for built in (health.report(week, "2026-10-22"), health.report(week)):
+        for d in built["week"]:
+            assert by[d["date"]] == d
+
+
+def test_no_nights_no_days(db):
+    assert health.days(db) == []
+
+
 @pytest.mark.parametrize("wake_on", list(NIGHTS))
 def test_the_numbers_are_withings_own(week, wake_on):
     n = health.report(week, wake_on)["night"]

@@ -102,9 +102,32 @@ def report(db: Database, wake_on: str | None = None) -> dict[str, Any] | None:
     return out
 
 
+def days(db: Database) -> list[dict[str, Any]]:
+    """Every morning from the week of the first night to the week of the latest.
+
+    Whole weeks, Sunday first, so the strip along the top can hold every week
+    at once and scroll through them, rather than asking for one week per swipe.
+    Empty when there are no nights.
+    """
+    earliest = db.earliest_sleep_wake_on()
+    latest = db.latest_sleep_night()
+    if earliest is None or latest is None:
+        return []
+    first = _sunday(date.fromisoformat(earliest))
+    last = _sunday(date.fromisoformat(latest.wake_on)) + timedelta(days=6)
+    return _days(db, first, (last - first).days + 1)
+
+
+def _sunday(on: date) -> date:
+    return on - timedelta(days=(on.weekday() - WEEK_STARTS_ON) % 7)
+
+
 def _week(db: Database, anchor: date) -> list[dict[str, Any]]:
-    first = anchor - timedelta(days=(anchor.weekday() - WEEK_STARTS_ON) % 7)
-    days = [first + timedelta(days=i) for i in range(7)]
+    return _days(db, _sunday(anchor), 7)
+
+
+def _days(db: Database, first: date, count: int) -> list[dict[str, Any]]:
+    days = [first + timedelta(days=i) for i in range(count)]
     held: dict[str, StoredNight] = {}
     for n in db.sleep_nights(days[0].isoformat(), days[-1].isoformat()):
         # The longest, if a morning has more than one. See Database.sleep_night_on.

@@ -2500,11 +2500,25 @@ button:disabled {
 
 /* The week. Seven rings, evenly spread across the width. */
 
+/* Every week side by side, scrolled by the browser itself and snapping to a
+   week at rest. The scrollbar is hidden: the rings are the thing to look at. */
 .week {
+  display: flex;
+  margin: 2px -4px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.week::-webkit-scrollbar { display: none; }
+
+.week__page {
+  flex: 0 0 100%;
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  margin: 2px -4px 0;
-  touch-action: pan-y;
+  scroll-snap-align: start;
 }
 
 .week__day {

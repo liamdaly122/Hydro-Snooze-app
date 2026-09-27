@@ -102,6 +102,13 @@ async def disconnect(request: Request) -> dict[str, object]:
     return sync.status()
 
 
+@router.get("/health-report/days")
+async def get_health_days(request: Request) -> list[dict[str, object]]:
+    """Every morning's score, whole weeks from the first night to the latest,
+    for the strip along the top of the Health Report. Empty with no nights."""
+    return health.days(_service(request).db)
+
+
 @router.get("/health-report")
 async def get_health_report(
     request: Request,

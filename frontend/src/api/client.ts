@@ -18,6 +18,7 @@ import type {
   AuthState,
   AutopilotNight,
   AutopilotSwitch,
+  HealthDay,
   HealthReport,
   Learning,
   DeviceEvent,
@@ -143,6 +144,11 @@ export interface ApiClient {
    * is no sleep at all yet, which getWithings then explains.
    */
   getHealthReport(date?: string): Promise<HealthReport>
+  /**
+   * Every morning's score, whole weeks Sunday first, from the week of the first
+   * night to the week of the latest. Empty with no nights.
+   */
+  getHealthDays(): Promise<HealthDay[]>
   /**
    * The recent nights against the schedule's parts: when I fall asleep, when my
    * deep sleep is mostly done, and where the boundaries could move to. Always
