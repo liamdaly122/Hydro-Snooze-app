@@ -283,10 +283,10 @@ def quieter_mode(
     """The mode this stage should really be in, judged from the bed rather than
     the schedule. None means leave it alone, which is most of the time.
 
-    `arrived_c` and `fallen_c` are the Hold level's (hold.py): quiet once the
-    bed is at target + arrived_c, warming again at target - fallen_c. The
-    defaults are the Quiet level, which was the only behaviour before there was
-    a choice.
+    `arrived_c` and `fallen_c` say where: quiet once the bed is at target +
+    arrived_c, warming again at target - fallen_c. The service passes hold.py's.
+    The defaults are the old Quiet level, which was the only behaviour before
+    there was a choice. Never asked at all with Stay on target on (hold.py).
 
     `mode_for_target` decides at plan time, from the stage before it. That is a
     prediction, made hours early, about a bed with nobody in it. This is the same

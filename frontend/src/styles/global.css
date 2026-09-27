@@ -512,6 +512,10 @@ button:disabled {
   transform: translateX(23px);
 }
 
+.toggle:disabled {
+  opacity: 0.4;
+}
+
 /* --- Segmented mode selector ----------------------------------------------- */
 
 .segmented {
@@ -3602,6 +3606,7 @@ a.pill {
 }
 
 .ap-hold__title {
+  flex: 1;
   font-size: 14px;
   color: var(--text);
 }

@@ -1,13 +1,16 @@
-"""Holding the bed at the number: the Hold level and the night-time trim.
+"""Holding the bed at the number: Stay on target and the night-time trim.
 
 The case that started it: a 32C REM part that spent the small hours at 30,
-because the bed went quiet at 31.5 and warmed again only at 30.
+because the bed went quiet at 31.5 and warmed again only at 30. Then three Hold
+levels that on the real bed did not change much, and one switch instead: every
+part stays in the mode it started in.
 """
 
 from __future__ import annotations
 
 import asyncio
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 
@@ -18,8 +21,7 @@ from hydrosnooze.clock import VirtualClock
 from hydrosnooze.config import Settings
 from hydrosnooze.db import Database
 from hydrosnooze.models import TRIM_KIND, Mode, Power, Schedule, SleepStage, Stage, quieter_mode
-from hydrosnooze.sequences import CommandFailed
-from hydrosnooze.service import Service
+from hydrosnooze.service import HOLD_KIND, Service
 
 T0 = datetime.combine(date(2026, 9, 25), time(2, 0))
 BEAT = timedelta(seconds=30)
@@ -65,29 +67,23 @@ def test_a_bed_still_closing_on_the_target_is_left_to_get_there():
     assert hold.trim_needed(falling, 32, T0) == 0
 
 
-# --- The Hold level, in the drift response -----------------------------------------------
+# --- Stay on target off: where a warm part swaps -------------------------------------------
 
 
-def mode_for(level: str, running: Mode, bed: float) -> Mode | None:
-    h = hold.HOLDS[level]
+def mode_for(running: Mode, bed: float) -> Mode | None:
     return quieter_mode(32, running, bed, Mode.QUIET, cap_c=40,
-                        arrived_c=h.arrived_c, fallen_c=h.fallen_c)
+                        arrived_c=hold.QUIET_AT_C, fallen_c=hold.WARM_AGAIN_C)
 
 
-@pytest.mark.parametrize(("level", "goes_quiet_at", "not_yet_at"), [
-    ("quiet", 31.5, 31.4), ("balanced", 32.0, 31.9), ("close", 33.0, 32.9),
-])
-def test_when_a_warm_part_goes_quiet(level, goes_quiet_at, not_yet_at):
-    assert mode_for(level, Mode.WARMING, goes_quiet_at) is Mode.QUIET
-    assert mode_for(level, Mode.WARMING, not_yet_at) is None
+def test_off_a_warm_part_goes_quiet_at_the_number():
+    """What the Balanced level did."""
+    assert mode_for(Mode.WARMING, 32.0) is Mode.QUIET
+    assert mode_for(Mode.WARMING, 31.9) is None
 
 
-@pytest.mark.parametrize(("level", "warms_at", "not_yet_at"), [
-    ("quiet", 30.0, 30.1), ("balanced", 31.0, 31.1), ("close", 31.5, 31.6),
-])
-def test_when_it_warms_again(level, warms_at, not_yet_at):
-    assert mode_for(level, Mode.QUIET, warms_at) is Mode.WARMING
-    assert mode_for(level, Mode.QUIET, not_yet_at) is None
+def test_off_it_warms_again_a_degree_below():
+    assert mode_for(Mode.QUIET, 31.0) is Mode.WARMING
+    assert mode_for(Mode.QUIET, 31.1) is None
 
 
 def test_the_old_behaviour_is_the_quiet_level():
@@ -218,47 +214,129 @@ def test_a_nudge_pauses_it(service, monkeypatch):
     assert service.sent == []
 
 
-def test_the_hold_level_decides_when_a_warm_part_goes_quiet(service, monkeypatch):
-    applied = []
+def correct(svc: Service, step, now=T0) -> list[Mode]:
+    applied: list[Mode] = []
 
     async def apply(mode, target_c):
         applied.append(mode)
+        svc._set_state(assumed_mode=mode, assumed_target_c=target_c)
 
-    monkeypatch.setattr(service, "_apply", apply)
-    service.bed = 31.6
+    svc._apply = apply  # type: ignore[method-assign]
+    asyncio.run(svc._correct_mode(step, Power.ON, now))
+    return applied
+
+
+def test_off_a_warm_part_at_the_number_goes_quiet(service):
+    service.bed = 32.0
+    assert correct(service, rem(service)) == [Mode.QUIET]
+
+
+def test_on_a_warm_part_at_the_number_keeps_warming(service):
+    service.set_stay_on_target(True)
+    service.bed = 33.5
+    assert correct(service, rem(service)) == [], "never quiet, however warm the bed"
+
+
+def test_on_a_cooling_part_below_the_number_keeps_cooling(service):
+    """The other swap goes too: a part stays in the mode it started in."""
+    service.set_stay_on_target(True)
+    service._set_state(assumed_mode=Mode.QUIET)
+    service.bed = 29.0
+    assert correct(service, rem(service)) == []
+
+
+def test_on_the_trim_still_holds_the_number(service):
+    """Staying in one mode is what gives the trim its full half hour."""
+    service.set_stay_on_target(True)
+    run_for(service, 31)
+    assert service.sent == [33]
+
+
+def follow(svc: Service, step, now=T0) -> list[tuple[Mode, int]]:
+    applied: list[tuple[Mode, int]] = []
+
+    async def apply(mode, target_c):
+        applied.append((mode, target_c))
+        svc._set_state(assumed_mode=mode, assumed_target_c=target_c)
+
+    svc._apply = apply  # type: ignore[method-assign]
+    asyncio.run(svc._follow_the_plan(step, Power.ON, now))
+    return applied
+
+
+def test_turned_on_after_a_swap_it_goes_back_to_the_plans_mode(service):
     step = rem(service)
+    assert step.mode is Mode.WARMING
+    # Off, the part went quiet at the number, and following the plan keeps that.
+    service._set_state(assumed_mode=Mode.QUIET, assumed_target_c=32)
+    assert follow(service, step) == []
 
-    asyncio.run(service._correct_mode(step, Power.ON, T0))
-    assert applied == [], "balanced: not quiet until the bed reaches 32"
-
-    service.set_hold("quiet")
-    service._mode_changed_at = None
-    asyncio.run(service._correct_mode(step, Power.ON, T0))
-    assert applied == [Mode.QUIET], "quiet: half a degree short is close enough"
-
-
-def test_the_hold_level_is_kept_and_checked(service):
-    assert service.autopilot_state()["hold"] == "balanced"
-    assert service.set_hold("close")["hold"] == "close"
-    assert service.db.hold() == "close"
-    with pytest.raises(CommandFailed):
-        service.set_hold("loud")
+    service._followed_at = T0
+    service.set_stay_on_target(True)
+    assert follow(service, step, T0 + BEAT) == [(Mode.WARMING, 32)], "straight away"
+    assert follow(service, step, T0 + 2 * BEAT) == [], "and once there, silence"
 
 
-def test_a_database_from_before_the_choice_is_balanced(tmp_path):
-    path = tmp_path / "old.db"
+def test_on_a_press_part_way_moves_it_the_way_the_number_moved(service):
+    """Cooler at 3am in a warm part is the number going down, so it cools, and
+    stays cooling. Warmer, or the press running out, is up again, so it warms."""
+    service.set_stay_on_target(True)
+    step = rem(service)
+    service._set_state(assumed_mode=Mode.WARMING, assumed_target_c=32)
+    assert follow(service, step) == []
+
+    cooler = replace(step, temp_c=30)
+    assert cooler.mode is Mode.WARMING, "the plan still says warming: up from Deep"
+    assert follow(service, cooler, T0 + BEAT) == [(Mode.QUIET, 30)]
+    later = T0 + timedelta(minutes=31)
+    assert follow(service, cooler, later) == [], "and stays cooling"
+    assert follow(service, step, later + timedelta(minutes=31)) == [(Mode.WARMING, 32)]
+
+
+def test_on_does_nothing_with_autopilot_off(service):
+    service.set_stay_on_target(True)
+    asyncio.run(service.set_autopilot(False))
+    service._set_state(assumed_mode=Mode.QUIET, assumed_target_c=32)
+    service._followed_at = None
+    assert follow(service, rem(service)) == [], "off runs the night as it always has"
+    assert service.autopilot_state() == {"on": False, "stay_on_target": True}
+
+
+def test_it_is_kept_and_said(service):
+    assert service.autopilot_state()["stay_on_target"] is False
+    assert service.set_stay_on_target(True)["stay_on_target"] is True
+    assert service.db.stay_on_target() is True
+    said = [e.message for e in service.events.recent() if e.kind == HOLD_KIND]
+    assert said and said[-1].startswith("Stay on target on.")
+    assert service.set_stay_on_target(False)["stay_on_target"] is False
+
+
+def old_database(tmp_path, hold_value: str | None) -> Database:
+    path = tmp_path / f"old-{hold_value}.db"
     old = sqlite3.connect(path)
+    extra = ", hold TEXT NOT NULL DEFAULT 'balanced'" if hold_value else ""
     old.execute(
         "CREATE TABLE preferences (id INTEGER PRIMARY KEY CHECK (id = 1), "
         "learning_on INTEGER NOT NULL DEFAULT 1, timing_since TEXT, "
-        "autopilot_on INTEGER NOT NULL DEFAULT 1)"
+        f"autopilot_on INTEGER NOT NULL DEFAULT 1{extra})"
     )
-    old.execute("INSERT INTO preferences (id) VALUES (1)")
+    if hold_value:
+        old.execute("INSERT INTO preferences (id, hold) VALUES (1, ?)", (hold_value,))
+    else:
+        old.execute("INSERT INTO preferences (id) VALUES (1)")
     old.commit()
     old.close()
-    db = Database(path)
+    return Database(path)
+
+
+@pytest.mark.parametrize(("was", "on"), [
+    (None, False), ("quiet", False), ("balanced", False), ("close", True),
+])
+def test_an_older_database_carries_over(tmp_path, was, on):
+    """Close already kept warm parts warming, so it is on. The rest swapped."""
+    db = old_database(tmp_path, was)
     try:
-        assert db.hold() == "balanced"
+        assert db.stay_on_target() is on
     finally:
         db.close()
 

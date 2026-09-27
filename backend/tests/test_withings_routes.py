@@ -188,7 +188,8 @@ def test_the_autopilot_switch_over_http(client):
     assert client.get("/api/autopilot/switch").json()["on"] is True
     assert client.post("/api/autopilot/switch", json={"on": False}).json()["on"] is False
     assert client.get("/api/autopilot/switch").json()["on"] is False
-    assert client.post("/api/autopilot/switch", json={"hold": "close"}).json()["hold"] == "close"
-    assert client.post("/api/autopilot/switch", json={"hold": "loud"}).status_code == 422
+    stay = client.post("/api/autopilot/switch", json={"stay_on_target": True}).json()
+    assert stay == {"on": False, "stay_on_target": True}
+    assert client.post("/api/autopilot/switch", json={"stay_on_target": "loud"}).status_code == 422
     assert client.get("/api/suggestion").json()["state"] == "off"
     assert "suggested" in client.get("/api/tonight").json()

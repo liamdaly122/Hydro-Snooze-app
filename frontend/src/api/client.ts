@@ -18,7 +18,6 @@ import type {
   AuthState,
   AutopilotNight,
   AutopilotSwitch,
-  HoldName,
   HealthReport,
   Learning,
   DeviceEvent,
@@ -162,8 +161,8 @@ export interface ApiClient {
    */
   getAutopilotSwitch(): Promise<AutopilotSwitch>
   setAutopilotSwitch(on: boolean): Promise<AutopilotSwitch>
-  /** How closely warm parts are held: quiet, balanced or close. */
-  setHold(hold: HoldName): Promise<AutopilotSwitch>
+  /** Every part stays in the mode it starts in, warming or cooling, all night. */
+  setStayOnTarget(on: boolean): Promise<AutopilotSwitch>
   /** Tonight's suggested Deep and REM, and where it is up to. */
   getSuggestion(): Promise<Suggestion>
   /** Use it for tonight. Changes tonight only; the routine is untouched. */

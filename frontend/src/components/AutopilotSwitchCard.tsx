@@ -1,10 +1,10 @@
-import type { AutopilotSwitch, HoldName } from '../types'
+import type { AutopilotSwitch } from '../types'
 import { InfoButton } from './InfoButton'
 import { Toggle } from './Toggle'
 
 /**
- * The switch over all of Autopilot, at the top of its screen, and how closely
- * it holds the bed.
+ * The switch over all of Autopilot, at the top of its screen, and Stay on
+ * target inside it.
  *
  * On, it learns the bed's timings and corrections, trims the setting through
  * the night when the bed sits off the number, switches to the quieter mode
@@ -13,23 +13,23 @@ import { Toggle } from './Toggle'
  * back to usual if it was running a suggestion. The reports stay: every night
  * is still written down, so turning it back on loses nothing.
  *
- * Hold is the trade between silence and accuracy for warm parts: warming mode
- * is loud and cooling is silent, so how soon a warm part is handed to the quiet
- * mode, and how far the bed may fall before warming comes back, is a choice.
+ * Stay on target is the trade between silence and accuracy: warming mode is
+ * loud and cooling is silent. Off, a warm part goes quiet once the bed reaches
+ * the number. On, every part stays in the mode it started in, all night. It
+ * replaced three Hold levels (Quiet, Balanced, Close) that on the real bed did
+ * not change much. See backend/hydrosnooze/hold.py.
  */
 export function AutopilotSwitchCard({
   state,
   onSwitch,
-  onHold,
+  onStay,
   busy = false,
 }: {
   state: AutopilotSwitch
   onSwitch: (on: boolean) => void
-  onHold: (hold: HoldName) => void
+  onStay: (on: boolean) => void
   busy?: boolean
 }) {
-  const chosen = state.holds.find((h) => h.name === state.hold)
-
   return (
     <section className="card ap-switch">
       <div className="ap-switch__row">
@@ -50,10 +50,10 @@ export function AutopilotSwitchCard({
             one step at a time and never more than 4° from what you asked for.
           </p>
           <p>
-            It hands warm parts to the silent cooling mode when your body heat can hold them, as
-            Hold below sets out. And each evening it picks tonight&apos;s Deep and REM and sets
-            them itself, now and then trying a degree either side to learn what suits you. Back to
-            usual on the home screen undoes one night.
+            It hands warm parts to the silent cooling mode once the bed reaches the number, unless
+            Stay on target below is on. And each evening it picks tonight&apos;s Deep and REM and
+            sets them itself, now and then trying a degree either side to learn what suits you.
+            Back to usual on the home screen undoes one night.
           </p>
           <p>
             Off, none of that happens. The bed gets exactly the temperatures you set, at the times
@@ -70,24 +70,45 @@ export function AutopilotSwitchCard({
 
       <div className={`ap-hold${state.on ? '' : ' ap-hold--off'}`}>
         <div className="ap-hold__head">
-          <span className="ap-hold__title">Hold</span>
-          <span className="suggest__reach" role="group" aria-label="How closely warm parts are held">
-            {state.holds.map((h) => (
-              <button
-                key={h.name}
-                type="button"
-                className="suggest__reach-btn"
-                aria-pressed={state.hold === h.name}
-                disabled={busy || !state.on}
-                onClick={() => onHold(h.name)}
-              >
-                {h.label}
-              </button>
-            ))}
-          </span>
+          <span className="ap-hold__title">Stay on target</span>
+          <InfoButton title="Stay on target">
+            <p>
+              Each part of the night starts in the mode its direction calls for. A part that is
+              warmer than the one before it warms, and a part that is cooler cools.
+            </p>
+            <p>
+              Off, a warm part switches to the silent cooling mode once the bed reaches the number,
+              and warms again if the bed falls a degree below. Quieter, but the bed swings about a
+              degree under what you asked for.
+            </p>
+            <p>
+              On, every part stays in the mode it started in, all night. The bed stays at the
+              number, and warm parts are as loud as warming mode is. If the bed still sits off the
+              number for half an hour, Autopilot sends a degree more or less, the same as always.
+            </p>
+            <p>
+              Changing the temperature part way through, from the app or the bedside, counts as a
+              direction too. Cooler switches that part to cooling and warmer to warming, and it
+              stays that way.
+            </p>
+            <p>
+              It needs Autopilot on. With Autopilot off, every part stays in the mode the schedule
+              gave it anyway, but nothing adjusts the setting.
+            </p>
+          </InfoButton>
+          <Toggle
+            on={state.stay_on_target}
+            onChange={(next) => !busy && onStay(next)}
+            label="Stay on target"
+            disabled={busy || !state.on}
+          />
         </div>
         <p className="ap-hold__describe">
-          {state.on ? chosen?.describe : 'Off with Autopilot: warm parts stay in the mode the schedule gave them.'}
+          {!state.on
+            ? 'Off with Autopilot: every part stays in the mode the schedule gave it.'
+            : state.stay_on_target
+              ? 'On. Every part stays warming or cooling all night, so the bed holds the number. Louder on warm parts.'
+              : 'Off. Warm parts go quiet once the bed reaches the number, and warm again a degree below.'}
         </p>
       </div>
     </section>

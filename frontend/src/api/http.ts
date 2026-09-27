@@ -17,7 +17,6 @@ import type {
   AuthState,
   AutopilotNight,
   AutopilotSwitch,
-  HoldName,
   DeviceEvent,
   DeviceHealth,
   DeviceState,
@@ -175,10 +174,10 @@ export class HttpApiClient implements ApiClient {
       method: 'POST',
       body: JSON.stringify({ on }),
     })
-  setHold = (hold: HoldName) =>
+  setStayOnTarget = (on: boolean) =>
     request<AutopilotSwitch>('/api/autopilot/switch', {
       method: 'POST',
-      body: JSON.stringify({ hold }),
+      body: JSON.stringify({ stay_on_target: on }),
     })
   getSuggestion = () => request<Suggestion>('/api/suggestion')
   acceptSuggestion = () => request<Suggestion>('/api/suggestion/accept', { method: 'POST' })
