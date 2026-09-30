@@ -169,7 +169,8 @@ export function App({ client, auth, onAuth }: Props) {
           In the header rather than on the home screen, because it is the one
           thing worth reaching in a single tap from wherever you happen to be.
         */}
-        {state && (
+        {/* Not while HydroSnooze is off: it would only be refused. */}
+        {state?.system_on && (
           <PowerButton
             power={state.power}
             onPress={() => client.pressPower()}

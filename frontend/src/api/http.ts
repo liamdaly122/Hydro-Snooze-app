@@ -88,6 +88,8 @@ export class HttpApiClient implements ApiClient {
 
   info = () => request<ServiceInfo>('/api/info')
   getState = () => request<DeviceState>('/api/state')
+  setSystem = (on: boolean) =>
+    request<DeviceState>('/api/system', { method: 'POST', body: JSON.stringify({ on }) })
   getSchedule = () => request<Schedule>('/api/schedule')
   getHealth = () => request<DeviceHealth[]>('/api/health')
 

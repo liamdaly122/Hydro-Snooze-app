@@ -316,6 +316,10 @@ class Scheduler:
     #: Whether Autopilot is on, asked each time rather than held. It decides how
     #: a night longer or shorter than usual is laid out; see models.laid_out_like.
     autopilot_on: Callable[[], bool] | None = None
+    #: The switch over everything, asked each time like Autopilot. Off, there is
+    #: no night in progress and none coming, rehearsal included, so nothing is
+    #: due, nothing is missed and no stage is running for anything to follow.
+    system_on: Callable[[], bool] | None = None
 
     def plan_in_progress(self, schedule: Schedule, now: datetime) -> NightPlan | None:
         """The night we are currently inside, or the next one.
@@ -323,6 +327,8 @@ class Scheduler:
         Looks back a day as well as forward, because bedtime is almost always the
         evening before the wake morning.
         """
+        if self.system_on is not None and not self.system_on():
+            return None
         # A rehearsal suppresses the real night while it runs. Two nights at once
         # would fight over the unit, and the real one is hours away in any case.
         if self.rehearsal is not None:

@@ -25,7 +25,7 @@ from .api import dev, notes, routes, signin
 from .api import withings as withings_routes
 from .api.schemas import health_json, state_json
 from .config import get_settings
-from .service import Service
+from .service import Service, SystemOff
 
 logging.basicConfig(
     level=os.environ.get("HS_LOG_LEVEL", "INFO"),
@@ -138,6 +138,16 @@ app.include_router(routes.router)
 app.include_router(dev.router)
 app.include_router(withings_routes.router)
 app.include_router(notes.router)
+
+
+@app.exception_handler(SystemOff)
+async def switched_off(request: Request, exc: SystemOff) -> JSONResponse:
+    """Anything that would send to the unit while HydroSnooze is switched off.
+
+    One answer for every route, rather than each one catching it and choosing a
+    status of its own: it is the same refusal wherever it comes from.
+    """
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.middleware("http")

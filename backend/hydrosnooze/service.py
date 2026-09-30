@@ -119,6 +119,25 @@ LEARNING_KIND = "learning"
 #: What the three buttons on the bedside are logged under.
 BUTTON_KIND = "buttons"
 
+#: The switch over everything going on or off.
+SYSTEM_KIND = "system"
+
+#: What anything that would send to the unit says while the switch is off.
+SYSTEM_OFF = (
+    "HydroSnooze is switched off, so nothing is sent to the unit. Switch it back on "
+    "from the menu first."
+)
+
+
+class SystemOff(RuntimeError):
+    """Asked to send something while HydroSnooze is switched off.
+
+    Its own type rather than a CommandFailed, which every caller that sends
+    catches and files as a failure: this is not the unit failing, and a line
+    in the log saying it did would be the wrong way round. The API turns it into
+    a 409 carrying SYSTEM_OFF.
+    """
+
 #: Stay on target going on or off, and the trim saying it has gone as far as it
 #: may. Neither sends anything to the unit, so neither may be QUIET_KIND or
 #: TRIM_KIND: the Autopilot screen treats those as the reason for whatever
@@ -349,6 +368,7 @@ class Service:
             learned_lead=self._learned_lead,
             bed_now=self._bed_now,
             autopilot_on=self._autopilot_on,
+            system_on=self.db.system_on,
         )
         # Read back what already ran tonight before anything can ask. A restart is
         # a routine event now: systemd brings the service back after a crash and
@@ -393,12 +413,20 @@ class Service:
         #: Switching off a night that turned out to be a night away. See
         #: _switch_off_if_away.
         self._away_task: asyncio.Task[None] | None = None
+        # The running part, run late when HydroSnooze is switched on mid-night.
+        self._resume_task: asyncio.Task[None] | None = None
         # Whatever is different about tonight, read back the same way, and after
         # the schedule because finding which night we are in needs it. A restart
         # is routine, and forgetting a sleep-in halfway through would put the
         # switch-off back at the old alarm.
         self.load_tonight()
-        self.state = DeviceState()
+        # Switched off before a restart, it comes back switched off, with the
+        # unit taken to be off or unplugged, the way it was left.
+        self.state = (
+            DeviceState()
+            if self.db.system_on()
+            else DeviceState(power=Power.OFF, system_on=False)
+        )
         self.events.seed(self.db.recent_events(200))
 
         # None means never asked, which is a different thing from "not answering"
@@ -498,6 +526,14 @@ class Service:
     # device that has gone.
 
     def health(self) -> list[DeviceHealth]:
+        if not self.db.system_on():
+            said = "Switched off with HydroSnooze. Nothing asks it anything until that is back on"
+            return [
+                DeviceHealth("plug", Health.OFF, said),
+                DeviceHealth("blaster", Health.OFF, said),
+                DeviceHealth("probes", Health.OFF, said),
+                self._alerts_health(),
+            ]
         now = self.clock.now()
         real_plug = self.settings.power_monitor != "fake"
         real_blaster = self.settings.transmitter != "fake"
@@ -740,7 +776,11 @@ class Service:
     async def _health_loop(self) -> None:
         while True:
             try:
-                await self._check_blaster()
+                # Not while switched off: the board may well be unplugged too,
+                # and a warning that it is not answering would be the app
+                # complaining about the very thing it was told.
+                if self.db.system_on():
+                    await self._check_blaster()
             except asyncio.CancelledError:
                 raise
             except Exception:  # pragma: no cover
@@ -822,6 +862,11 @@ class Service:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._away_task
             self._away_task = None
+        if self._resume_task is not None:
+            self._resume_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._resume_task
+            self._resume_task = None
         await self.probes.close()
         await self.withings.close()
         await self.notifier.close()
@@ -1100,6 +1145,12 @@ class Service:
                 log.exception("power sample failed")
 
     async def _sample_power(self) -> None:
+        # Switched off, the unit is taken to be unplugged, so there is nothing
+        # to read and nothing to follow. Nothing is recorded either: a night
+        # with no readings is a night the scoreboard cannot count, which is
+        # right for a night the system was off.
+        if not self.db.system_on():
+            return
         watts = await self.power.read_watts()
         now = self.clock.now()
 
@@ -1239,6 +1290,7 @@ class Service:
         same fired marks, the same power checks and the same sequences that will
         run at 2am. Only the durations differ.
         """
+        self._refuse_while_off()
         if not self.schedule.stages:
             raise ValueError("There are no stages to rehearse.")
 
@@ -1683,6 +1735,12 @@ class Service:
 
     async def _send_what_was_asked(self, delta: int, power: bool) -> None:
         said = _button_summary(delta, power)
+
+        if not self.db.system_on():
+            self.events.info(
+                BUTTON_KIND, f"{said}. HydroSnooze is switched off, so nothing was sent."
+            )
+            return
 
         if power:
             # One gesture per window. On/off and a temperature in the same one
@@ -2255,6 +2313,112 @@ class Service:
             f"so the unit is being sent {after}C now, a degree {'more' if way > 0 else 'less'}.",
         )
 
+    # --- The switch over everything ------------------------------------------
+
+    def _refuse_while_off(self) -> None:
+        if not self.db.system_on():
+            raise SystemOff(SYSTEM_OFF)
+
+    async def set_system(self, on: bool) -> DeviceState:
+        """HydroSnooze, all of it, on or off.
+
+        Off means off, not paused. No night is planned, so nothing is due and
+        nothing is missed. Nothing is sent to the unit by any route, the bedside
+        buttons included. The plug, the blaster and the probe board are not
+        asked anything, and the unit is taken to be switched off or unplugged,
+        because that is what it is for: a unit away for cleaning, a spare room,
+        a month of not using it. That includes not switching the unit off on the
+        way out. If it is running, that is for whoever flipped this to do with
+        their hands; the app says so before it lets them.
+
+        What carries on: the Pi's heartbeat, since the Pi is still up, Withings,
+        since the mat does not care, and every setting, which is data and can
+        still be changed.
+
+        On is a fresh start. Nothing about the unit is assumed from before, and
+        any part of tonight whose moment passed while it was off is put down as
+        not run, quietly, rather than rung through as missed.
+        """
+        if on == self.db.system_on():
+            return self.state
+        self.db.set_system_on(on)
+        # Forgotten either way: nothing from before the switch describes after it.
+        self._plug_ok = self._blaster_ok = self._probes_ok = None
+        self._probes_quiet_at = None
+        self._followed_at = None
+        self._mode_changed_at = None
+        self._stay_held = None
+        self._retrying = None
+        self._retry_after = None
+        self._reset_trim()
+
+        if not on:
+            self._button_delta, self._button_power = 0, False
+            self._button_until = None
+            await self.stop_rehearsal(power_off=False)
+            self._abandon_precondition("HydroSnooze was switched off")
+            self._set_state(
+                system_on=False,
+                power=Power.OFF,
+                current_stage=None,
+                observed_power_w=None,
+                observed_flow_c=None,
+                observed_return_c=None,
+                observed_room_c=None,
+                inferred_activity=Activity.UNKNOWN,
+            )
+            self.events.info(
+                SYSTEM_KIND,
+                "HydroSnooze switched off. Nothing runs and nothing is sent to the unit "
+                "until it is switched back on, and the unit is taken to be off or unplugged.",
+            )
+            return self.state
+
+        now = self.clock.now()
+        plan = self.scheduler.plan_in_progress(self.schedule, now)
+        step = self.scheduler.stage_now(self.schedule, now)
+        here = Job("stage", plan, step) if plan is not None and step is not None else None
+        for job in [
+            *self.scheduler.missed(self.schedule, now),
+            *self.scheduler.cancelled(self.schedule, now),
+        ]:
+            if here is None or job.key != here.key:
+                self.scheduler.fired.mark(job, cancelled=True)
+        self._set_state(
+            system_on=True, power=Power.UNKNOWN, assumed_mode=None, assumed_target_c=None
+        )
+        # The part the night has reached, if it is one. Left to the tick while
+        # it would still offer it; past that, a stage is offered only for a few
+        # minutes after it starts, and switched on at four the bed would wait
+        # for Wake with the unit off. So it is run now, on its own task, because
+        # this is somebody waiting on a switch and it is forty presses.
+        resume = (
+            here is not None
+            and not self.scheduler.fired.has_fired(here)
+            and self.scheduler.due(self.schedule, now) != here
+        )
+        if here is not None and step is not None and resume:
+            self.events.info(
+                SYSTEM_KIND,
+                f"HydroSnooze switched on. {step.label} is running, so the unit is being "
+                f"put on it now: {step.temp_c}C until {step.ends_at:%H:%M}.",
+            )
+            self._resume_task = asyncio.create_task(self._resume(here), name="resume")
+        else:
+            self.events.info(
+                SYSTEM_KIND,
+                "HydroSnooze switched on. The schedule runs from here, and the plug is "
+                "asked straight away whether the unit is on.",
+            )
+        await self._sample_power()
+        return self.state
+
+    async def _resume(self, job: Job) -> None:
+        """The running part, run late, and marked the way the tick marks it."""
+        assert job.step is not None
+        if await self._run_stage(job.plan, job.step):
+            self.scheduler.fired.mark(job)
+
     # --- The switch over all of Autopilot -------------------------------------
 
     def _autopilot_on(self) -> bool:
@@ -2797,6 +2961,7 @@ class Service:
         await what()
 
     async def power_on(self) -> None:
+        self._refuse_while_off()
         async with self._lock:
             try:
                 await self._through_a_reboot(self.commands.power_on)
@@ -2813,6 +2978,7 @@ class Service:
         with the app in their hand, and they can reach the Restart blaster button
         themselves if the answer they get is that nothing arrived.
         """
+        self._refuse_while_off()
         self._abandon_precondition("the unit was switched off")
         async with self._lock:
             try:
@@ -2835,6 +3001,7 @@ class Service:
         the next sample, within thirty seconds, and until then the app says so
         rather than showing a value nothing confirmed.
         """
+        self._refuse_while_off()
         self._abandon_precondition("the power button was pressed")
         async with self._lock:
             try:
@@ -2844,6 +3011,7 @@ class Service:
                 self._fail("power", exc, power=Power.UNKNOWN)
 
     async def reboot_blaster(self) -> None:
+        self._refuse_while_off()
         """Restart the blaster board.
 
         For the failure the device bar cannot see: the board answering, every
@@ -2894,6 +3062,7 @@ class Service:
         decides. A cooling correction uses the night's own speed, which is Quiet
         unless it has been changed, because this happens next to a sleeping head.
         """
+        self._refuse_while_off()
         mode = self.mode_for_now(target_c)
         stage = self.state.current_stage
         async with self._lock:
@@ -2945,6 +3114,7 @@ class Service:
         press that unmuted it would beep. It is a one-time setup action, done from
         the app once the codes are captured.
         """
+        self._refuse_while_off()
         async with self._lock:
             try:
                 await self.commands.mute()
@@ -2960,6 +3130,7 @@ class Service:
                 self._fail("mute", exc)
 
     async def set_mode(self, mode: Mode) -> None:
+        self._refuse_while_off()
         async with self._lock:
             try:
                 await self.commands.set_mode(mode)

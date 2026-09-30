@@ -188,6 +188,12 @@ export interface ApiClient {
   info(): Promise<ServiceInfo>
 
   getState(): Promise<DeviceState>
+  /**
+   * HydroSnooze, all of it, on or off. Off, no night runs, nothing is sent to the
+   * unit and it is taken to be off or unplugged; every command is refused until
+   * it is back on. On picks up whatever part of tonight has been reached.
+   */
+  setSystem(on: boolean): Promise<DeviceState>
   getSchedule(): Promise<Schedule>
 
   /**
