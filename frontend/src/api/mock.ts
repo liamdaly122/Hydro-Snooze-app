@@ -1430,7 +1430,7 @@ function preconditioningFor(firstTempC: number): Preconditioning {
 /**
  * Mirrors `modes_for` in backend/hydrosnooze/models.py.
  *
- * Cooling reaches 15 to 35 and warming reaches 25 to 55, so between 25 and 35
+ * Cooling reaches 15 to 30 and warming reaches 25 to 55, so between 25 and 30
  * both modes hold the number and only the direction of travel says which one can
  * actually move the bed there. That makes a stage's mode depend on the stage
  * before it, so the night is resolved in order.

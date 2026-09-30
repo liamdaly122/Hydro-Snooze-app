@@ -70,25 +70,33 @@ def test_a_bed_still_closing_on_the_target_is_left_to_get_there():
 # --- Stay on target off: where a warm part swaps -------------------------------------------
 
 
-def mode_for(running: Mode, bed: float) -> Mode | None:
-    return quieter_mode(32, running, bed, Mode.QUIET, cap_c=40,
+def mode_for(running: Mode, bed: float, target: int = 29) -> Mode | None:
+    return quieter_mode(target, running, bed, Mode.QUIET, cap_c=40,
                         arrived_c=hold.QUIET_AT_C, fallen_c=hold.WARM_AGAIN_C)
 
 
 def test_off_a_warm_part_goes_quiet_at_the_number():
     """What the Balanced level did."""
-    assert mode_for(Mode.WARMING, 32.0) is Mode.QUIET
-    assert mode_for(Mode.WARMING, 31.9) is None
+    assert mode_for(Mode.WARMING, 29.0) is Mode.QUIET
+    assert mode_for(Mode.WARMING, 28.9) is None
 
 
 def test_off_it_warms_again_a_degree_below():
-    assert mode_for(Mode.QUIET, 31.0) is Mode.WARMING
-    assert mode_for(Mode.QUIET, 31.1) is None
+    assert mode_for(Mode.QUIET, 28.0) is Mode.WARMING
+    assert mode_for(Mode.QUIET, 28.1) is None
+
+
+def test_off_a_warm_part_above_30_never_goes_quiet():
+    """Cooling stops at 30 on this unit. Asked for 32, it went round to 16 and
+    pulled the bed down for half an hour at a time: the sawtooth under a warm
+    part that no Hold level could shift."""
+    assert mode_for(Mode.WARMING, 33.0, target=32) is None
+    assert mode_for(Mode.WARMING, 31.0, target=31) is None
 
 
 def test_the_old_behaviour_is_the_quiet_level():
-    assert quieter_mode(32, Mode.WARMING, 31.5, Mode.QUIET, cap_c=40) is Mode.QUIET
-    assert quieter_mode(32, Mode.QUIET, 30.0, Mode.QUIET, cap_c=40) is Mode.WARMING
+    assert quieter_mode(29, Mode.WARMING, 28.5, Mode.QUIET, cap_c=40) is Mode.QUIET
+    assert quieter_mode(29, Mode.QUIET, 27.0, Mode.QUIET, cap_c=40) is Mode.WARMING
 
 
 # --- The service ----------------------------------------------------------------------------
@@ -227,8 +235,13 @@ def correct(svc: Service, step, now=T0) -> list[Mode]:
 
 
 def test_off_a_warm_part_at_the_number_goes_quiet(service):
-    service.bed = 32.0
-    assert correct(service, rem(service)) == [Mode.QUIET]
+    service.bed = 29.0
+    assert correct(service, replace(rem(service), temp_c=29)) == [Mode.QUIET]
+
+
+def test_off_a_warm_part_above_what_cooling_reaches_keeps_warming(service):
+    service.bed = 32.5
+    assert correct(service, rem(service)) == []
 
 
 def test_on_a_warm_part_at_the_number_keeps_warming(service):

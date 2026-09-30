@@ -70,8 +70,17 @@ class Tristate(str, Enum):
 #
 # Not one 15-55 range. It depends on the mode, and getting this wrong is how you
 # end up railing the wrong number of presses.
+#
+# Cooling stops at 30 on the real unit, not the 35 the manual gives. Found in the
+# journal for 29 and 30 September: every cooling setting up to 30 landed, and
+# every one from 31 up did not. A press of Cooler on the bedside at REM 34 asked
+# quiet for 31, which is a rail to 15 and sixteen presses up, and the unit ended
+# on 15: fifteen presses to reach 30 and the sixteenth back round to the bottom.
+# The trims after it asked for 32 to 35 and left the unit at 16 to 19 all
+# through REM. So above 30 only warming can be asked, and nothing sent in a
+# cooling mode can reach the top and wrap.
 
-COOLING_RANGE = (15, 35)
+COOLING_RANGE = (15, 30)
 WARMING_RANGE = (25, 55)
 
 MODE_RANGE: dict[Mode, tuple[int, int]] = {
@@ -144,6 +153,18 @@ DEFAULT_LEAD_MINUTES: dict[Mode, int] = {
     Mode.WARMING: 30,
 }
 
+#: The spans those were set against, the manual's 15 to 35 and 25 to 55. Kept
+#: apart from the ranges on purpose: a range is what the unit can be set to, this
+#: is how fast it moves. Finding that cooling cannot be set above 30 says nothing
+#: about how quickly it pulls a bed down, and dividing by the new range would
+#: have made every estimated head start in cooling a third longer.
+LEAD_SPAN_C: dict[Mode, int] = {
+    Mode.QUIET: 20,
+    Mode.STANDARD: 20,
+    Mode.TURBO: 20,
+    Mode.WARMING: 30,
+}
+
 #: Pre-conditioning runs Turbo when it is cooling, because it is the fastest way
 #: to pull the bed down before bedtime.
 PRECOOL_MODE = Mode.TURBO
@@ -189,10 +210,11 @@ def mode_for_target(
 ) -> Mode:
     """Whether a stage cools or warms.
 
-    Two thirds of this is forced. Below 25C it has to cool, because warming mode
-    cannot express a number that low. Above 35C it has to warm, because cooling
-    cannot. Between the two, 25 to 35, the ranges overlap and both modes can be
-    set to the number, so the number alone does not decide anything.
+    Most of this is forced. Below 25C it has to cool, because warming mode
+    cannot express a number that low. Above 30C it has to warm, because cooling
+    cannot on this unit (see COOLING_RANGE). Between the two, 25 to 30, the
+    ranges overlap and both modes can be set to the number, so the number alone
+    does not decide anything.
 
     What decides it there is the direction the bed has to move, because only one
     mode can actually move it. Asking for 25C on the way down from 30C in warming
@@ -301,8 +323,8 @@ def quieter_mode(
     cannot put heat back. So the moment the bed genuinely drops away from the
     number, only warming can bring it up, and the noise is worth it again.
 
-    Outside the 25 to 35 overlap there is no decision to make: below 25 only
-    cooling can express the number and above 35 only warming can.
+    Outside the 25 to 30 overlap there is no decision to make: below 25 only
+    cooling can express the number and above 30 only warming can.
     """
     if bed_c is None:
         return None
@@ -436,8 +458,7 @@ def preconditioning_for(
             f"measured on recent nights.",
         )
 
-    low, high = range_for(mode)
-    per_degree = DEFAULT_LEAD_MINUTES[mode] / (high - low)
+    per_degree = DEFAULT_LEAD_MINUTES[mode] / LEAD_SPAN_C[mode]
     lead = PRECONDITION_BASE_MINUTES + abs(gap) * per_degree
     return Preconditioning(
         mode,

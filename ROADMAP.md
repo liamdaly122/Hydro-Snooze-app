@@ -265,7 +265,7 @@ now.
 ## Preferring the quiet half of the unit
 
 Warming mode on this unit sounds like a geiger counter, and it runs next to someone asleep. Cooling
-is silent. Between 25 and 35°C both modes can be set to the same number, so for most of a night
+is silent. Between 25 and 30°C both modes can be set to the same number, so for most of a night
 there is a real choice, and until the probes went on there was no way to make it.
 
 `mode_for_target` decides at plan time, from the stage before it. That is a prediction, made hours
@@ -338,6 +338,25 @@ over as off (`backend/hydrosnooze/hold.py`).
 The one thing it cannot do: a mode only pushes one way. Warming cannot take body heat out of a warm
 part, and cooling cannot put heat back into a cool one. If the bed sits over a warm part's number
 with it on, the trim turns the setting down, but only the room and the hoses take the heat away.
+
+## Cooling stops at 30, not 35
+
+Found on 30 September, chasing a bedside Cooler that sent the unit to 15. The manual gives cooling
+as 15 to 35 and everything here was built on that. The journal says otherwise: every cooling
+setting at 30 or below landed, and every one from 31 up did not. At REM 34, Cooler three times asked
+quiet for 31, which is a rail to 15 and sixteen presses up. Fifteen reach 30 and the sixteenth goes
+round to 15. The trims after it asked for 32 to 35 and left the unit at 16 to 19 for the rest of REM.
+
+It explains more than the button. With Stay on target off, a warm part above 30 went quiet at the
+number, and "quiet at 32" was really cooling at 16 for the half hour before warming could come
+back. That is very likely the two degree sawtooth under a warm part that none of the three Hold
+levels could shift, because all three swapped into it.
+
+Now `COOLING_RANGE` is 15 to 30. Above 30 only warming can be asked, so Cooler in a warm part above
+30 turns warming down rather than switching to cooling, the trim stops at 30 in a cooling mode, and
+a warm part above 30 never goes quiet. The simulated unit has its own idea of the top now
+(`UNIT_COOLING_TOP_C`), rather than borrowing the app's, which is how the manual's number went
+unnoticed there too.
 
 ---
 

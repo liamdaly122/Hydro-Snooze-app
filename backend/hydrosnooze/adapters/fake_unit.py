@@ -21,6 +21,7 @@ The behaviour that matters, and that the sequences are built to survive:
 - while the sleep schedule is running the temperature and timer buttons do nothing
   AND do not wake the display, which is the trap the wake preamble must avoid
 - the three cooling speeds cycle and wrap, and can still be changed mid-schedule
+- cooling tops out at 30, and a press of temp_up at 30 lands back on 15
 - warming is an absolute destination, and cooling from warming lands on Quiet
 - inside the setup wizard presses act immediately, and eight seconds of silence
   arms the schedule with whatever temperatures were already saved
@@ -60,6 +61,17 @@ DISPLAY_TIMEOUT = timedelta(minutes=5)
 # display, the first power press switched the unit off, and the second switched it
 # back on. The note that used to sit here said "worth narrowing if a power off
 # ever fails with the display awake", which is exactly what happened.
+
+
+
+#: Where cooling stops on the real unit, and what a press past it does.
+#:
+#: ASSUMPTION, inferred rather than watched: the journal for 29 and 30 September
+#: has quiet asked for 31, a rail to 15 and sixteen presses up, and the unit
+#: ending on 15. Everything asked for at 30 or below landed. So the top is 30 and
+#: a press past it goes round to the bottom rather than stopping. Confirm in
+#: daylight with the remote: Quiet, then temp_up until it stops or wraps.
+UNIT_COOLING_TOP_C = 30
 
 
 @dataclass
@@ -249,7 +261,15 @@ class FakeUnit:
                 self.adjusting = True
                 return self._result(button, True, "switched the display to the target")
             low, high = range_for(self.mode)
+            if self.mode.is_cooling:
+                # The unit's own top, not the app's idea of it. Taking it from
+                # range_for is how the manual's 35 went unnoticed here for a
+                # month: the simulator believed whatever the app believed.
+                high = UNIT_COOLING_TOP_C
             step = 1 if button is Button.TEMP_UP else -1
+            if self.mode.is_cooling and step > 0 and self.target >= high:
+                self.targets[self.mode] = low
+                return self._result(button, False, f"past the top, round to {low}C")
             self.targets[self.mode] = max(low, min(high, self.target + step))
             return self._result(button, False, f"target {self.target}C")
 

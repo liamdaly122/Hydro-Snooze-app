@@ -233,7 +233,7 @@ async def post_tonight_stage(request: Request, body: StageTonight) -> dict[str, 
         replace(st, temp_c=body.temp_c) if st.stage is body.stage else st
         for st in running.stages
     ]
-    # The whole night, not the one stage. Inside the 25 to 35 overlap a stage's
+    # The whole night, not the one stage. Inside the 25 to 30 overlap a stage's
     # mode depends on the temperature before it, so a stage can only be judged in
     # the sequence it sits in. _guard_night's docstring is where that is argued;
     # this used to call _guard_temperature with two of its three arguments and
@@ -646,7 +646,7 @@ async def post_activate_profile(request: Request, profile_id: int) -> dict[str, 
     # happens to agree today. Asking mode_for_target per stage with nothing to
     # come from contradicts modes_for's own contract, which says outright that a
     # night has to be resolved as a sequence because a stage's mode inside the
-    # 25 to 35 overlap depends on the temperature before it. The two agree only
+    # 25 to 30 overlap depends on the temperature before it. The two agree only
     # because every cooling speed currently shares one range.
     _guard_night(service, list(profile.stages), profile.cooling_speed)
     _guard_room(service, list(profile.stages))
