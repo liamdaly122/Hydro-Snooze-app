@@ -314,13 +314,17 @@ CREATE TABLE IF NOT EXISTS holiday (
 --
 -- `hold` is Stay on target (hold.py): 'target' on, 'balanced' off. It held one
 -- of three levels, quiet, balanced or close, until they became one switch.
+--
+-- `system_on` is the switch over everything (Service.set_system). Off, nothing
+-- runs and nothing is sent, and the unit is taken to be off or unplugged.
 CREATE TABLE IF NOT EXISTS preferences (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     learning_on  INTEGER NOT NULL DEFAULT 1,
     timing_since TEXT,
     autopilot_on INTEGER NOT NULL DEFAULT 1,
     hold         TEXT    NOT NULL DEFAULT 'balanced',
-    tariff_p     REAL
+    tariff_p     REAL,
+    system_on    INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -634,6 +638,11 @@ class Database:
         # What electricity costs, for Trends. NULL until it is set.
         if "tariff_p" not in prefs:
             self._db.execute("ALTER TABLE preferences ADD COLUMN tariff_p REAL")
+        # The switch over everything. On, on every database from before it.
+        if "system_on" not in prefs:
+            self._db.execute(
+                "ALTER TABLE preferences ADD COLUMN system_on INTEGER NOT NULL DEFAULT 1"
+            )
 
         # Whether a night's note was submitted and put away. Not on any row
         # written before there was a Submit button, which is what nought says.
@@ -1336,6 +1345,19 @@ class Database:
         self._db.execute(
             "INSERT INTO preferences (id, autopilot_on) VALUES (1, ?) "
             "ON CONFLICT(id) DO UPDATE SET autopilot_on = excluded.autopilot_on",
+            (int(on),),
+        )
+        self._db.commit()
+
+    def system_on(self) -> bool:
+        """The switch over everything. On until it is switched off."""
+        row = self._db.execute("SELECT system_on FROM preferences WHERE id = 1").fetchone()
+        return True if row is None else bool(row["system_on"])
+
+    def set_system_on(self, on: bool) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, system_on) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET system_on = excluded.system_on",
             (int(on),),
         )
         self._db.commit()

@@ -497,6 +497,18 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
     return service.schedule_as_shown()
 
 
+class SystemSwitch(BaseModel):
+    on: bool
+
+
+@router.post("/system")
+async def post_system(request: Request, body: SystemSwitch) -> dict[str, object]:
+    """HydroSnooze, all of it, on or off. Off, no night runs, nothing is sent to
+    the unit, and it is taken to be off or unplugged. See Service.set_system.
+    The state that comes back carries `system_on`, as every live update does."""
+    return state_json(await _service(request).set_system(body.on))
+
+
 @router.post("/power/on")
 async def post_power_on(request: Request) -> dict[str, object]:
     service = _service(request)

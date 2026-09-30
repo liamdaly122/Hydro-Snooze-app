@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { DeviceBar } from './DeviceBar'
+import { Toggle } from './Toggle'
 import { Bolt, ChevronRight, Clock, Close, Snowflake, Sparkle, Suitcase } from './Icons'
 import { formatDay, formatDays, formatWatts, hasOtherTimes, parseDay } from '../domain'
 import type { ApiClient } from '../api/client'
@@ -109,6 +110,8 @@ export function SideMenu({
           </button>
         </div>
 
+        {state && <SystemSwitch client={client} state={state} />}
+
         <div className="drawer__devices">
           <DeviceBar health={health} connected={connected} />
         </div>
@@ -205,6 +208,63 @@ function Items({
         onClick={() => onOpen('holiday')}
       />
     </>
+  )
+}
+
+/**
+ * HydroSnooze, all of it, on or off.
+ *
+ * At the top, above the chips, because it is the one thing in here that changes
+ * what every other row means: off, the chips go grey, the alarm does not run and
+ * nothing any screen sends reaches the unit.
+ *
+ * Off asks first, and says the one thing it will not do: switch the unit off on
+ * the way out. It takes the unit to be off or unplugged, so if the plug says it
+ * is running, that is said plainly before anything changes.
+ */
+function SystemSwitch({ client, state }: { client: ApiClient; state: DeviceState }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function flip(on: boolean) {
+    if (!on) {
+      const running = state.power === 'on'
+      const sure = window.confirm(
+        running
+          ? 'The unit is on right now, and switching HydroSnooze off will not switch it off. ' +
+              'Switch it off or unplug it yourself. Switch HydroSnooze off anyway?'
+          : 'Switch HydroSnooze off? No night runs and nothing is sent to the unit until you ' +
+              'switch it back on.',
+      )
+      if (!sure) return
+    }
+    setBusy(true)
+    setError(null)
+    void client
+      .setSystem(on)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="drawer__system">
+      <div className="drawer__system-row">
+        <span className="drawer__text">
+          <span className="drawer__label">HydroSnooze</span>
+          {/* Amber for the state worth noticing, as Holiday is when it is on. */}
+          <span className={`drawer__sub${state.system_on ? '' : ' drawer__sub--on'}`}>
+            {state.system_on ? 'On. Nights run as scheduled' : 'Off. Nothing runs or is sent'}
+          </span>
+        </span>
+        <Toggle
+          on={state.system_on}
+          onChange={(next) => !busy && flip(next)}
+          label="HydroSnooze on"
+          disabled={busy}
+        />
+      </div>
+      {error && <p className="footnote footnote--error">{error}</p>}
+    </div>
   )
 }
 

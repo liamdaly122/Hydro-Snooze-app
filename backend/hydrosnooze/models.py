@@ -1301,6 +1301,10 @@ class DeviceState:
     inferred_activity: Activity = Activity.UNKNOWN
     last_command_at: datetime | None = None
     last_error: str | None = None
+    #: The switch over everything (Service.set_system). Off, nothing runs and
+    #: nothing is sent, and the unit is taken to be switched off or unplugged.
+    #: Here rather than on its own endpoint so every phone sees it flip at once.
+    system_on: bool = True
 
     @property
     def can_set_temperature(self) -> bool:
@@ -1328,6 +1332,9 @@ class Health(str, Enum):
     DOWN = "down"
     SIMULATED = "simulated"
     UNKNOWN = "unknown"
+    #: HydroSnooze is switched off in the app, so nothing asks the device
+    #: anything. Not a fault, and not a colour on a dial either.
+    OFF = "off"
 
 
 #: How long a device can go unreachable before it stops being a wobble. Chosen

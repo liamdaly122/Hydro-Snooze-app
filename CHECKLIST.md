@@ -607,6 +607,13 @@ API rather than read. Read that before writing any of it.
 - [x] Step three: Full Autopilot. With Autopilot on, tonight's Deep and REM are chosen and set in
       the evening without asking, tests included; Back to usual undoes a night and the switch turns
       it off. The morning message says how a test night went
+- [x] One switch over everything, at the top of the menu. Off, no night runs, nothing is sent to
+      the unit by any route (the bedside buttons included), and the plug, blaster and probes are
+      not asked anything: the unit is taken to be off or unplugged, and the chips go grey rather
+      than red. It will not switch the unit off on the way out, and says so first if the plug has
+      it running. On picks up the part of the night it has reached, without ringing through the
+      parts that went by. **Tested against the simulated unit.** The first real use is the next
+      thing to look at
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

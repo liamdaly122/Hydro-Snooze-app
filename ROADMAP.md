@@ -476,3 +476,30 @@ is what "off" has always meant. Sleep timing now measures each night from its ow
 out, so the weekend nights feed it too, and Full Autopilot can take the same decision over
 without anything underneath changing.
 
+---
+
+## One switch for all of it
+
+The Alarm card's Run automatically stops future nights, and Holiday mode stops a run of them.
+Neither stops the app from talking to the unit, and neither is for the times the unit is not there
+at all: away being cleaned, moved to another room, or a month of not using it. Then every check of
+the plug and the blaster turns into a warning about something that is simply unplugged.
+
+So there is a switch above everything else in the menu. Off means off, not paused:
+
+- no night is planned, so nothing is due and nothing is missed
+- nothing is sent to the unit by any route. The power button goes from the header, the home screen
+  says it is off and offers the way back on, the bedside buttons are counted and ignored, and
+  anything that would send is refused with one plain answer
+- nothing asks the plug, the blaster or the probe board anything, and their chips go grey. With no
+  readings, a night slept with it off cannot count on the scoreboard
+- it does not switch the unit off on the way out. It takes the unit to be off or unplugged, and if
+  the plug says it is running, the menu says so before it lets the switch go off
+
+What carries on is the Pi's heartbeat, since the Pi is still up, Withings, and every setting.
+
+On is a fresh start. Anything about the unit from before is forgotten, and any part of tonight that
+went by while it was off is put down as not run, quietly, rather than rung through as missed. The
+part the night has reached, if it has reached one, is run straight away, so switching it back on
+at four in the morning means REM now rather than a bed that waits for Wake.
+

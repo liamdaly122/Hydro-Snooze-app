@@ -41,6 +41,7 @@ def state_json(state: DeviceState) -> dict[str, Any]:
         "inferred_activity": state.inferred_activity.value,
         "last_command_at": _iso(state.last_command_at),
         "last_error": state.last_error,
+        "system_on": state.system_on,
     }
 
 

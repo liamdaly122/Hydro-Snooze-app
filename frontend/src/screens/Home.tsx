@@ -4,6 +4,7 @@ import { TonightBanner } from '../components/TonightBanner'
 import { HolidayBanner } from '../components/HolidayBanner'
 import { KeepTonight, NudgeControls } from '../components/TonightControls'
 import { SuggestionCard } from '../components/Suggestion'
+import { SystemOffCard } from '../components/SystemOffCard'
 import type { ApiClient } from '../api/client'
 import type { DeviceState, Holiday, Schedule, Stage, Suggestion, TonightState } from '../types'
 
@@ -88,6 +89,12 @@ export function Home({
     // app said the opposite while doing it. The permanent change is the Save as
     // my usual pill inside this card, and that is the only thing that should be.
     run(client.setStageTonight(stage, tempC))
+  }
+
+  // Switched off, there is nothing here that could reach the unit, so there is
+  // nothing to offer but the way back on.
+  if (!state.system_on) {
+    return <SystemOffCard onTurnOn={() => client.setSystem(true)} />
   }
 
   return (

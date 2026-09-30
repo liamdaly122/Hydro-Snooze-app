@@ -132,6 +132,7 @@ export class MockApiClient implements ApiClient {
     inferred_activity: 'cooling',
     last_command_at: nowIso(),
     last_error: null,
+    system_on: true,
   }
 
   private schedule: Schedule = {
@@ -322,6 +323,39 @@ export class MockApiClient implements ApiClient {
     return { ...this.state }
   }
 
+  /** As on the Pi: off takes the unit to be unplugged, on starts from knowing nothing. */
+  async setSystem(on: boolean): Promise<DeviceState> {
+    await sleep(150)
+    if (on === this.state.system_on) return { ...this.state }
+    if (!on) {
+      this.patchState({
+        system_on: false,
+        power: 'off',
+        current_stage: null,
+        observed_power_w: null,
+        observed_flow_c: null,
+        observed_return_c: null,
+        observed_room_c: null,
+        inferred_activity: 'unknown',
+      })
+      this.log('info', 'system', 'HydroSnooze switched off. Nothing runs and nothing is sent to the unit.')
+    } else {
+      this.patchState({ system_on: true, power: 'off', inferred_activity: 'off', observed_power_w: 0.4 })
+      this.log('info', 'system', 'HydroSnooze switched on. The schedule runs from here.')
+    }
+    this.emit({ health: this.healthNow() })
+    return { ...this.state }
+  }
+
+  /** What the Pi says to anything that would send while switched off. */
+  private refuseWhileOff(): void {
+    if (!this.state.system_on) {
+      throw new ApiError(
+        'HydroSnooze is switched off, so nothing is sent to the unit. Switch it back on from the menu first.',
+      )
+    }
+  }
+
   async getSchedule(): Promise<Schedule> {
     return { ...this.schedule }
   }
@@ -344,6 +378,7 @@ export class MockApiClient implements ApiClient {
   }
 
   async pressPower(): Promise<void> {
+    this.refuseWhileOff()
     await sleep(400)
     // Unknown, because a single press with nothing verifying it means exactly
     // that. The pretend plug settles it a moment later, the same way the real
@@ -353,6 +388,7 @@ export class MockApiClient implements ApiClient {
   }
 
   async powerOn(): Promise<void> {
+    this.refuseWhileOff()
     await sleep(400)
     this.patchState({
       power: 'on',
@@ -364,6 +400,7 @@ export class MockApiClient implements ApiClient {
   }
 
   async powerOff(): Promise<void> {
+    this.refuseWhileOff()
     await sleep(400)
     this.patchState({
       power: 'off',
@@ -380,6 +417,18 @@ export class MockApiClient implements ApiClient {
   }
 
   async getHealth(): Promise<DeviceHealth[]> {
+    return this.healthNow()
+  }
+
+  private healthNow(): DeviceHealth[] {
+    if (!this.state.system_on) {
+      const detail = 'Switched off with HydroSnooze. Nothing asks it anything until that is back on'
+      return [
+        { name: 'plug', health: 'off', detail, last_ok_at: null },
+        { name: 'blaster', health: 'off', detail, last_ok_at: null },
+        { name: 'probes', health: 'off', detail, last_ok_at: null },
+      ]
+    }
     // Seed data has no hardware behind it, so it says so rather than showing
     // green for devices that are not there.
     return [
@@ -394,6 +443,7 @@ export class MockApiClient implements ApiClient {
   }
 
   async setTemperature(targetC: number): Promise<void> {
+    this.refuseWhileOff()
     if (targetC > MAX_TEMPERATURE_C) {
       throw new ApiError(`Refused: ${targetC}C is above the ${MAX_TEMPERATURE_C}C safety cap.`)
     }

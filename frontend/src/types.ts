@@ -133,7 +133,8 @@ export interface Schedule {
   other_night_minutes: number | null
 }
 
-export type Health = 'ok' | 'degraded' | 'down' | 'simulated' | 'unknown'
+/** `off`: HydroSnooze is switched off, so nothing asks the device anything. */
+export type Health = 'ok' | 'degraded' | 'down' | 'simulated' | 'unknown' | 'off'
 
 /** One thing that can independently stop working, and how it is doing. */
 export interface DeviceHealth {
@@ -163,6 +164,11 @@ export interface DeviceState {
   inferred_activity: Activity
   last_command_at: string | null
   last_error: string | null
+  /**
+   * The switch over everything. Off, no night runs, nothing is sent to the unit,
+   * and it is taken to be switched off or unplugged. See Service.set_system.
+   */
+  system_on: boolean
 }
 
 export interface PowerSample {
