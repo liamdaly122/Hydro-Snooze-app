@@ -35,10 +35,10 @@ async def test_set_temperature_lands_exactly_from_any_starting_state(
 
 
 async def test_set_temperature_sends_exactly_two_plus_rail_plus_count(rig):
-    rig.unit_on(mode=Mode.QUIET, target=30)
+    rig.unit_on(mode=Mode.QUIET, target=35)
     await rig.commands.set_temperature(19, Mode.QUIET)
-    # 2 preamble + 20 rail + 4 up
-    assert rig.tx.presses_sent == 2 + 20 + 4
+    # 2 preamble + 25 rail + 4 up
+    assert rig.tx.presses_sent == 2 + 25 + 4
 
 
 async def test_warming_rails_thirty_five_not_twenty_five(rig):

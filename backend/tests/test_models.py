@@ -96,17 +96,16 @@ def test_the_cooling_speed_carries_through_to_cooling_stages_only():
 @pytest.mark.parametrize(
     ("mode", "expected_range", "expected_rail"),
     [
-        (Mode.QUIET, (15, 30), 20),
-        (Mode.STANDARD, (15, 30), 20),
-        (Mode.TURBO, (15, 30), 20),
+        (Mode.QUIET, (15, 35), 25),
+        (Mode.STANDARD, (15, 35), 25),
+        (Mode.TURBO, (15, 35), 25),
         (Mode.WARMING, (25, 55), 35),
     ],
 )
-def test_ranges_and_rail_counts(mode, expected_range, expected_rail):
-    # 20 presses in cooling and 35 in warming: the span plus five, which is what
+def test_ranges_and_rail_counts_match_the_manual(mode, expected_range, expected_rail):
+    # 25 presses in cooling and 35 in warming: the span plus five, which is what
     # makes a temperature set idempotent from any starting point and what absorbs
-    # the two discarded presses of the wake preamble. Cooling is 15 to 30, not the
-    # manual's 35: see COOLING_RANGE.
+    # the two discarded presses of the wake preamble.
     assert range_for(mode) == expected_range
     assert rail_count(mode) == expected_rail
 
@@ -149,18 +148,11 @@ def test_power_thresholds_classify_the_plug_reading(watts, expected):
 # which one depends on where the bed is coming from.
 
 
-@pytest.mark.parametrize("target", [25, 28, 30])
+@pytest.mark.parametrize("target", [25, 30, 35])
 def test_coming_down_into_the_overlap_cools(target):
     """The bug this fixes: 30C to 25C in warming mode sets the right number and
     then sits idle while the bed coasts down on its own."""
     assert mode_for_target(target, Mode.QUIET, coming_from_c=target + 5) is Mode.QUIET
-
-
-@pytest.mark.parametrize("target", [31, 33, 35])
-def test_coming_down_above_30_still_warms(target):
-    """Cooling cannot be set above 30 on this unit. Asked for 31 it went round
-    to 15, which is what a bedside Cooler did at REM 34 on 29 and 30 September."""
-    assert mode_for_target(target, Mode.QUIET, coming_from_c=target + 3) is Mode.WARMING
 
 
 @pytest.mark.parametrize("target", [25, 30, 35])

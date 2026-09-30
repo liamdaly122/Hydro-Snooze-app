@@ -73,7 +73,7 @@ export function TemperatureCard({
 
   // The full span a temperature can occupy, not the current mode's range.
   //
-  // Cooling covers 15 to 30 and warming covers 25 to 55, so the union runs 15 to
+  // Cooling covers 15 to 35 and warming covers 25 to 55, so the union runs 15 to
   // 55 with no gap: below 25 it cools, at 25 and above it warms. Bounding the
   // buttons by whichever mode the current value happens to fall in trapped it at
   // exactly 25, because warming's floor IS 25, so the minus button disabled
@@ -264,7 +264,7 @@ function StageNote({
       note = say(measured, `${label} is running. Changing this is for tonight only.`)
     } else note = measured
   } else if (value !== null) {
-    // The stage's mode when the service has said, because between 25 and 30
+    // The stage's mode when the service has said, because between 25 and 35
     // both modes reach the number and the stage before decides. A Wake at 26
     // after a REM at 28 cools, and reading the number alone said it heats.
     const warms = mode !== null ? mode === 'warming' : value >= WARMING_FLOOR_C

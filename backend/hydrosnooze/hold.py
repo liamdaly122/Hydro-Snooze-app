@@ -3,7 +3,7 @@
 Two things decide how close the bed stays to what a part asks for.
 
 **Stay on target.** Warming mode on this unit sounds like a geiger counter and
-cooling is silent, and between 25 and 30C both can be set to the same number.
+cooling is silent, and between 25 and 35C both can be set to the same number.
 Each part starts in the mode its direction calls for: a part that steps the
 temperature up warms, one that steps it down cools (models.mode_for_target).
 The question is whether it stays there.

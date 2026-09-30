@@ -21,12 +21,10 @@ export const MODE_LABEL: Record<Mode, string> = {
   warming: 'Warming',
 }
 
-/** Cooling stops at 30 on the real unit, not the manual's 35. See COOLING_RANGE
- *  in backend/hydrosnooze/models.py. */
 export const MODE_RANGE: Record<Mode, [number, number]> = {
-  quiet: [15, 30],
-  standard: [15, 30],
-  turbo: [15, 30],
+  quiet: [15, 35],
+  standard: [15, 35],
+  turbo: [15, 35],
   warming: [25, 55],
 }
 
@@ -98,7 +96,7 @@ export interface SleepStage {
   temp_c: number
   /**
    * Derived by the service, not chosen, and derived from the whole night rather
-   * than this stage. Between 25 and 30 both modes reach the number, so which one
+   * than this stage. Between 25 and 35 both modes reach the number, so which one
    * a stage lands in depends on the temperature before it.
    */
   mode: Mode

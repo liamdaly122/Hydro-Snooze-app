@@ -1442,7 +1442,7 @@ class Service:
         # The plan's mode, unless the one actually running can reach the number
         # too. Keeping the running mode preserves whatever _correct_mode swapped
         # to for quiet; keeping it when it cannot express the target means a legal
-        # request fails, because cooling stops at 30 and warming starts at 25.
+        # request fails, because cooling stops at 35 and warming starts at 25.
         #
         # With Stay on target there is nothing to preserve: the part runs in the
         # mode its direction calls for (_stay_mode), and a unit found in the other

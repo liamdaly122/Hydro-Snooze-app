@@ -178,9 +178,8 @@ reading would have found that.
 
 ### The one open assumption, now answered
 
-Cooling covers 15 to 30°C and warming covers 25 to 55°C, so between 25 and 30 both modes can be set
-to the same number and the app has to pick one. The manual gives cooling as 15 to 35, but on this
-unit a cooling setting above 30 goes round to 15, found on 29 September. It picks from the direction the bed has to move: a
+Cooling covers 15 to 35°C and warming covers 25 to 55°C, so between 25 and 35 both modes can be set
+to the same number and the app has to pick one. It picks from the direction the bed has to move: a
 stage climbing into that band warms, a stage dropping into it, 30°C down to 25°C for instance,
 cools. That rested on warming mode only ever heating.
 
@@ -1340,7 +1339,7 @@ wrong out of the blast radius of the thing that goes wrong.
 | Watts look right but the state is wrong | The three thresholds are not separating the four states. Re-read them with `./scripts/plug.py` and put each boundary halfway between |
 | Presses sent, unit ignores them | First **Restart the blaster** on the Status card, or `./scripts/press.py power` while watching the unit. A board can answer, report every press as sent, and emit nothing: infrared is one-way, so green only ever means the board is on the network. If a restart fixes it, that is the fault, and `uptime` on `http://hydrosnooze-ir.local` says whether it wedged or rebooted. If a restart does not fix it, the codes are wrong or the blaster cannot see the unit: back to step 4 |
 | A stage did not change | Check the event log for a missed stage warning, then the power chart for whether the draw changed |
-| A stage set the right number but the bed never moved | Check which mode it used. If a stage between 25 and 30°C is warming when the bed needed to come down, the assumption from step 1 was wrong |
+| A stage set the right number but the bed never moved | Check which mode it used. If a stage between 25 and 35°C is warming when the bed needed to come down, the assumption from step 1 was wrong |
 | The unit was still on in the morning | Check the event log for the power off entry. Switching off is two `temp_down` presses to wake the display and then **exactly one** press of power. More than one press of power in the log is the 11 September bug back again: the spare press lands on a unit that has just gone off and switches it straight back on. Then check the Shelly's daily schedule is still set |
 | Everything unreachable at once: plug, blaster and probes | Not three devices, one network. Every device in this project is on the Virgin booster rather than the hub, so the booster is a load-bearing part of the system with nothing behind it. Check the Pi's own link first: `journalctl -k -u NetworkManager -u wpa_supplicant` around the time it went |
 | A board drops and will not come back until it is power cycled | Two access points answering to one SSID, which a hub plus a booster always is. `fast_connect` pins a board to one remembered radio and skips the scan that would find it again, so rebooting just repeats the mistake. It was removed from both boards on 19 September |

@@ -116,8 +116,8 @@ nothing to copy into `.env` unless a different unit reads differently.
       holds.** Flat 5 W for ninety seconds, against 166 W cooling and 306 W heating, so warming does
       not cool
 
-Cooling covers 15 to 30°C on this unit (the manual says 35: see below) and warming covers 25 to
-55°C, so between 25 and 30 both modes hold the same number and the app has to pick one. It picks from the direction the bed has to travel, and that
+Cooling covers 15 to 35°C and warming covers 25 to 55°C, so between 25 and 35 both modes hold the
+same number and the app has to pick one. It picks from the direction the bed has to travel, and that
 rested on warming only ever heating. The 5 W reading is itself the proof the bed was at or above
 25°C, because below it the unit would have been heating. So the direction rule is doing real work.
 
@@ -598,13 +598,6 @@ API rather than read. Read that before writing any of it.
       scoreboard, which nothing the mat measures could. Alcohol, Ill and Someone else in the
       bed leave a night out of the scoreboard, and say so; the other tags are recorded only
 - [ ] Rate a fortnight of mornings, so Wake has something to compare
-- [x] Cooling stops at 30, not the manual's 35. A bedside Cooler at REM 34 asked quiet for 31
-      and the unit ended on 15, on 29 and 30 September: sixteen presses up from 15, and the
-      sixteenth went round to the bottom. Every cooling setting at 30 or below had landed. The app
-      now never asks cooling for more than 30: above it only warming can be asked, the trim stops
-      at 30, and a warm part above 30 never goes quiet
-- [ ] In daylight, with the remote: Quiet, then temp_up until it stops or wraps. Confirm the top
-      is 30 and that the next press lands on 15 (`UNIT_COOLING_TOP_C` in `fake_unit.py`)
 - [x] Trends, at the top of History: 30 days, 90 days or a year of nights, the sleep
       score, deep and REM, time to fall asleep, the bed against the room, and the energy,
       each as a seven-night average over the nights themselves, set against the same
