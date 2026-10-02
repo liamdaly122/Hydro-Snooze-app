@@ -76,11 +76,19 @@ export const STAGE_ORDER: Stage[] = ['drift', 'deep', 'rem', 'wake']
  */
 export const MIN_STAGE_MINUTES = 15
 
-export const STAGE_LABEL: Record<Stage, string> = {
+/**
+ * What can be running: one of the four parts of a whole night, the one part of
+ * a Bedtime only night, or a nap. Only the four are ever in a schedule.
+ */
+export type Part = Stage | 'bedtime' | 'nap'
+
+export const STAGE_LABEL: Record<Part, string> = {
   drift: 'Drift',
   deep: 'Deep',
   rem: 'REM',
   wake: 'Wake',
+  bedtime: 'Bedtime',
+  nap: 'Nap',
 }
 
 /**
@@ -131,6 +139,16 @@ export interface Schedule {
   other_wake_time: string | null
   /** Lights out to alarm on those mornings, or null with no other times. */
   other_night_minutes: number | null
+  /**
+   * Bedtime only: ready by lights out, one temperature for `bedtime_minutes`,
+   * then off for the rest of the night. A setting, so it stays until switched
+   * back, and the four stages above are kept as they are underneath.
+   */
+  bedtime_only: boolean
+  bedtime_temp_c: number
+  bedtime_minutes: number
+  /** The mode that one part runs in, as the service works it out. */
+  bedtime_mode: Mode
 }
 
 /** `off`: HydroSnooze is switched off, so nothing asks the device anything. */
@@ -146,8 +164,8 @@ export interface DeviceHealth {
 
 export interface DeviceState {
   power: Power
-  /** Which part of the night is running. Known, not assumed: the app drives it. */
-  current_stage: Stage | null
+  /** Which part of the night is running, or a nap. Known, not assumed. */
+  current_stage: Part | null
   /** When a compressed rehearsal night ends, or null if none is running. */
   rehearsal_ends_at: string | null
   /** Set by us, never read back off the unit. */
@@ -169,6 +187,36 @@ export interface DeviceState {
    * and it is taken to be switched off or unplugged. See Service.set_system.
    */
   system_on: boolean
+  /** A nap under way. See backend/hydrosnooze/nap.py. */
+  nap: NapState | null
+}
+
+/** A nap under way. `ends_at` is null until the bed gets there, because that is
+ *  when its length starts counting. */
+export interface NapState {
+  temp_c: number
+  minutes: number
+  mode: Mode
+  started_at: string
+  expect_ready_at: string
+  ready_at: string | null
+  ends_at: string | null
+}
+
+/** What a nap would do before it starts. Without arguments, the last nap's. */
+export interface NapPreview {
+  temp_c: number
+  minutes: number
+  mode: Mode
+  ready_in_minutes: number
+  ready_at: string
+  ends_at: string
+  /** Whether the ready time is this bed's own, measured, or the estimate. */
+  measured: boolean
+  /** When tonight would start getting ready before the nap is over, ending it. */
+  cut_at: string | null
+  /** Why it cannot start now, when it cannot. */
+  blocked: string | null
 }
 
 export interface PowerSample {
@@ -449,6 +497,8 @@ export interface TonightState {
   times_changed: boolean
   /** Tonight has its own cooling speed. The usual one is on the schedule. */
   speed_changed: boolean
+  /** Tonight has its own Bedtime only temperature. Absent from older builds. */
+  bedtime_changed?: boolean
   nudge_c: number
   nudge_until: string | null
   /**
@@ -742,6 +792,7 @@ export interface NightNotePatch {
  *   skipped   tonight is not running
  *   no_mat    the Sleep Analyzer is not connected
  *   off       Autopilot is switched off
+ *   bedtime_only  Bedtime only is on, which has no Deep or REM to choose
  *   closed    no night ahead yet: suggestions open in the evening
  */
 export type SuggestionState =
@@ -754,6 +805,7 @@ export type SuggestionState =
   | 'by_hand'
   | 'skipped'
   | 'no_mat'
+  | 'bedtime_only'
   | 'closed'
 
 export interface SuggestionPart {

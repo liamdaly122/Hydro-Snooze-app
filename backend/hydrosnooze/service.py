@@ -49,6 +49,7 @@ from .models import (
     NightPlan,
     Power,
     Schedule,
+    SleepStage,
     NUDGE_LIMIT_C,
     NUDGE_MINUTES,
     PRECONDITION_MAX_MINUTES,
@@ -59,11 +60,12 @@ from .models import (
     Tonight,
     Underway,
     mode_for_target,
+    preconditioning_for,
     quieter_mode,
     range_for,
     rehearsal_plan,
 )
-from . import autopilot, clocksync, hold, pi, report, suggest, trials, watchdog
+from . import autopilot, clocksync, hold, nap, pi, report, suggest, trials, watchdog
 from .notify import HEARTBEAT_EVERY, Heartbeat, Notifier
 from .scheduler import Job, Scheduler
 from .sequences import CommandFailed, Commands, NotLanding
@@ -121,6 +123,14 @@ BUTTON_KIND = "buttons"
 
 #: The switch over everything going on or off.
 SYSTEM_KIND = "system"
+
+#: A nap starting, getting there, and ending.
+NAP_KIND = "nap"
+
+#: How long between attempts to switch off at the end of a nap that did not
+#: land, and how long to keep trying before saying so loudly.
+NAP_RETRY = timedelta(minutes=1)
+NAP_GIVE_UP = timedelta(minutes=30)
 
 #: What anything that would send to the unit says while the switch is off.
 SYSTEM_OFF = (
@@ -413,6 +423,10 @@ class Service:
         #: Switching off a night that turned out to be a night away. See
         #: _switch_off_if_away.
         self._away_task: asyncio.Task[None] | None = None
+        #: A nap's working notes (nap.py): whether the probes have seen heat move
+        #: since it started, and when switching off at its end may next be tried.
+        self._nap_worked = False
+        self._nap_retry_at: datetime | None = None
         # The running part, run late when HydroSnooze is switched on mid-night.
         self._resume_task: asyncio.Task[None] | None = None
         # Whatever is different about tonight, read back the same way, and after
@@ -423,7 +437,7 @@ class Service:
         # Switched off before a restart, it comes back switched off, with the
         # unit taken to be off or unplugged, the way it was left.
         self.state = (
-            DeviceState()
+            DeviceState(nap=self._nap_on_start())
             if self.db.system_on()
             else DeviceState(power=Power.OFF, system_on=False)
         )
@@ -1025,6 +1039,7 @@ class Service:
             return
 
         now = self.clock.now()
+        await self._nap_tick(now)
 
         # A missed stage means the bed spent that stretch of the night at the
         # wrong temperature. Worth saying out loud rather than passing over.
@@ -1160,6 +1175,7 @@ class Service:
         if watts is not None and watts < self.settings.off_threshold_w:
             self._abandon_precondition("the plug says the unit is off")
         self._watch_precondition(watts, now)
+        self._watch_nap(watts, now)
 
         # Every read is already a reachability check, so there is nothing extra
         # to ask: a reading means the plug answered.
@@ -1214,7 +1230,13 @@ class Service:
             observed_room_c=room,
             inferred_activity=activity,
             power=power,
-            current_stage=step.stage if step and power is Power.ON else None,
+            current_stage=(
+                step.stage
+                if step and power is Power.ON
+                else Stage.NAP
+                if self.state.nap is not None and power is not Power.OFF
+                else None
+            ),
         )
         if trusted:
             await self._correct_mode(step, power, now)
@@ -1294,8 +1316,14 @@ class Service:
         if not self.schedule.stages:
             raise ValueError("There are no stages to rehearse.")
 
+        # A Bedtime only night is rehearsed as the night it is: its one part.
+        stages = (
+            [SleepStage(Stage.BEDTIME, self.schedule.bedtime_minutes, self.schedule.bedtime_temp_c)]
+            if self.schedule.bedtime_only
+            else self.schedule.stages
+        )
         plan = rehearsal_plan(
-            self.schedule.stages,
+            stages,
             self.schedule.cooling_speed,
             now=self.clock.now(),
             total_seconds=seconds,
@@ -1753,6 +1781,8 @@ class Service:
                     f"{said}. Doing the on/off and leaving the temperature alone.",
                 )
             await self._button_power_toggle(said if not delta else "Bedside: on/off")
+            if self.state.nap is not None:
+                self._end_nap("The nap is over: the bedside on/off was pressed.")
             return
 
         if not delta:
@@ -2313,6 +2343,210 @@ class Service:
             f"so the unit is being sent {after}C now, a degree {'more' if way > 0 else 'less'}.",
         )
 
+    # --- A nap (nap.py) -------------------------------------------------------
+
+    def _night_under_way(self, now: datetime) -> NightPlan | None:
+        """Tonight's night, once it has started getting ready, until its morning.
+        A nap does not start inside one, and one starting ends a nap."""
+        plan = self.scheduler.plan_in_progress(self.schedule, now)
+        if plan is None or plan.rehearsal or now < plan.starts_at:
+            return None
+        return plan
+
+    def nap_preview(self, temp_c: int | None = None, minutes: int | None = None) -> dict[str, Any]:
+        """What a nap would do, before it is started: the Nap screen's one line.
+
+        Ready in however long the bed has learned it takes, or the estimate,
+        and off that long after. `blocked` says why it cannot start now, when
+        it cannot; `cut_at` when tonight would start getting ready before the
+        nap is over, and so end it.
+        """
+        last_temp, last_minutes = self.db.last_nap()
+        temp = last_temp if temp_c is None else temp_c
+        length = last_minutes if minutes is None else minutes
+        now = self.clock.now()
+        speed = self.schedule.cooling_speed
+        pre = preconditioning_for(temp, speed, self._bed_now(), self._learned_lead)
+        lead = pre.lead_minutes if pre.runs else 0
+        ready = now + timedelta(minutes=lead)
+        ends = ready + timedelta(minutes=length)
+        blocked = None
+        if not self.db.system_on():
+            blocked = SYSTEM_OFF
+        elif self.state.nap is not None:
+            blocked = "A nap is already running."
+        elif self.scheduler.rehearsal is not None:
+            blocked = "A rehearsal is running."
+        elif self._night_under_way(now) is not None:
+            blocked = "Tonight's night is under way. Change the temperature on Home instead."
+        upcoming = self.scheduler.plan_in_progress(self.schedule, now)
+        cut = (
+            upcoming.starts_at
+            if upcoming is not None and not upcoming.rehearsal and upcoming.starts_at < ends
+            else None
+        )
+        return {
+            "temp_c": temp,
+            "minutes": length,
+            "mode": (pre.mode or mode_for_target(temp, speed)).value,
+            "ready_in_minutes": lead,
+            "ready_at": ready.isoformat(),
+            "ends_at": ends.isoformat(),
+            "measured": pre.runs and "measured" in pre.reason,
+            "cut_at": cut.isoformat() if cut else None,
+            "blocked": blocked,
+        }
+
+    async def start_nap(self, temp_c: int, minutes: int) -> DeviceState:
+        """The bed to `temp_c`, held for `minutes` once it gets there, then off.
+
+        Switched on and set the way getting a bed ready is, in the mode the
+        direction calls for, with the learned correction on what is sent. The
+        length counts from when the bed gets there: see nap.arrived.
+        """
+        self._refuse_while_off()
+        preview = self.nap_preview(temp_c, minutes)
+        if preview["blocked"]:
+            raise CommandFailed(preview["blocked"])
+        now = self.clock.now()
+        mode = Mode(preview["mode"])
+        expect = datetime.fromisoformat(preview["ready_at"])
+        self._abandon_precondition("a nap was started")
+        async with self._lock:
+            try:
+                watts = await self.power.read_watts()
+                if watts is None or watts < self.settings.off_threshold_w:
+                    await self.commands.power_on()
+                self._set_state(power=Power.ON, current_stage=Stage.NAP)
+                await self._apply(mode, temp_c)
+            except CommandFailed as exc:
+                self._fail(NAP_KIND, exc)
+                raise
+        self.db.set_last_nap(temp_c, minutes)
+        self._nap_worked = False
+        self._nap_retry_at = None
+        self._keep_nap(nap.Nap(temp_c, minutes, mode, now, expect))
+        way = "warming" if mode is Mode.WARMING else "cooling"
+        wait = int((expect - now).total_seconds() // 60)
+        self.events.info(
+            NAP_KIND,
+            f"Nap started, {way} to {temp_c}C. "
+            + (f"Ready in about {wait} minutes; " if wait else "Ready now; ")
+            + f"the {minutes} minute nap counts from when the bed gets there.",
+        )
+        return self.state
+
+    async def stop_nap(self) -> DeviceState:
+        """Stop now, and switch the unit off."""
+        if self.state.nap is None:
+            return self.state
+        self._end_nap("Nap stopped.")
+        await self.power_off()
+        return self.state
+
+    def _nap_on_start(self) -> nap.Nap | None:
+        """A nap carried through a restart, unless it was over long ago.
+
+        Back within the half hour after it should have ended, it is still
+        switched off, which is what it was owed. Longer than that and somebody
+        has had the bed to themselves since, so it is forgotten rather than
+        acted on: switching the unit off now could be undoing what they did.
+        """
+        kept = self.db.nap()
+        if kept is None:
+            return None
+        ends = kept.ends_at or (kept.give_up_at + timedelta(minutes=kept.minutes))
+        if self.clock.now() - ends > NAP_GIVE_UP:
+            self.db.clear_nap()
+            return None
+        return kept
+
+    def _keep_nap(self, current: nap.Nap) -> None:
+        self.db.save_nap(current)
+        self._set_state(nap=current)
+
+    def _end_nap(self, why: str) -> None:
+        """Forget it, and say so. Sends nothing: the caller decides that."""
+        self.db.clear_nap()
+        self._nap_worked = False
+        self._nap_retry_at = None
+        self._set_state(nap=None, current_stage=None)
+        self.events.info(NAP_KIND, why)
+
+    def _watch_nap(self, watts: float | None, now: datetime) -> None:
+        """On the sampling beat: has the bed got there, and is the unit still on."""
+        current = self.state.nap
+        if current is None:
+            return
+        moving = self.probes.moving_c
+        if moving is not None and abs(moving) >= WORKING_DELTA_C:
+            self._nap_worked = True
+        # Switched off some other way, with the remote or at the wall: the nap
+        # is over, and there is nothing to switch off at the end of it.
+        if (
+            watts is not None
+            and watts < self.settings.off_threshold_w
+            and now - current.started_at >= nap.PLUG_LAG
+        ):
+            self._end_nap("The unit has been switched off, so the nap is over.")
+            return
+        by = nap.arrived(
+            current,
+            now,
+            bed_c=self.probes.bed_c,
+            moving_c=moving,
+            worked=self._nap_worked,
+            activity=None if watts is None else self.settings.thresholds.classify(watts),
+            settle_after_s=MIN_PRECONDITION_SECONDS,
+            settled_c=SETTLED_DELTA_C,
+        )
+        if by is None:
+            return
+        # The estimate counts from when it ran out, not from whenever this beat
+        # noticed: after a restart that can be hours later, and a nap counted
+        # from then would run its whole length again.
+        ready = current.ready(current.give_up_at if by == "estimate" else now, by)
+        self._keep_nap(ready)
+        assert ready.ends_at is not None
+        if by == "estimate":
+            said = (
+                f"Nothing could confirm the bed reached {ready.temp_c}C, so the nap counts "
+                f"from {ready.ready_at:%H:%M}. Switching off at {ready.ends_at:%H:%M}."
+            )
+        else:
+            said = f"The bed is at {ready.temp_c}C. Switching off at {ready.ends_at:%H:%M}."
+        self.events.info(NAP_KIND, f"Nap: {said}")
+        self.notifier.push("Nap: bed ready", said, tag="nap")
+
+    async def _nap_tick(self, now: datetime) -> None:
+        """On the tick: hand over to a night that has started, or end on time."""
+        current = self.state.nap
+        if current is None:
+            return
+        if self._night_under_way(now) is not None:
+            # Tonight has started getting ready, and it is driving the unit
+            # from here. Nothing is switched off in between.
+            self._end_nap("Tonight has started, so the nap hands over to it.")
+            return
+        if current.ends_at is None or now < current.ends_at:
+            return
+        if self._nap_retry_at is not None and now < self._nap_retry_at:
+            return
+        if self._lock.locked():
+            return
+        async with self._lock:
+            try:
+                await self.commands.power_off()
+            except CommandFailed as exc:
+                self._nap_retry_at = now + NAP_RETRY
+                if now - current.ends_at >= NAP_GIVE_UP:
+                    self._fail(NAP_KIND, exc, power=Power.UNKNOWN)
+                    self._end_nap("The nap is over, but the unit would not switch off.")
+                return
+        self._set_state(power=Power.OFF, assumed_target_c=None, last_command_at=now)
+        self._end_nap(f"Nap over: switched off after {current.minutes} minutes at {current.temp_c}C.")
+        self.notifier.push("Nap over", "The bed has switched off.", tag="nap")
+
     # --- The switch over everything ------------------------------------------
 
     def _refuse_while_off(self) -> None:
@@ -2357,6 +2591,8 @@ class Service:
             self._button_until = None
             await self.stop_rehearsal(power_off=False)
             self._abandon_precondition("HydroSnooze was switched off")
+            if self.state.nap is not None:
+                self._end_nap("The nap is over: HydroSnooze was switched off.")
             self._set_state(
                 system_on=False,
                 power=Power.OFF,
@@ -2569,6 +2805,11 @@ class Service:
         }
         if not self.db.autopilot_on():
             out["state"] = "off"
+            return out
+        # Nothing to choose. Bedtime only has no Deep and no REM, and a test
+        # night is a Deep or REM a degree out.
+        if self.schedule.bedtime_only:
+            out["state"] = "bedtime_only"
             return out
         wake_on = self._tonight_date()
         phase = self.tonight_phase()
@@ -3065,6 +3306,9 @@ class Service:
         self._refuse_while_off()
         mode = self.mode_for_now(target_c)
         stage = self.state.current_stage
+        if self.state.nap is not None:
+            # Changed by hand part way through, which is the nap's number now.
+            self._keep_nap(replace(self.state.nap, temp_c=target_c, mode=mode))
         async with self._lock:
             try:
                 if self.state.assumed_mode is not mode:
@@ -3320,6 +3564,17 @@ class Service:
 
     async def set_stage_tonight(self, stage: Stage, target_c: int) -> Tonight:
         """Change one stage for this night, leaving the routine alone."""
+        if stage is Stage.BEDTIME:
+            # Its own field on Tonight, not a fifth stage: see Tonight.bedtime_temp_c.
+            out = self._change_tonight(bedtime_temp_c=target_c)
+            self.events.info(
+                TONIGHT_KIND,
+                f"Bedtime is {target_c}C tonight. Your usual Bedtime only temperature is "
+                "untouched.",
+            )
+            self._followed_at = None
+            await self._follow_the_plan(loud=True)
+            return out
         stages = tuple(
             replace(s, temp_c=target_c) if s.stage is stage else replace(s)
             for s in self.tonight_now().stages
@@ -3448,6 +3703,10 @@ class Service:
         tonight = self.tonight_state()
         if tonight is not None and tonight.stages is not None:
             self._change_tonight(stages=None)
+        tonight = self.tonight_state()
+        if tonight is not None and tonight.bedtime_temp_c is not None:
+            self.update_schedule({"bedtime_temp_c": tonight.bedtime_temp_c})
+            self._change_tonight(bedtime_temp_c=None)
 
     def clear_tonight(self) -> None:
         """Put tonight back to the routine."""

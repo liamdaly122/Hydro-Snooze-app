@@ -11,6 +11,7 @@ import { Profiles } from './screens/Profiles'
 import { Autopilot } from './screens/Autopilot'
 import { Schedule } from './screens/Schedule'
 import { Holiday } from './screens/Holiday'
+import { Nap } from './screens/Nap'
 import { Alarm } from './screens/Alarm'
 import { CoolingSpeed } from './screens/CoolingSpeed'
 import { Status } from './screens/Status'
@@ -40,6 +41,7 @@ const TITLE: Record<View, string> = {
   speed: 'Cooling speed',
   status: 'Status',
   holiday: 'Holiday mode',
+  nap: 'Nap',
   schedule: 'Schedule',
   profiles: 'Saved nights',
 }
@@ -205,6 +207,8 @@ export function App({ client, auth, onAuth }: Props) {
           <History client={client} power={power} events={events} />
         ) : screen === 'report' ? (
           <HealthReport client={client} onOpenAutopilot={() => openFromMenu('autopilot')} />
+        ) : view === 'nap' ? (
+          <Nap client={client} state={state} maxC={info?.max_temperature_c ?? MAX_TEMPERATURE_C} />
         ) : view === 'holiday' ? (
           <Holiday client={client} schedule={schedule} holiday={holiday} onChanged={setHoliday} />
         ) : view === 'autopilot' ? (

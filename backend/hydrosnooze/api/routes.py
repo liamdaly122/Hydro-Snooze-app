@@ -11,12 +11,14 @@ from pydantic import BaseModel, Field
 from ..models import (
     MIN_STAGE_MINUTES,
     NUDGE_MINUTES,
+    STAGE_ORDER,
     Mode,
     Power,
     SleepStage,
     Stage,
     minutes_between,
     modes_for,
+    mode_for_target,
     range_for,
 )
 from .. import trends
@@ -66,6 +68,12 @@ class SchedulePatch(BaseModel):
     other_days: list[int] | None = None
     other_bed_time: str | None = Field(default=None, pattern=r"^(\d{2}:\d{2})?$")
     other_wake_time: str | None = Field(default=None, pattern=r"^(\d{2}:\d{2})?$")
+    #: Bedtime only: one temperature from lights out for a while, then off.
+    bedtime_only: bool | None = None
+    bedtime_temp_c: int | None = None
+    #: Quarter hours, from one to twelve hours. Never past the alarm either way:
+    #: the plan stops it there.
+    bedtime_minutes: int | None = Field(default=None, ge=15, le=720, multiple_of=15)
 
 
 class TemperatureBody(BaseModel):
@@ -229,6 +237,20 @@ async def post_tonight_stage(request: Request, body: StageTonight) -> dict[str, 
     """One stage, for this night only."""
     service = _service(request)
     running = service.tonight_now()
+    if body.stage is Stage.BEDTIME:
+        # Bedtime only's one part, which is not one of the four.
+        if not running.bedtime_only:
+            raise HTTPException(422, "Bedtime only is off, so there is no Bedtime part tonight.")
+        _guard_temperature(
+            service, body.temp_c, mode_for_target(body.temp_c, running.cooling_speed)
+        )
+        try:
+            await service.set_stage_tonight(body.stage, body.temp_c)
+        except CommandFailed as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return _tonight(service)
+    if body.stage not in STAGE_ORDER:
+        raise HTTPException(422, f"{body.stage.value} is not a part of the night")
     wanted = [
         replace(st, temp_c=body.temp_c) if st.stage is body.stage else st
         for st in running.stages
@@ -443,6 +465,8 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
         seen = set()
         for raw in data["stages"]:
             stage = Stage(raw["stage"])
+            if stage not in STAGE_ORDER:
+                raise HTTPException(422, f"{stage.value} is not a part of the night")
             if stage in seen:
                 raise HTTPException(422, f"{stage.value} appears twice")
             seen.add(stage)
@@ -476,6 +500,11 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
             f"between going to bed and waking up.",
         )
 
+    if "bedtime_temp_c" in data:
+        speed = Mode(data.get("cooling_speed", service.schedule.cooling_speed))
+        temp = data["bedtime_temp_c"]
+        _guard_temperature(service, temp, mode_for_target(temp, speed))
+
     if "days_of_week" in data and any(d < 0 or d > 6 for d in data["days_of_week"]):
         raise HTTPException(422, "days_of_week must be 0 (Monday) to 6 (Sunday)")
     if "other_days" in data:
@@ -495,6 +524,40 @@ async def put_schedule(request: Request, patch: SchedulePatch) -> dict[str, obje
 
     service.update_schedule(data)
     return service.schedule_as_shown()
+
+
+class NapBody(BaseModel):
+    temp_c: int
+    minutes: int = Field(ge=5, le=180, multiple_of=5)
+
+
+@router.get("/nap")
+async def get_nap(
+    request: Request, temp_c: int | None = None, minutes: int | None = None
+) -> dict[str, object]:
+    """What a nap would do before it starts: ready by when, off by when, and
+    why it cannot start now if it cannot. Left out, the last nap's numbers."""
+    return _service(request).nap_preview(temp_c, minutes)
+
+
+@router.post("/nap")
+async def post_nap(request: Request, body: NapBody) -> dict[str, object]:
+    """The bed to one temperature, held for `minutes` once it gets there, then
+    off. See nap.py. The state that comes back carries the nap."""
+    service = _service(request)
+    preview = service.nap_preview(body.temp_c, body.minutes)
+    _guard_temperature(service, body.temp_c, Mode(preview["mode"]))
+    try:
+        state = await service.start_nap(body.temp_c, body.minutes)
+    except CommandFailed as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return state_json(state)
+
+
+@router.delete("/nap")
+async def delete_nap(request: Request) -> dict[str, object]:
+    """Stop the nap now, and switch the unit off."""
+    return state_json(await _service(request).stop_nap())
 
 
 class SystemSwitch(BaseModel):

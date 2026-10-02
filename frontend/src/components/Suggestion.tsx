@@ -108,6 +108,8 @@ function summary(s: Suggestion): { text: string; ready: boolean } {
       return { text: 'Tonight is off', ready: false }
     case 'no_mat':
       return { text: 'Needs the Sleep Analyzer', ready: false }
+    case 'bedtime_only':
+      return { text: 'Paused while Bedtime only is on', ready: false }
     case 'closed':
       return { text: 'Chosen in the evening', ready: false }
   }
@@ -178,6 +180,8 @@ export function SuggestionFold({
             ? 'Autopilot is off, so nothing is suggested. The bed runs your usual temperatures.'
             : s.state === 'no_mat'
             ? 'Suggestions need the Sleep Analyzer connected, or a test night would teach nothing.'
+            : s.state === 'bedtime_only'
+            ? 'Paused while Bedtime only is on: there is no Deep or REM to choose, and they come back when the whole night does.'
             : s.state === 'closed'
               ? "Tonight's suggestion appears in the evening, before the bed starts getting ready."
               : said.text + '.'}

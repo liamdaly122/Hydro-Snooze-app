@@ -573,9 +573,12 @@ class Scheduler:
         """
         # Not optional any more. Without the unit's own schedule, nothing else
         # turns it off.
+        # From the switch-off, which is the wake time on a whole night and the
+        # end of the one part on a Bedtime only night, to the same close either
+        # way: a Bedtime only switch-off that keeps failing has until morning.
         closes = plan.wake_at + POWER_OFF_GRACE
         off = Job("power_off", plan)
-        off_due = plan.wake_at <= now < closes and not self.fired.has_fired(off)
+        off_due = plan.switch_off_at <= now < closes and not self.fired.has_fired(off)
 
         # After the power off, so the report describes a night that is completely
         # over, including whether switching off worked. A fired mark like

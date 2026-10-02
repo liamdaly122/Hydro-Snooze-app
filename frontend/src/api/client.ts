@@ -20,6 +20,7 @@ import type {
   AutopilotSwitch,
   HealthDay,
   HealthReport,
+  NapPreview,
   Learning,
   DeviceEvent,
   DeviceHealth,
@@ -95,7 +96,8 @@ export interface ApiClient {
    * keepTonight, which is the only one that touches the saved routine.
    */
   getTonight(): Promise<TonightState>
-  setStageTonight(stage: Stage, tempC: number): Promise<TonightState>
+  /** One part, tonight only. 'bedtime' is Bedtime only's one part. */
+  setStageTonight(stage: Stage | 'bedtime', tempC: number): Promise<TonightState>
   /** One degree, one period, no stacking. Never moves the switch-off. */
   nudgeTonight(deltaC: number): Promise<TonightState>
   /** Going to bed early, or sleeping in. Moves the switch-off with the alarm. */
@@ -194,6 +196,12 @@ export interface ApiClient {
    * it is back on. On picks up whatever part of tonight has been reached.
    */
   setSystem(on: boolean): Promise<DeviceState>
+  /** What a nap would do before it starts. Without arguments, the last nap's. */
+  getNapPreview(tempC?: number, minutes?: number): Promise<NapPreview>
+  /** The bed to tempC, held for minutes once it gets there, then off. */
+  startNap(tempC: number, minutes: number): Promise<DeviceState>
+  /** Stop now, and switch the unit off. */
+  stopNap(): Promise<DeviceState>
   getSchedule(): Promise<Schedule>
 
   /**

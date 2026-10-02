@@ -23,7 +23,7 @@ from itertools import pairwise
 
 from .db import Sample
 from .events import Event, Level
-from .models import QUIET_KIND, TRIM_KIND, NightPlan
+from .models import QUIET_KIND, TRIM_KIND, Mode, NightPlan, Stage
 
 #: Sampling interval, for turning watts into energy. Not read from settings on
 #: purpose: this works off what was recorded, and the gap between two rows is the
@@ -105,6 +105,20 @@ def stages_line(
 ) -> tuple[str, Level]:
     """The first line of the report, and whether it is worth a warning."""
     landed, missed, off = _stages_landed(plan, fired, cancelled)
+    if len(plan.steps) == 1 and plan.steps[0].stage is Stage.BEDTIME:
+        # Bedtime only has one part, so "all 1 stages landed" says less than the
+        # night did. What it was, from when to when, and that it then went off.
+        step = plan.steps[0]
+        if off:
+            return "Bedtime only: called off, as asked.", "info"
+        if missed:
+            return f"Bedtime only: the {step.starts_at:%H:%M} part did not land.", "warning"
+        how = "Warmed" if step.mode is Mode.WARMING else "Cooled"
+        return (
+            f"Bedtime only: {how.lower()} to {step.temp_c}C from {step.starts_at:%H:%M} "
+            f"to {step.ends_at:%H:%M}, then off.",
+            "info",
+        )
     total = len(plan.steps)
     if not missed and not off:
         return f"All {total} stages landed.", "info"

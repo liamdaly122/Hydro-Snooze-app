@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Card } from './Card'
 import { Minus, Plus, Sparkle } from './Icons'
-import { canSetTemperature, formatTemp, tint, tintAlpha } from '../domain'
+import { canSetTemperature, formatDuration, formatTemp, tint, tintAlpha } from '../domain'
 import {
   MODE_RANGE,
   STAGE_LABEL,
@@ -13,10 +13,16 @@ import {
   type Stage,
 } from '../types'
 
-/** "Now" is the live temperature. The rest are the parts of the night. */
-export type TabKey = 'now' | Stage
+/** "Now" is the live temperature. The rest are the parts of the night, which
+ *  for Bedtime only is the one part. */
+export type TabKey = 'now' | Stage | 'bedtime'
 
-const TABS: TabKey[] = ['now', ...STAGE_ORDER]
+const NIGHT_TABS: TabKey[] = ['now', ...STAGE_ORDER]
+const BEDTIME_TABS: TabKey[] = ['now', 'bedtime']
+
+/** Bedtime only's length moves in quarter hours, from one to twelve hours. */
+const BEDTIME_STEP = 15
+const BEDTIME_LONGEST = 720
 
 /** How long to wait after the last tap before firing a real infrared run. */
 const COMMIT_DELAY_MS = 900
@@ -26,7 +32,13 @@ interface Props {
   /** The locally edited night. */
   draft: Schedule
   maxC: number
-  onStageChange: (stage: Stage, tempC: number) => void
+  onStageChange: (stage: Stage | 'bedtime', tempC: number) => void
+  /**
+   * Whole night or Bedtime only. A setting rather than tonight's, so it stays
+   * until it is switched back; the four parts are kept underneath either way.
+   */
+  onBedtimeOnly?: (on: boolean) => void
+  onBedtimeMinutes?: (minutes: number) => void
   onSetNow: (targetC: number) => void
   /** Opens the saved nights. The card is where a whole night's temperatures live,
    *  so it is where saving and loading a set of them belongs. */
@@ -47,10 +59,20 @@ export function TemperatureCard({
   onStageChange,
   onSetNow,
   onOpenProfiles,
+  onBedtimeOnly,
+  onBedtimeMinutes,
   children,
   keep,
 }: Props) {
   const [tab, setTab] = useState<TabKey>('now')
+  const bedtimeOnly = draft.bedtime_only
+  const tabs = bedtimeOnly ? BEDTIME_TABS : NIGHT_TABS
+
+  // Switched between the two, a tab that has gone goes back to Now rather than
+  // showing nothing.
+  useEffect(() => {
+    if (!(bedtimeOnly ? BEDTIME_TABS : NIGHT_TABS).includes(tab)) setTab('now')
+  }, [bedtimeOnly, tab])
 
   // "Now" is edited optimistically and committed once the tapping stops, because
   // every commit is a 25-plus press infrared run and firing one per tap would be
@@ -66,10 +88,14 @@ export function TemperatureCard({
 
   const stageOf = (stage: Stage) => draft.stages.find((s) => s.stage === stage)
   const valueFor = (key: TabKey): number | null =>
-    key === 'now' ? nowValue : (stageOf(key)?.temp_c ?? null)
+    key === 'now'
+      ? nowValue
+      : key === 'bedtime'
+        ? draft.bedtime_temp_c
+        : (stageOf(key)?.temp_c ?? null)
 
   const selected = valueFor(tab)
-  const fallback = draft.stages[0]?.temp_c ?? 20
+  const fallback = bedtimeOnly ? draft.bedtime_temp_c : (draft.stages[0]?.temp_c ?? 20)
 
   // The full span a temperature can occupy, not the current mode's range.
   //
@@ -102,8 +128,34 @@ export function TemperatureCard({
 
   return (
     <Card label="Temperature" onOpen={onOpenProfiles} openLabel="Open saved nights">
+      {/*
+        Inside the card rather than as a card of its own, because it changes
+        what this card holds, not what the screen holds. A row of its own under
+        the header rather than in it: beside the label and the chevron there is
+        not room for it on a small phone.
+      */}
+      {onBedtimeOnly && (
+        <div className="night-kind" role="group" aria-label="What the night runs">
+          <button
+            type="button"
+            className="night-kind__btn"
+            aria-pressed={!bedtimeOnly}
+            onClick={() => bedtimeOnly && onBedtimeOnly(false)}
+          >
+            Whole night
+          </button>
+          <button
+            type="button"
+            className="night-kind__btn"
+            aria-pressed={bedtimeOnly}
+            onClick={() => !bedtimeOnly && onBedtimeOnly(true)}
+          >
+            Bedtime only
+          </button>
+        </div>
+      )}
       <div className="tabs" role="tablist" aria-label="Part of the night to edit">
-        {TABS.map((key) => {
+        {tabs.map((key) => {
           const value = valueFor(key)
           const label = key === 'now' ? 'Now' : STAGE_LABEL[key]
           const running = key !== 'now' && state.current_stage === key
@@ -192,19 +244,90 @@ export function TemperatureCard({
           offering it where nobody will look.
         */}
         {tab === 'now' && children}
+        {tab === 'bedtime' && <BedtimeLength draft={draft} onMinutes={onBedtimeMinutes} />}
         {keep}
 
         <StageNote
           state={state}
           tab={tab}
           value={selected}
-          mode={tab === 'now' ? null : (stageOf(tab)?.mode ?? null)}
+          mode={
+            tab === 'now'
+              ? null
+              : tab === 'bedtime'
+                ? draft.bedtime_mode
+                : (stageOf(tab)?.mode ?? null)
+          }
           atCeiling={atCeiling}
           ceiling={ceiling}
           maxC={maxC}
         />
       </div>
     </Card>
+  )
+}
+
+/** "22:30" plus a number of minutes, round the clock. */
+function later(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const total = (h! * 60 + m! + minutes) % (24 * 60)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`
+}
+
+/**
+ * How long Bedtime only holds its temperature, and what that means in clock
+ * time. A setting, like the switch above, so a tap changes every night until it
+ * is changed back; shown as the times it lands on rather than the step.
+ */
+function BedtimeLength({
+  draft,
+  onMinutes,
+}: {
+  draft: Schedule
+  onMinutes?: (minutes: number) => void
+}) {
+  // Shown straight away and saved behind, so three quick taps read as three.
+  const [pending, setPending] = useState<number | null>(null)
+  useEffect(() => setPending(null), [draft.bedtime_minutes])
+  const minutes = pending ?? draft.bedtime_minutes
+  const longest = Math.min(BEDTIME_LONGEST, draft.night_minutes)
+  const held = Math.min(minutes, draft.night_minutes)
+
+  function change(by: number) {
+    const next = Math.max(BEDTIME_STEP, Math.min(longest, minutes + by))
+    if (next === minutes) return
+    setPending(next)
+    onMinutes?.(next)
+  }
+
+  return (
+    <div className="bedtime-length">
+      <div className="bedtime-length__row">
+        <button
+          type="button"
+          className="step step--small"
+          onClick={() => change(-BEDTIME_STEP)}
+          disabled={!onMinutes || minutes <= BEDTIME_STEP}
+          aria-label="Shorter"
+        >
+          <Minus />
+        </button>
+        <span className="bedtime-length__for">for {formatDuration(held)}</span>
+        <button
+          type="button"
+          className="step step--small"
+          onClick={() => change(BEDTIME_STEP)}
+          disabled={!onMinutes || minutes >= longest}
+          aria-label="Longer"
+        >
+          <Plus />
+        </button>
+      </div>
+      <p className="bedtime-length__when">
+        Ready by {draft.bed_time}, off at {later(draft.bed_time, held)}, then off until morning.
+      </p>
+    </div>
   )
 }
 

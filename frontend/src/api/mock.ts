@@ -29,6 +29,7 @@ import type {
   DeviceState,
   HealthDay,
   HealthReport,
+  NapPreview,
   Holiday,
   Learning,
   LearningMode,
@@ -133,6 +134,7 @@ export class MockApiClient implements ApiClient {
     last_command_at: nowIso(),
     last_error: null,
     system_on: true,
+    nap: null,
   }
 
   private schedule: Schedule = {
@@ -158,6 +160,10 @@ export class MockApiClient implements ApiClient {
     other_bed_time: null,
     other_wake_time: null,
     other_night_minutes: null,
+    bedtime_only: false,
+    bedtime_temp_c: 30,
+    bedtime_minutes: 90,
+    bedtime_mode: 'warming',
   }
 
   private events: DeviceEvent[] = []
@@ -347,6 +353,89 @@ export class MockApiClient implements ApiClient {
     return { ...this.state }
   }
 
+  private napLast = { temp_c: 30, minutes: 30 }
+  private napTimer?: ReturnType<typeof setTimeout>
+
+  /** As on the Pi, with a demo bed that gets there in a few seconds. */
+  async getNapPreview(tempC?: number, minutes?: number): Promise<NapPreview> {
+    await sleep(80)
+    const temp = tempC ?? this.napLast.temp_c
+    const length = minutes ?? this.napLast.minutes
+    const lead = 18
+    const ready = new Date(Date.now() + lead * 60_000)
+    return {
+      temp_c: temp,
+      minutes: length,
+      mode: temp >= 25 ? 'warming' : this.schedule.cooling_speed,
+      ready_in_minutes: lead,
+      ready_at: ready.toISOString(),
+      ends_at: new Date(ready.getTime() + length * 60_000).toISOString(),
+      measured: false,
+      cut_at: null,
+      blocked: !this.state.system_on
+        ? 'HydroSnooze is switched off, so nothing is sent to the unit. Switch it back on from the menu first.'
+        : this.state.nap
+          ? 'A nap is already running.'
+          : null,
+    }
+  }
+
+  async startNap(tempC: number, minutes: number): Promise<DeviceState> {
+    const preview = await this.getNapPreview(tempC, minutes)
+    if (preview.blocked) throw new ApiError(preview.blocked)
+    this.napLast = { temp_c: tempC, minutes }
+    const now = new Date()
+    this.patchState({
+      power: 'on',
+      current_stage: 'nap',
+      assumed_mode: preview.mode,
+      assumed_target_c: tempC,
+      inferred_activity: preview.mode === 'warming' ? 'heating' : 'cooling',
+      observed_power_w: preview.mode === 'warming' ? 306 : 170,
+      nap: {
+        temp_c: tempC,
+        minutes,
+        mode: preview.mode,
+        started_at: now.toISOString(),
+        expect_ready_at: preview.ready_at,
+        ready_at: null,
+        ends_at: null,
+      },
+    })
+    this.log('info', 'nap', `Nap started at ${tempC}C. The ${minutes} minute nap counts from when the bed gets there.`)
+    clearTimeout(this.napTimer)
+    this.napTimer = setTimeout(() => {
+      const nap = this.state.nap
+      if (!nap) return
+      const ready = new Date()
+      this.patchState({
+        inferred_activity: 'idle',
+        observed_power_w: 40,
+        nap: {
+          ...nap,
+          ready_at: ready.toISOString(),
+          ends_at: new Date(ready.getTime() + nap.minutes * 60_000).toISOString(),
+        },
+      })
+      this.log('info', 'nap', `Nap: the bed is at ${nap.temp_c}C.`)
+    }, 5000)
+    return { ...this.state }
+  }
+
+  async stopNap(): Promise<DeviceState> {
+    await sleep(200)
+    clearTimeout(this.napTimer)
+    this.patchState({
+      nap: null,
+      power: 'off',
+      current_stage: null,
+      inferred_activity: 'off',
+      observed_power_w: 0.4,
+    })
+    this.log('info', 'nap', 'Nap stopped.')
+    return { ...this.state }
+  }
+
   /** What the Pi says to anything that would send while switched off. */
   private refuseWhileOff(): void {
     if (!this.state.system_on) {
@@ -371,7 +460,10 @@ export class MockApiClient implements ApiClient {
         ? minutesBetween(next.other_bed_time, next.other_wake_time)
         : null
     next.stages = withModes(fitStages(next.stages, next.night_minutes), next.cooling_speed)
-    next.preconditioning = preconditioningFor(next.stages[0]?.temp_c ?? 20)
+    next.preconditioning = preconditioningFor(
+      next.bedtime_only ? next.bedtime_temp_c : (next.stages[0]?.temp_c ?? 20),
+    )
+    next.bedtime_mode = next.bedtime_temp_c >= 25 ? 'warming' : next.cooling_speed
     this.schedule = next
     this.emit({ schedule: { ...this.schedule } })
     return { ...this.schedule }
@@ -522,6 +614,7 @@ export class MockApiClient implements ApiClient {
     nudge_c: 0,
     nudge_until: null as string | null,
     cooling_speed: null as Mode | null,
+    bedtime_temp_c: null as number | null,
   }
 
   private learningOn = true
@@ -560,6 +653,7 @@ export class MockApiClient implements ApiClient {
       wake_time,
       bed_time,
       night_minutes,
+      bedtime_temp_c: t.bedtime_temp_c ?? this.schedule.bedtime_temp_c,
       stages: withModes(
         fitStages((t.stages ?? this.schedule.stages).map((s) => ({ ...s })), night_minutes),
         t.cooling_speed ?? this.schedule.cooling_speed,
@@ -574,11 +668,13 @@ export class MockApiClient implements ApiClient {
         t.stages !== null ||
         t.wake_time !== null ||
         t.bed_time !== null ||
-        t.cooling_speed !== null,
+        t.cooling_speed !== null ||
+        t.bedtime_temp_c !== null,
       skip: t.skip,
       stages_changed: t.stages !== null,
       times_changed: t.wake_time !== null || t.bed_time !== null,
       speed_changed: t.cooling_speed !== null,
+      bedtime_changed: t.bedtime_temp_c !== null,
       nudge_c: t.nudge_c,
       nudge_until: t.nudge_until,
       suggested: this.suggestedTonight(),
@@ -591,8 +687,12 @@ export class MockApiClient implements ApiClient {
     return this.tonightJson()
   }
 
-  async setStageTonight(stage: Stage, temp_c: number): Promise<TonightState> {
+  async setStageTonight(stage: Stage | 'bedtime', temp_c: number): Promise<TonightState> {
     await sleep(120)
+    if (stage === 'bedtime') {
+      this.tonightState.bedtime_temp_c = temp_c
+      return this.tonightJson()
+    }
     const base = this.tonightState.stages ?? this.schedule.stages
     this.tonightState.stages = base.map((s) => (s.stage === stage ? { ...s, temp_c } : { ...s }))
     return this.tonightJson()
@@ -652,6 +752,7 @@ export class MockApiClient implements ApiClient {
       nudge_c: 0,
       nudge_until: null,
       cooling_speed: null,
+      bedtime_temp_c: null,
     }
     return this.tonightJson()
   }
@@ -663,9 +764,11 @@ export class MockApiClient implements ApiClient {
       ...this.schedule,
       cooling_speed: running.cooling_speed,
       stages: running.stages.map((s) => ({ ...s })),
+      bedtime_temp_c: running.bedtime_temp_c,
     }
     this.tonightState.stages = null
     this.tonightState.cooling_speed = null
+    this.tonightState.bedtime_temp_c = null
     return this.schedule
   }
 

@@ -25,16 +25,23 @@ export function TonightBanner({
 
   // Autopilot's evening suggestion, as it was taken. Named as Autopilot's, with
   // the usual beside each moved part, so a test night reads as a test and not
-  // as something somebody set and forgot.
-  const suggested = tonight.suggested ?? null
+  // as something somebody set and forgot. Not on a Bedtime only night, which
+  // runs none of the parts it chose.
+  const bedtimeOnly = tonight.running.bedtime_only
+  const suggested = bedtimeOnly ? null : (tonight.suggested ?? null)
   const parts: string[] = []
 
   if (tonight.skip) {
     parts.push('not running')
   } else {
+    // Bedtime only's one part, when tonight has its own number for it.
+    if (tonight.running.bedtime_only && tonight.running.bedtime_temp_c !== usual.bedtime_temp_c) {
+      parts.push(`Bedtime ${tonight.running.bedtime_temp_c}°`)
+    }
     // Only the stages that actually moved, named. "Deep 17°" beats "temperatures
-    // changed" by exactly the amount of thinking it saves.
-    for (const stage of tonight.running.stages) {
+    // changed" by exactly the amount of thinking it saves. Not on a Bedtime only
+    // night, which does not run them.
+    for (const stage of tonight.running.bedtime_only ? [] : tonight.running.stages) {
       const before = usual.stages.find((s) => s.stage === stage.stage)
       if (before && before.temp_c !== stage.temp_c) {
         parts.push(
@@ -59,6 +66,10 @@ export function TonightBanner({
       parts.push(`${speed.charAt(0).toUpperCase()}${speed.slice(1)} speed`)
     }
   }
+
+  // A Bedtime only night with nothing different about it that it uses: a change
+  // to the four parts it does not run is not worth a line on the home screen.
+  if (bedtimeOnly && !tonight.skip && parts.length === 0) return null
 
   return (
     <div className="tonight">

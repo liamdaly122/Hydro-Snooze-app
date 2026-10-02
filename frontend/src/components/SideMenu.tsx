@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { DeviceBar } from './DeviceBar'
 import { Toggle } from './Toggle'
-import { Bolt, ChevronRight, Clock, Close, Snowflake, Sparkle, Suitcase } from './Icons'
+import { Bolt, ChevronRight, Clock, Close, Moon, Snowflake, Sparkle, Suitcase } from './Icons'
 import { formatDay, formatDays, formatWatts, hasOtherTimes, parseDay } from '../domain'
 import type { ApiClient } from '../api/client'
 import {
@@ -16,7 +16,7 @@ import {
 } from '../types'
 
 /** The screens the menu opens. */
-export type MenuView = 'autopilot' | 'alarm' | 'speed' | 'status' | 'holiday'
+export type MenuView = 'autopilot' | 'alarm' | 'speed' | 'status' | 'holiday' | 'nap'
 
 interface Props {
   open: boolean
@@ -197,6 +197,13 @@ function Items({
         onClick={() => onOpen('status')}
       />
       <Item
+        icon={<Moon size={18} />}
+        label="Nap"
+        sub={napLine(state)}
+        on={state.nap !== null}
+        onClick={() => onOpen('nap')}
+      />
+      <Item
         icon={<Suitcase />}
         label="Holiday mode"
         sub={
@@ -349,6 +356,18 @@ function Item({
       <ChevronRight className="drawer__chevron" />
     </button>
   )
+}
+
+/** What the Nap row says: what one is doing, or what one is for. */
+function napLine(state: DeviceState): string {
+  const nap = state.nap
+  if (!nap) return 'The bed to one temperature for a while'
+  if (!nap.ends_at) return `Getting ready, ${nap.temp_c}°`
+  const until = new Date(nap.ends_at).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `On, ${nap.temp_c}° until ${until}`
 }
 
 function weekday(iso: string): string {
