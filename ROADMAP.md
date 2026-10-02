@@ -503,3 +503,36 @@ went by while it was off is put down as not run, quietly, rather than rung throu
 part the night has reached, if it has reached one, is run straight away, so switching it back on
 at four in the morning means REM now rather than a bed that waits for Wake.
 
+---
+
+## Bedtime only, and naps
+
+Two shorter ways to use the bed, both inside screens that were already there rather than in new
+blocks on the home screen.
+
+**Bedtime only** is a switch at the top of the Temperature card: Whole night or Bedtime only. In
+Bedtime only the four part tabs fold into one Bedtime tab, with the same big number and a length
+underneath in quarter hours, and one line saying what that means in clock time: ready by 22:30,
+off at 00:00, then off until morning. The bed gets ready before lights out the way a whole night
+does, holds the one number, and switches off at the end of it.
+
+It is a setting rather than tonight's, so it stays until it is switched back, and the four parts
+are kept exactly as they were underneath. The night keeps its wake time, because that is what it
+is called by, what the marks are keyed on and when the morning report goes; only the switch-off
+moves, which is what `NightPlan.off_at` is for. The part has its own name, so a Bedtime only night
+never counts as Drift on the scoreboard, and Full Autopilot pauses because there is no Deep or REM
+to choose. The bedside buttons and tonight-only changes work on it as on any part, with Save as
+my usual for it too.
+
+**A nap** is in the menu: a temperature, a length, and a line before you start that says ready by
+when and off by when, from how long this bed has measured it takes. The length counts from when
+the bed gets there rather than from Start, which is the one thing that makes a nap different from
+setting a temperature by hand. Getting there is decided on the same evidence getting a bed ready
+uses, with the probe reading the number added at the front, and the estimate as a backstop so a
+nap that never hears it has arrived still ends (`nap.py`). There is a notification when it is
+ready and when it switches off, and one line on Home with Stop while it runs.
+
+It is not a night. It does not start inside one, a night that starts getting ready takes it over
+without switching off in between, and none of it reaches the scoreboard or the morning report.
+It survives a restart, and the bedside on/off ends it.
+

@@ -16,6 +16,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .nap import Nap
 
 
 class Mode(str, Enum):
@@ -464,8 +468,14 @@ class Stage(str, Enum):
     DEEP = "deep"
     REM = "rem"
     WAKE = "wake"
+    #: Not a part of the four-part night. The one part of a Bedtime only night
+    #: (Schedule.bedtime_only), and the one part of a nap (nap.py). Their own
+    #: names so that neither is ever counted as Drift on the scoreboard.
+    BEDTIME = "bedtime"
+    NAP = "nap"
 
 
+#: The four parts of a whole night, in order. A schedule is always exactly these.
 STAGE_ORDER: tuple[Stage, ...] = (Stage.DRIFT, Stage.DEEP, Stage.REM, Stage.WAKE)
 
 STAGE_LABEL: dict[Stage, str] = {
@@ -473,6 +483,8 @@ STAGE_LABEL: dict[Stage, str] = {
     Stage.DEEP: "Deep",
     Stage.REM: "REM",
     Stage.WAKE: "Wake",
+    Stage.BEDTIME: "Bedtime",
+    Stage.NAP: "Nap",
 }
 
 #: Stages whose length is a real duration rather than a share of the night.
@@ -753,10 +765,19 @@ class NightPlan:
     #: on the plan so the marks can keep the two apart without either having to
     #: wipe the other: see FiredMarks.night.
     rehearsal: bool = False
+    #: When the unit switches off, when that is not the wake time. Bedtime only
+    #: switches off after its one part and leaves the rest of the night off; the
+    #: wake time stays the wake time, because it is what the night is called by,
+    #: what the marks are keyed on and when the morning report goes.
+    off_at: datetime | None = None
 
     @property
     def starts_at(self) -> datetime:
         return self.precool_at or self.bedtime_at
+
+    @property
+    def switch_off_at(self) -> datetime:
+        return self.off_at or self.wake_at
 
     @property
     def first_temp_c(self) -> int:
@@ -850,6 +871,10 @@ class Tonight:
     #: cooling stages from the next boundary on; the unit is not changed now.
     cooling_speed: Mode | None = None
 
+    #: Tonight's Bedtime only temperature, when it differs from the usual one.
+    #: Its own field rather than a fifth stage, so the four parts stay four.
+    bedtime_temp_c: int | None = None
+
     #: A temporary offset on whatever stage is running, and when it lapses.
     #: Degrees only. See the note above about times.
     nudge_c: int = 0
@@ -874,6 +899,8 @@ class Tonight:
             patch["bed_time"] = self.bed_time
         if self.cooling_speed is not None:
             patch["cooling_speed"] = self.cooling_speed
+        if self.bedtime_temp_c is not None:
+            patch["bedtime_temp_c"] = self.bedtime_temp_c
         return replace(schedule, **patch) if patch else schedule
 
     def nudge_at(self, now: datetime) -> int:
@@ -896,6 +923,7 @@ class Tonight:
             or self.wake_time is not None
             or self.bed_time is not None
             or self.cooling_speed is not None
+            or self.bedtime_temp_c is not None
         )
 
 
@@ -987,6 +1015,49 @@ def plan_for_wake(
         bedtime_at=bedtime_at,
         wake_at=wake_at,
         steps=tuple(steps),
+    )
+
+
+def plan_for_bedtime(
+    wake_on: date,
+    bed_time: time,
+    wake_time: time,
+    temp_c: int,
+    minutes: int,
+    cooling_speed: Mode = Mode.QUIET,
+    *,
+    bed_c: float | None = None,
+    learned: LearnedLead | None = None,
+) -> NightPlan:
+    """A Bedtime only night: ready by lights out, one temperature for a while,
+    then off for the rest of the night.
+
+    Ready the same way a whole night is, with the head start worked out from
+    where the bed is and what it has learned. The one part runs from lights out
+    for `minutes`, never past the alarm, and the switch-off comes at its end.
+    Which mode it runs in is decided the way a first part's is: by the number.
+    """
+    wake_at = datetime.combine(wake_on, wake_time)
+    night = minutes_between(bed_time, wake_time)
+    bedtime_at = wake_at - timedelta(minutes=night)
+    length = max(MIN_STAGE_MINUTES, min(minutes, night))
+    ends = bedtime_at + timedelta(minutes=length)
+    step = StageStep(
+        stage=Stage.BEDTIME,
+        starts_at=bedtime_at,
+        ends_at=ends,
+        temp_c=temp_c,
+        mode=mode_for_target(temp_c, cooling_speed),
+    )
+    pre = preconditioning_for(temp_c, cooling_speed, bed_c, learned)
+    precool_at = bedtime_at - timedelta(minutes=pre.lead_minutes) if pre.runs else None
+    return NightPlan(
+        preconditioning=pre,
+        precool_at=precool_at,
+        bedtime_at=bedtime_at,
+        wake_at=wake_at,
+        steps=(step,),
+        off_at=ends if ends < wake_at else None,
     )
 
 
@@ -1149,6 +1220,13 @@ class Schedule:
     other_days: list[int] = field(default_factory=list)
     other_bed_time: time | None = None
     other_wake_time: time | None = None
+    #: Bedtime only: ready by lights out, one temperature for `bedtime_minutes`,
+    #: then off for the rest of the night. A setting rather than tonight's, so it
+    #: stays until it is switched back. The four parts above are left exactly as
+    #: they are, so switching back is the whole night as it was.
+    bedtime_only: bool = False
+    bedtime_temp_c: int = 30
+    bedtime_minutes: int = 90
 
     def __post_init__(self) -> None:
         # Two invariants, both enforced here so there is no way to hold a
@@ -1175,6 +1253,8 @@ class Schedule:
     @property
     def first_temp_c(self) -> int:
         """The temperature the bed is brought to before the night starts."""
+        if self.bedtime_only:
+            return self.bedtime_temp_c
         return self.stages[0].temp_c if self.stages else 20
 
     @property
@@ -1229,6 +1309,17 @@ class Schedule:
         learned: LearnedLead | None = None,
         bed_c: float | None = None,
     ) -> NightPlan:
+        if self.bedtime_only:
+            return plan_for_bedtime(
+                wake_on,
+                self.bed_time,
+                self.wake_time,
+                self.bedtime_temp_c,
+                self.bedtime_minutes,
+                self.cooling_speed,
+                bed_c=bed_c,
+                learned=learned,
+            )
         return plan_for_wake(
             wake_on,
             self.wake_time,
@@ -1305,6 +1396,8 @@ class DeviceState:
     #: nothing is sent, and the unit is taken to be switched off or unplugged.
     #: Here rather than on its own endpoint so every phone sees it flip at once.
     system_on: bool = True
+    #: A nap under way, or None. Here for the same reason: see nap.py.
+    nap: Nap | None = None
 
     @property
     def can_set_temperature(self) -> bool:

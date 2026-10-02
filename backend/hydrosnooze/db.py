@@ -28,6 +28,7 @@ from .models import (
     default_stages,
     with_all_stages,
 )
+from .nap import Nap
 from .notes import NightNote
 
 # Renamed on the way in. `Stage` here already means Drift, Deep, REM and Wake:
@@ -167,7 +168,10 @@ CREATE TABLE IF NOT EXISTS schedule (
     updated_at           TEXT,
     other_days           TEXT    NOT NULL DEFAULT '[]',
     other_bed_time       TEXT    NOT NULL DEFAULT '',
-    other_wake_time      TEXT    NOT NULL DEFAULT ''
+    other_wake_time      TEXT    NOT NULL DEFAULT '',
+    bedtime_only         INTEGER NOT NULL DEFAULT 0,
+    bedtime_temp_c       INTEGER NOT NULL DEFAULT 30,
+    bedtime_minutes      INTEGER NOT NULL DEFAULT 90
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -283,7 +287,8 @@ CREATE TABLE IF NOT EXISTS tonight (
     bed_time    TEXT,
     nudge_c     INTEGER NOT NULL DEFAULT 0,
     nudge_until TEXT,
-    cooling_speed TEXT
+    cooling_speed TEXT,
+    bedtime_temp_c INTEGER
 );
 
 -- Away from home. One row, like tonight, and for the same reason: it expires by
@@ -324,7 +329,22 @@ CREATE TABLE IF NOT EXISTS preferences (
     autopilot_on INTEGER NOT NULL DEFAULT 1,
     hold         TEXT    NOT NULL DEFAULT 'balanced',
     tariff_p     REAL,
-    system_on    INTEGER NOT NULL DEFAULT 1
+    system_on    INTEGER NOT NULL DEFAULT 1,
+    nap_temp_c   INTEGER NOT NULL DEFAULT 30,
+    nap_minutes  INTEGER NOT NULL DEFAULT 30
+);
+
+-- A nap under way (nap.py). One row while it runs and none otherwise, so a
+-- restart part way through still switches the unit off at the end of it.
+CREATE TABLE IF NOT EXISTS nap (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    temp_c          INTEGER NOT NULL,
+    minutes         INTEGER NOT NULL,
+    mode            TEXT    NOT NULL,
+    started_at      TEXT    NOT NULL,
+    expect_ready_at TEXT    NOT NULL,
+    ready_at        TEXT,
+    ready_by        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS precondition_runs (
@@ -495,6 +515,9 @@ SCHEDULE_COLUMNS = (
     "other_days",
     "other_bed_time",
     "other_wake_time",
+    "bedtime_only",
+    "bedtime_temp_c",
+    "bedtime_minutes",
 )
 
 #: How long the unit's own three phases lasted, in minutes. Fixed in the hardware,
@@ -603,6 +626,9 @@ class Database:
         night = {r["name"] for r in self._db.execute("PRAGMA table_info(tonight)")}
         if "cooling_speed" not in night:
             self._db.execute("ALTER TABLE tonight ADD COLUMN cooling_speed TEXT")
+        # Tonight's Bedtime only temperature. Not set on any row from before.
+        if "bedtime_temp_c" not in night:
+            self._db.execute("ALTER TABLE tonight ADD COLUMN bedtime_temp_c INTEGER")
 
         # The Sleep timing card's Start again. NULL is "count every night", which
         # is what a database from before the button meant.
@@ -643,6 +669,15 @@ class Database:
             self._db.execute(
                 "ALTER TABLE preferences ADD COLUMN system_on INTEGER NOT NULL DEFAULT 1"
             )
+        # The last nap's temperature and length, to start the next one from.
+        if "nap_temp_c" not in prefs:
+            self._db.execute(
+                "ALTER TABLE preferences ADD COLUMN nap_temp_c INTEGER NOT NULL DEFAULT 30"
+            )
+        if "nap_minutes" not in prefs:
+            self._db.execute(
+                "ALTER TABLE preferences ADD COLUMN nap_minutes INTEGER NOT NULL DEFAULT 30"
+            )
 
         # Whether a night's note was submitted and put away. Not on any row
         # written before there was a Submit button, which is what nought says.
@@ -671,6 +706,11 @@ class Database:
             ("other_days", "TEXT NOT NULL DEFAULT '[]'"),
             ("other_bed_time", "TEXT NOT NULL DEFAULT ''"),
             ("other_wake_time", "TEXT NOT NULL DEFAULT ''"),
+            # Bedtime only. Off, with a starting temperature and length, on
+            # every schedule from before it existed.
+            ("bedtime_only", "INTEGER NOT NULL DEFAULT 0"),
+            ("bedtime_temp_c", "INTEGER NOT NULL DEFAULT 30"),
+            ("bedtime_minutes", "INTEGER NOT NULL DEFAULT 90"),
         ]
         for name, definition in added:
             if name not in columns:
@@ -820,20 +860,22 @@ class Database:
             nudge_c=row["nudge_c"] or 0,
             nudge_until=_parse(row["nudge_until"]),
             cooling_speed=Mode(row["cooling_speed"]) if row["cooling_speed"] else None,
+            bedtime_temp_c=row["bedtime_temp_c"],
         )
 
     def save_tonight(self, tonight: Tonight) -> None:
         self._db.execute(
             """
             INSERT INTO tonight (id, wake_on, skip, stages, wake_time, bed_time,
-                                 nudge_c, nudge_until, cooling_speed)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 nudge_c, nudge_until, cooling_speed, bedtime_temp_c)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 wake_on=excluded.wake_on, skip=excluded.skip,
                 stages=excluded.stages, wake_time=excluded.wake_time,
                 bed_time=excluded.bed_time, nudge_c=excluded.nudge_c,
                 nudge_until=excluded.nudge_until,
-                cooling_speed=excluded.cooling_speed
+                cooling_speed=excluded.cooling_speed,
+                bedtime_temp_c=excluded.bedtime_temp_c
             """,
             (
                 tonight.wake_on.isoformat(),
@@ -857,6 +899,7 @@ class Database:
                 tonight.nudge_c,
                 _iso(tonight.nudge_until),
                 tonight.cooling_speed.value if tonight.cooling_speed else None,
+                tonight.bedtime_temp_c,
             ),
         )
         self._db.commit()
@@ -893,8 +936,9 @@ class Database:
             """
             INSERT INTO schedule (id, name, enabled, days_of_week, wake_time,
                                   bed_time, stages, cooling_speed, updated_at,
-                                  other_days, other_bed_time, other_wake_time)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  other_days, other_bed_time, other_wake_time,
+                                  bedtime_only, bedtime_temp_c, bedtime_minutes)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, enabled=excluded.enabled,
                 days_of_week=excluded.days_of_week, wake_time=excluded.wake_time,
@@ -903,7 +947,10 @@ class Database:
                 updated_at=excluded.updated_at,
                 other_days=excluded.other_days,
                 other_bed_time=excluded.other_bed_time,
-                other_wake_time=excluded.other_wake_time
+                other_wake_time=excluded.other_wake_time,
+                bedtime_only=excluded.bedtime_only,
+                bedtime_temp_c=excluded.bedtime_temp_c,
+                bedtime_minutes=excluded.bedtime_minutes
             """,
             (
                 schedule.name,
@@ -922,6 +969,9 @@ class Database:
                 json.dumps(schedule.other_days),
                 schedule.other_bed_time.strftime("%H:%M") if schedule.other_bed_time else "",
                 schedule.other_wake_time.strftime("%H:%M") if schedule.other_wake_time else "",
+                int(schedule.bedtime_only),
+                schedule.bedtime_temp_c,
+                schedule.bedtime_minutes,
             ),
         )
         self._db.commit()
@@ -1346,6 +1396,60 @@ class Database:
             "INSERT INTO preferences (id, autopilot_on) VALUES (1, ?) "
             "ON CONFLICT(id) DO UPDATE SET autopilot_on = excluded.autopilot_on",
             (int(on),),
+        )
+        self._db.commit()
+
+    def nap(self) -> Nap | None:
+        row = self._db.execute("SELECT * FROM nap WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        return Nap(
+            temp_c=row["temp_c"],
+            minutes=row["minutes"],
+            mode=Mode(row["mode"]),
+            started_at=datetime.fromisoformat(row["started_at"]),
+            expect_ready_at=datetime.fromisoformat(row["expect_ready_at"]),
+            ready_at=_parse(row["ready_at"]),
+            ready_by=row["ready_by"],
+        )
+
+    def save_nap(self, nap: Nap) -> None:
+        self._db.execute(
+            "INSERT INTO nap (id, temp_c, minutes, mode, started_at, expect_ready_at, "
+            "ready_at, ready_by) VALUES (1, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET temp_c=excluded.temp_c, minutes=excluded.minutes, "
+            "mode=excluded.mode, started_at=excluded.started_at, "
+            "expect_ready_at=excluded.expect_ready_at, ready_at=excluded.ready_at, "
+            "ready_by=excluded.ready_by",
+            (
+                nap.temp_c,
+                nap.minutes,
+                nap.mode.value,
+                nap.started_at.isoformat(),
+                nap.expect_ready_at.isoformat(),
+                _iso(nap.ready_at),
+                nap.ready_by,
+            ),
+        )
+        self._db.commit()
+
+    def clear_nap(self) -> None:
+        self._db.execute("DELETE FROM nap WHERE id = 1")
+        self._db.commit()
+
+    def last_nap(self) -> tuple[int, int]:
+        """The last nap's temperature and length, or where the first one starts."""
+        row = self._db.execute(
+            "SELECT nap_temp_c, nap_minutes FROM preferences WHERE id = 1"
+        ).fetchone()
+        return (30, 30) if row is None else (row["nap_temp_c"], row["nap_minutes"])
+
+    def set_last_nap(self, temp_c: int, minutes: int) -> None:
+        self._db.execute(
+            "INSERT INTO preferences (id, nap_temp_c, nap_minutes) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET nap_temp_c = excluded.nap_temp_c, "
+            "nap_minutes = excluded.nap_minutes",
+            (temp_c, minutes),
         )
         self._db.commit()
 
@@ -1933,6 +2037,9 @@ def _schedule_from(row: sqlite3.Row) -> Schedule:
         other_days=json.loads(row["other_days"]) if row["other_days"] else [],
         other_bed_time=_time_from(row["other_bed_time"]) if row["other_bed_time"] else None,
         other_wake_time=_time_from(row["other_wake_time"]) if row["other_wake_time"] else None,
+        bedtime_only=bool(row["bedtime_only"]),
+        bedtime_temp_c=row["bedtime_temp_c"],
+        bedtime_minutes=row["bedtime_minutes"],
     )
 
 

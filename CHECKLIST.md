@@ -614,6 +614,18 @@ API rather than read. Read that before writing any of it.
       it running. On picks up the part of the night it has reached, without ringing through the
       parts that went by. **Tested against the simulated unit.** The first real use is the next
       thing to look at
+- [x] Bedtime only, in the Temperature card: ready by lights out, one temperature for a length
+      set in quarter hours, then off for the rest of the night. A setting, so it stays until it
+      is switched back, with the four parts kept underneath. Its own part name, so it never counts
+      as Drift; Full Autopilot pauses, and the morning report says what it did in one line.
+      **Tested against the simulated unit**, a whole night included
+- [x] Nap, from the menu: the bed to one temperature, held for a length that counts from when
+      the bed gets there (the probe on the number, the hoses settling, or the plug going idle,
+      with the estimate as a backstop), then off. A notification when it is ready and when it
+      ends, one line on Home with Stop, and it hands over to a night that starts getting ready.
+      Survives a restart. **Tested against the simulated unit**
+- [ ] A real nap and a real Bedtime only night, to see the ready detection and the early
+      switch-off on the bed itself
 
 **The rule that outranks the rest.** At no point does the bed depend on Withings. The integration
 lives in its own module, runs in its own loop, and never takes the command lock. An internet outage

@@ -4166,3 +4166,113 @@ a.pill {
 .fold__body > .log:first-child {
   margin-top: 0;
 }
+
+/* --- Whole night or Bedtime only, under the Temperature card's header ---------- */
+
+.night-kind {
+  display: flex;
+  margin: 12px 0 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.night-kind__btn {
+  flex: 1 1 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: background 160ms var(--ease), color 160ms var(--ease);
+}
+
+.night-kind__btn[aria-pressed='true'] {
+  background: rgb(255 255 255 / 0.16);
+  color: var(--text);
+}
+
+/* How long Bedtime only holds, under its big number. Also the nap's length. */
+.bedtime-length {
+  margin-top: 14px;
+}
+
+.bedtime-length__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+
+.bedtime-length__for {
+  min-width: 96px;
+  text-align: center;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.bedtime-length__when {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-mid);
+}
+
+.step--small {
+  width: 40px;
+  height: 40px;
+}
+
+/* --- Nap ---------------------------------------------------------------------- */
+
+.nap__temp {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 18px;
+}
+
+.nap__temp--running {
+  justify-content: center;
+}
+
+.nap__value {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: clamp(52px, 17.5vw, 72px);
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.nap__quick .segment {
+  font-size: 12px;
+}
+
+.nap__length {
+  margin-top: 14px;
+}
+
+.nap__preview,
+.nap__status {
+  margin: 14px 0 0;
+  text-align: center;
+}
+
+.nap__status {
+  font-size: 14px;
+  color: var(--text-mid);
+}
+
+.nap-banner__stop {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+  font-size: 13px;
+  color: var(--text);
+}

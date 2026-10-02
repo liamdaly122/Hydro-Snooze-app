@@ -19,6 +19,7 @@ from ..models import (
     Profile,
     Schedule,
     minutes_between,
+    mode_for_target,
     modes_for,
 )
 
@@ -42,6 +43,24 @@ def state_json(state: DeviceState) -> dict[str, Any]:
         "last_command_at": _iso(state.last_command_at),
         "last_error": state.last_error,
         "system_on": state.system_on,
+        "nap": nap_json(state.nap),
+    }
+
+
+def nap_json(nap: Any) -> dict[str, Any] | None:
+    """A nap under way, the way the app draws it: what, and the times that
+    matter. `ends_at` is null until the bed has got there, because that is when
+    the length starts counting."""
+    if nap is None:
+        return None
+    return {
+        "temp_c": nap.temp_c,
+        "minutes": nap.minutes,
+        "mode": nap.mode.value,
+        "started_at": _iso(nap.started_at),
+        "expect_ready_at": _iso(nap.expect_ready_at),
+        "ready_at": _iso(nap.ready_at),
+        "ends_at": _iso(nap.ends_at),
     }
 
 
@@ -107,6 +126,12 @@ def schedule_json(
             if schedule.other_bed_time and schedule.other_wake_time
             else None
         ),
+        # Bedtime only, and the mode its one part runs in, worked out the way the
+        # plan works it out so the card can say warming or cooling.
+        "bedtime_only": schedule.bedtime_only,
+        "bedtime_temp_c": schedule.bedtime_temp_c,
+        "bedtime_minutes": schedule.bedtime_minutes,
+        "bedtime_mode": mode_for_target(schedule.bedtime_temp_c, schedule.cooling_speed).value,
     }
 
 
@@ -273,6 +298,8 @@ def tonight_json(
         "stages_changed": bool(tonight and tonight.stages is not None),
         "times_changed": bool(tonight and (tonight.wake_time or tonight.bed_time)),
         "speed_changed": bool(tonight and tonight.cooling_speed is not None),
+        # Tonight's own Bedtime only temperature.
+        "bedtime_changed": bool(tonight and tonight.bedtime_temp_c is not None),
         "nudge_c": (tonight.nudge_c if tonight else 0),
         "nudge_until": (
             tonight.nudge_until.isoformat() if tonight and tonight.nudge_until else None

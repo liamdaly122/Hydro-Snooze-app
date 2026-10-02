@@ -22,6 +22,7 @@ import type {
   DeviceState,
   HealthDay,
   HealthReport,
+  NapPreview,
   Holiday,
   Learning,
   Mode,
@@ -90,6 +91,19 @@ export class HttpApiClient implements ApiClient {
   getState = () => request<DeviceState>('/api/state')
   setSystem = (on: boolean) =>
     request<DeviceState>('/api/system', { method: 'POST', body: JSON.stringify({ on }) })
+  getNapPreview = (tempC?: number, minutes?: number) => {
+    const query = new URLSearchParams()
+    if (tempC !== undefined) query.set('temp_c', String(tempC))
+    if (minutes !== undefined) query.set('minutes', String(minutes))
+    const qs = query.toString()
+    return request<NapPreview>(`/api/nap${qs ? `?${qs}` : ''}`)
+  }
+  startNap = (tempC: number, minutes: number) =>
+    request<DeviceState>('/api/nap', {
+      method: 'POST',
+      body: JSON.stringify({ temp_c: tempC, minutes }),
+    })
+  stopNap = () => request<DeviceState>('/api/nap', { method: 'DELETE' })
   getSchedule = () => request<Schedule>('/api/schedule')
   getHealth = () => request<DeviceHealth[]>('/api/health')
 
@@ -120,7 +134,7 @@ export class HttpApiClient implements ApiClient {
 
   getTonight = () => request<TonightState>('/api/tonight')
 
-  setStageTonight = (stage: Stage, temp_c: number) =>
+  setStageTonight = (stage: Stage | 'bedtime', temp_c: number) =>
     request<TonightState>('/api/tonight/stage', {
       method: 'POST',
       body: JSON.stringify({ stage, temp_c }),

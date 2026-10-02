@@ -70,12 +70,27 @@ export function NudgeControls({
 export function KeepTonight({
   tonight,
   usualStages,
+  usualBedtimeC,
   onKeep,
 }: {
   tonight: TonightState
   usualStages: { stage: string; temp_c: number }[]
+  /** Bedtime only's usual temperature, for tonight's own one. */
+  usualBedtimeC?: number
   onKeep: () => void
 }) {
+  // Bedtime only has its one part, and saving tonight's is the same tap.
+  if (tonight.running.bedtime_only) {
+    const t = tonight.running.bedtime_temp_c
+    if (!tonight.bedtime_changed || t === usualBedtimeC) return null
+    return (
+      <div className="pills">
+        <button type="button" className="pill pill--keep pill--wide" onClick={onKeep}>
+          &#10003; Save {t}° as my usual Bedtime
+        </button>
+      </div>
+    )
+  }
   if (!tonight.stages_changed) return null
   // Not for Autopilot's suggestion. Saving a test temperature as the usual ends
   // the test before it has been measured, and moves the usual every later

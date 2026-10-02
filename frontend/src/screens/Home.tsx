@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { TemperatureCard } from '../components/TemperatureCard'
 import { TonightBanner } from '../components/TonightBanner'
 import { HolidayBanner } from '../components/HolidayBanner'
+import { NapBanner } from '../components/NapBanner'
 import { KeepTonight, NudgeControls } from '../components/TonightControls'
 import { SuggestionCard } from '../components/Suggestion'
 import { SystemOffCard } from '../components/SystemOffCard'
@@ -82,7 +83,12 @@ export function Home({
     void work.then(onTonight).catch((e: Error) => setError(e.message))
   }
 
-  function setStageTemp(stage: Stage, tempC: number) {
+  function save(patch: Partial<Schedule>) {
+    setError(null)
+    void client.putSchedule(patch).catch((e: Error) => setError(e.message))
+  }
+
+  function setStageTemp(stage: Stage | 'bedtime', tempC: number) {
     // Tonight only, which is what the note under this card has said since the
     // tonight controls went in. It called putSchedule, so tapping + on Deep at
     // two in the morning rewrote the routine for every night after it, and the
@@ -99,6 +105,7 @@ export function Home({
 
   return (
     <>
+      {state.nap && <NapBanner nap={state.nap} onStop={() => client.stopNap()} />}
       <HolidayBanner holiday={holiday} now={now} />
 
       {/*
@@ -135,11 +142,14 @@ export function Home({
         maxC={maxC}
         onOpenProfiles={onOpenProfiles}
         onStageChange={setStageTemp}
+        onBedtimeOnly={(on) => save({ bedtime_only: on })}
+        onBedtimeMinutes={(minutes) => save({ bedtime_minutes: minutes })}
         keep={
           tonight && (
             <KeepTonight
               tonight={tonight}
               usualStages={schedule.stages}
+              usualBedtimeC={schedule.bedtime_temp_c}
               onKeep={() => run(client.keepTonight().then(() => client.getTonight()))}
             />
           )
