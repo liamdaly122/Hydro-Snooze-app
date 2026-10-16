@@ -29,9 +29,11 @@ EXAMPLE = ROOT / "backend" / ".env.example"
 SECRETS = ROOT / "docs" / "secrets.yaml"
 
 #: Worked out during setup and recorded in SETUP.md. Override with the flags if
-#: the router ever hands out something different.
+#: the router ever hands out something different. The plug goes by its name,
+#: because it had three different addresses in its first month and an address
+#: does not follow it: see backend/hydrosnooze/adapters/shelly.py.
 DEFAULT_ESPHOME_HOST = "192.168.1.178"
-DEFAULT_SHELLY_HOST = "192.168.1.194"
+DEFAULT_SHELLY_HOST = "shellypluspluguk-441d648dd41c.local"
 DEFAULT_PROBES_HOST = "hydrosnooze-temp.local"
 
 #: Everything this script owns. Any of these already in the file get replaced,

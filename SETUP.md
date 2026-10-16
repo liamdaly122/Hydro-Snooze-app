@@ -206,8 +206,12 @@ cp backend/.env.example backend/.env
 ```
 HS_TRANSMITTER=fake
 HS_POWER_MONITOR=shelly
-HS_SHELLY_HOST=192.168.1.194
+HS_SHELLY_HOST=shellypluspluguk-441d648dd41c.local
 ```
+
+The plug's name rather than its address. The router gives the plug a new address whenever it likes,
+and the plug had three different addresses in its first month; the name follows it. The name is the plug's device ID,
+shown on its own web page, in lower case with `.local` on the end.
 
 Then the three thresholds. **These are boundaries between states, not the readings themselves**, so
 each one goes roughly halfway between the two numbers it separates:
@@ -857,7 +861,7 @@ HS_TRANSMITTER=esphome
 HS_ESPHOME_HOST=192.168.1.178
 HS_ESPHOME_ENCRYPTION_KEY=<copied from docs/secrets.yaml>
 HS_POWER_MONITOR=shelly
-HS_SHELLY_HOST=192.168.1.194
+HS_SHELLY_HOST=shellypluspluguk-441d648dd41c.local
 ```
 
 The three power thresholds are already the defaults, measured off this unit, so they only need
@@ -1332,7 +1336,7 @@ wrong out of the blast radius of the thing that goes wrong.
 |---|---|
 | App will not load at all | `sudo systemctl status hydrosnooze` on the Pi |
 | App loads but is blank | The app was not copied across. Run `./scripts/deploy.sh` from the Mac |
-| Everything says `unknown` | The Shelly is unreachable. Check `HS_SHELLY_HOST` matches its real IP, and that `./scripts/plug.py <ip>` still answers |
+| Everything says `unknown` | The Shelly is unreachable. Check `HS_SHELLY_HOST` is the plug's name (`shellypluspluguk-...local`) rather than an address, which the router can change, and that `./scripts/plug.py <name>` still answers |
 | The app says switching off did not work, but the unit is off | The plug is slow. A Shelly takes the better part of a minute to report a change of draw, so anything that asks it within about thirty seconds gets the reading from before. The app now waits two minutes before it believes a failure. If it still reports one, believe it |
 | The chart only goes back so far | Five years of samples and five years of events are kept, pruned on the hour. That is about 516 MB. Both limits live in `service.py` as `HISTORY` and `EVENTS_KEPT`, and they have to move together |
 | Readings drop out now and then | `curl -s http://<plug ip>/rpc/WiFi.GetStatus` and read the `rssi`. Below -70 dBm is a coverage problem, not a software one. Every read is already retried once |
