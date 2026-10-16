@@ -28,7 +28,17 @@ echo "Copying backend to $TARGET:$REMOTE_DIR"
 # egg-info is left alone deliberately. install.sh installs the backend as an
 # editable package, and deleting that directory from under it breaks the import
 # on the next restart.
+#
+# So is .env, on both sides. The service reads $REMOTE_DIR/.env, never the one
+# in backend/, so a .env here is only ever the Mac's own test settings. Copying
+# it put them on the Pi, and deploying from a clone without one deleted them
+# again, so what a deploy did depended on which folder it ran from. The
+# example file is not a setting and still goes across.
 rsync -avz --delete \
+  --include '.env.example' \
+  --exclude '.env' \
+  --exclude '.env.*' \
+  --exclude '.env~' \
   --exclude '__pycache__' \
   --exclude '.pytest_cache' \
   --exclude '.venv' \
