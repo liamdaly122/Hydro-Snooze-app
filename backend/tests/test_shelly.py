@@ -11,7 +11,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from hydrosnooze.adapters.shelly import ShellyPowerMonitor
+from hydrosnooze.adapters import shelly
+from hydrosnooze.adapters.shelly import ShellyPowerMonitor, search_network
 
 
 def monitor(handler) -> ShellyPowerMonitor:
@@ -89,8 +90,15 @@ async def test_zero_watts_is_a_reading_not_a_failure():
 NAME = "shellypluspluguk-441d648dd41c.local"
 
 
-def named(handler, *answers: str | None) -> tuple[ShellyPowerMonitor, list[str]]:
-    """A plug known by name, whose lookups answer `answers` in turn."""
+async def nowhere(device_id: str, near: str | None) -> str | None:
+    return None
+
+
+def named(handler, *answers: str | None, search=nowhere, monotonic=None):
+    """A plug known by name, whose lookups answer `answers` in turn.
+
+    The search is a stand-in too, so no test here ever asks a real network.
+    """
     asked: list[str] = []
     queue = list(answers)
 
@@ -98,10 +106,13 @@ def named(handler, *answers: str | None) -> tuple[ShellyPowerMonitor, list[str]]
         asked.append(name)
         return queue.pop(0) if queue else None
 
+    extra = {"monotonic": monotonic} if monotonic else {}
     plug = ShellyPowerMonitor(
         NAME,
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         lookup=lookup,
+        search=search,
+        **extra,
     )
     return plug, asked
 
@@ -200,3 +211,120 @@ async def test_an_address_is_never_looked_up():
     assert await plug.read_watts() is None
     assert asked == []
     await plug.close()
+
+
+# --- When the name does not work either --------------------------------------------------
+#
+# After the hub was reset the name stopped answering altogether, while the plug
+# sat at .193 answering everything else. A service restarted then had nothing to
+# start from. The last resort is to ask the whole network for the plug's id.
+
+ID = "shellypluspluguk-441d648dd41c"
+
+
+def searching(*answers: str | None):
+    """A stand-in search that answers `answers` in turn, and the calls it got."""
+    calls: list[tuple[str, str | None]] = []
+    queue = list(answers)
+
+    async def search(device_id: str, near: str | None) -> str | None:
+        calls.append((device_id, near))
+        return queue.pop(0) if queue else None
+
+    return search, calls
+
+
+@pytest.mark.asyncio
+async def test_a_restart_with_the_name_not_working_finds_the_plug_by_searching():
+    handler, hosts = at("192.168.1.193")
+    search, searched = searching("192.168.1.193")
+    plug, asked = named(handler, None, search=search)
+    assert await plug.read_watts() == 12.5, "found, not called unreachable"
+    assert searched == [(ID, None)], "searched for by its id, once"
+    assert asked == [NAME], "the name was tried first, and only once"
+
+    assert await plug.read_watts() == 12.5
+    assert hosts == ["192.168.1.193"] * 2 and len(searched) == 1, "and read there after"
+    await plug.close()
+
+
+@pytest.mark.asyncio
+async def test_a_plug_silent_where_it_was_is_searched_for_near_there():
+    handler, hosts = at("192.168.1.201")
+    search, searched = searching("192.168.1.201")
+    plug, _ = named(handler, "192.168.1.193", "192.168.1.193", search=search)
+    assert await plug.read_watts() == 12.5
+    assert searched == [(ID, "192.168.1.193")]
+    assert hosts == ["192.168.1.193", "192.168.1.193", "192.168.1.201"]
+    assert plug.address == "192.168.1.201"
+    await plug.close()
+
+
+@pytest.mark.asyncio
+async def test_a_plug_that_is_really_gone_is_not_searched_for_on_every_reading():
+    now = [1000.0]
+    handler, _ = at()
+    search, searched = searching()
+    plug, _ = named(handler, "192.168.1.193", search=search, monotonic=lambda: now[0])
+    assert await plug.read_watts() is None
+    assert await plug.read_watts() is None
+    assert len(searched) == 1, "once, not every thirty seconds"
+
+    now[0] += shelly.SEARCH_EVERY_S
+    assert await plug.read_watts() is None
+    assert len(searched) == 2, "and again once enough time has gone by"
+    await plug.close()
+
+
+@pytest.mark.asyncio
+async def test_a_plug_known_by_address_or_by_another_name_is_never_searched_for():
+    for host in ("192.168.1.193", "hydrosnooze-plug.local"):
+        search, searched = searching("192.168.1.201")
+
+        async def lookup(name: str) -> str | None:
+            return None
+
+        plug = ShellyPowerMonitor(
+            host,
+            client=httpx.AsyncClient(transport=httpx.MockTransport(at()[0])),
+            lookup=lookup,
+            search=search,
+        )
+        assert await plug.read_watts() is None
+        assert searched == [], host
+        await plug.close()
+
+
+def shellies(**by_host: str):
+    """A network where these addresses answer /shelly with these ids."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        device = by_host.get(request.url.host)
+        if device is None or request.url.path != "/shelly":
+            raise httpx.ConnectError("No route to host")
+        return httpx.Response(200, json={"id": device, "gen": 2})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_the_search_finds_this_plug_and_not_another_shelly():
+    client = shellies(**{"192.168.1.50": "shellyplus1-aaaaaaaaaaaa", "192.168.1.193": ID})
+    assert await search_network(ID, "192.168.1.147", client=client) == "192.168.1.193"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_finds_nothing_says_so():
+    client = shellies(**{"192.168.1.50": "shellyplus1-aaaaaaaaaaaa"})
+    assert await search_network(ID, "192.168.1.147", client=client) is None
+    await client.aclose()
+
+
+def test_only_the_home_network_is_searched(monkeypatch):
+    hosts = shelly._neighbours("192.168.1.193")
+    assert len(hosts) == 254 and hosts[0] == "192.168.1.1" and hosts[-1] == "192.168.1.254"
+
+    monkeypatch.setattr(shelly, "_own_address", lambda: None)
+    assert shelly._neighbours("8.8.8.8") == [], "never the internet"
+    assert shelly._neighbours(None) == []
